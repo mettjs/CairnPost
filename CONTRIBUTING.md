@@ -12,6 +12,17 @@ go build ./...
 go test ./...
 ```
 
+The integration tests run against a real Postgres and are behind a build tag:
+
+```sh
+docker compose up -d --wait postgres
+export CAIRNPOST_TEST_DSN='postgres://cairnpost:cairnpost@localhost:5425/cairnpost?sslmode=disable'
+go test -tags=integration ./...
+```
+
+With the tag and no `CAIRNPOST_TEST_DSN` they fail rather than skip, so a run
+that tested nothing never reads as green.
+
 Every commit on `main` builds and passes its tests on its own, not only the
 last one of a branch.
 
