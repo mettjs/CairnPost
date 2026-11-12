@@ -50,15 +50,28 @@ type rig struct {
 	send, admin string
 }
 
-func newRig(t *testing.T) *rig { return newRigOn(t, memstore.New()) }
+// newRig builds the API over a store whose clock stands still, so a wait
+// the API says is exact.
+func newRig(t *testing.T) *rig {
+	s := memstore.New()
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	s.Now = func() time.Time { return at }
+	return newRigOn(t, s)
+}
 
 func newRigOn(t *testing.T, s store.Store) *rig {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	drv := &fake{}
 	ks := keys.New(s)
-	send, _, _ := ks.Create(context.Background(), "app", store.ScopeSend, "")
-	admin, _, _ := ks.Create(context.Background(), "ops", store.ScopeAdmin, "")
+	send, _, err := ks.Create(context.Background(), "app", store.ScopeSend, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, _, err := ks.Create(context.Background(), "ops", store.ScopeAdmin, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := api.New(api.Deps{
 		Mail: mail.New(s, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 			InDoubtWindow: time.Minute}, log),
@@ -165,7 +178,7 @@ func TestIdempotencyConflictsAreTwoDifferent409s(t *testing.T) {
 	r.h.ServeHTTP(rec, req)
 	// The wait said is the in-doubt window's remainder, not a guess.
 	if rec.Code != 409 || !strings.Contains(rec.Body.String(), "concurrent_idempotent_requests") ||
-		(rec.Header().Get("Retry-After") != "60" && rec.Header().Get("Retry-After") != "59") {
+		rec.Header().Get("Retry-After") != "60" {
 		t.Fatalf("in flight: %d %s, Retry-After %q", rec.Code, rec.Body, rec.Header().Get("Retry-After"))
 	}
 	r.do("POST", "/emails", r.send, "k2", good)
