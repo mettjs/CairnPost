@@ -6,4 +6,17 @@ Every change a user of CairnPost can notice is written here. The format is
 
 ## [Unreleased]
 
-Nothing yet. The first release will be v0.1.0.
+### Added
+
+- `POST /emails`: send one email to one recipient with an API key. A request
+  with an `Idempotency-Key` repeated with the same content is one email.
+- `GET /emails/{id}`: what became of an email.
+- `GET /health`.
+- API keys with a scope (`send` or `admin`), optionally bound to one sending
+  domain; stored hashed, shown once. `cairnpost keys create|list|revoke`.
+- The `capture` driver, for development: it keeps emails in memory, sends
+  nothing, and shows them at `GET /capture/emails` to an admin key.
+- `cairnpost serve`, `migrate`, `send` and `version`; a Dockerfile and a
+  Compose file with Postgres 18.
+
+The first release will be v0.1.0.
