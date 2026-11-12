@@ -63,7 +63,8 @@ silently dropped.
 
 **Idempotency.** Send an `Idempotency-Key` header and a request repeated
 with the same key and the same content is one email: the repeat answers the
-first one's id. Keys are remembered for a day.
+first one's id. A key is remembered for a day from the try that sent, and
+belongs to the API key that used it.
 
 **Errors** are JSON: `{"statusCode": 422, "name": "validation_error", "message": "..."}`.
 The status tells a program what to do:
@@ -72,12 +73,16 @@ The status tells a program what to do:
 |---|---|---|
 | 422 | `validation_error`, `rejected_by_upstream` | The request is at fault and will never succeed. Do not retry. |
 | 409 | `invalid_idempotent_request` | The key was already used with a different request, which was sent. Do not retry. |
-| 409 | `concurrent_idempotent_requests` | The same request is in flight. Retry shortly. |
+| 409 | `concurrent_idempotent_requests` | A send under this key is in flight, or its answer has not come yet. Retry after `Retry-After`. |
 | 401, 403 | `missing_api_key`, `invalid_api_key`, `domain_not_allowed`, `admin_key_required` | The key is missing, wrong, or not allowed to do this. |
 | 413 | `request_too_large` | The body is over `CAIRNPOST_MAX_BODY_BYTES`. |
 | 429 | `rate_limit_exceeded` | The provider's limit is reached; nothing was sent. Retry after `Retry-After`. |
-| 502 | `upstream_unknown` | The provider did not answer; the email may have gone. Retry with the same key. |
+| 502 | `upstream_unknown` | The provider did not answer; the email may have gone. Retry with the same key. This is the only answer that leaves it open. |
 | 503 | `upstream_unavailable`, `unavailable` | Nothing was sent. Retry later. |
+
+When a send fails after it was recorded (`rejected_by_upstream`, 429, 502,
+503 `upstream_unavailable`), the error carries the email's `id`, and
+`GET /emails/{id}` says what became of it.
 
 ## Command line
 
@@ -103,7 +108,7 @@ sending domain with `--domain`.
 | `CAIRNPOST_DRIVER` | required | Who delivers the mail. `capture` is the only one so far. |
 | `CAIRNPOST_ADDR` | `:8080` | Where the API listens. |
 | `CAIRNPOST_IDEMPOTENCY_TTL` | `24h` | How long an `Idempotency-Key` is remembered. |
-| `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. |
+| `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. |
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
