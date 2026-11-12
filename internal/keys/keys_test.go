@@ -22,8 +22,8 @@ func TestAKeyAuthenticatesUntilRevoked(t *testing.T) {
 		t.Fatalf("the key itself: %v", err)
 	}
 	for name, wrong := range map[string]string{
-		"empty": "", "no lead": "xx_" + full[3:], "short": k.Prefix, "another secret": full[:len(full)-1] + "A",
-		"unknown prefix": "cp_00000000" + full[len(k.Prefix):],
+		"empty": "", "no lead": "xx_" + full[3:], "short": k.Prefix, "another secret": changed(full, len(full)-1),
+		"unknown prefix": changed(full, len(k.Prefix)-1),
 	} {
 		if _, err := svc.Authenticate(ctx, wrong); !errors.Is(err, keys.ErrInvalid) {
 			t.Errorf("%s: %v", name, err)
@@ -38,6 +38,16 @@ func TestAKeyAuthenticatesUntilRevoked(t *testing.T) {
 	if err := svc.Revoke(ctx, k.Prefix); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoking twice: %v", err)
 	}
+}
+
+// changed is the key with the character at one place replaced by another:
+// always a different string, whatever was drawn.
+func changed(full string, at int) string {
+	swap := byte('a')
+	if full[at] == swap {
+		swap = 'b'
+	}
+	return full[:at] + string(swap) + full[at+1:]
 }
 
 func TestTheStoreNeverHoldsTheKey(t *testing.T) {

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
@@ -47,6 +49,26 @@ func key(t *testing.T, db *postgres.DB) store.Key {
 func start(k store.Key, idem, fingerprint string) store.Start {
 	return store.Start{KeyID: k.ID, Sender: "app@example.com", Recipient: "ana@example.org", Driver: "test",
 		IdemKey: idem, Fingerprint: []byte(fingerprint), TTL: time.Hour, InDoubt: time.Hour}
+}
+
+// age makes a key's row two hours older, with a connection of the test's
+// own: the test moves the past instead of waiting for it, so no outcome
+// depends on how fast the machine is.
+func age(t *testing.T, k store.Key, idem string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, os.Getenv("CAIRNPOST_TEST_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tag, err := conn.Exec(ctx, `
+		UPDATE idempotency_keys
+		SET created_at = created_at - interval '2 hours', tried_at = tried_at - interval '2 hours'
+		WHERE api_key_id = $1::uuid AND key = $2`, k.ID, idem)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("ageing the key: %v, %d rows", err, tag.RowsAffected())
+	}
 }
 
 func TestMigrateIsDoneOnce(t *testing.T) {
@@ -125,10 +147,8 @@ func TestAKeysLifeInTheDatabase(t *testing.T) {
 	if err := db.Lost(ctx, first); err != nil || state(first) != store.StateUnknown {
 		t.Fatalf("a lost answer: %v, state %s", err, state(first))
 	}
-	stale := start(k, "life", "a")
-	stale.InDoubt = time.Millisecond
-	time.Sleep(20 * time.Millisecond)
-	second := check("after the in-doubt window", stale, store.Started).ID
+	age(t, k, "life")
+	second := check("after the in-doubt window", start(k, "life", "a"), store.Started).ID
 	if err := db.Sent(ctx, second, "up-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -137,17 +157,11 @@ func TestAKeysLifeInTheDatabase(t *testing.T) {
 	}
 	check("another request once sent", start(k, "life", "b"), store.Mismatch)
 
-	// The key's life was renewed by the try that sent: measured from that
-	// try it is young, though its first try is 20ms old.
-	young := start(k, "life", "a")
-	young.TTL = 15 * time.Millisecond
-	check("a life counted from the try that sent", young, store.Replay)
-	time.Sleep(20 * time.Millisecond)
-	check("once forgotten, even a different request", func() store.Start {
-		s := start(k, "life", "c")
-		s.TTL = 15 * time.Millisecond
-		return s
-	}(), store.Started)
+	// The key's life was renewed by the try that sent: its first try is
+	// two hours old, twice the key's lifetime, and it is still remembered.
+	check("a life counted from the try that sent", start(k, "life", "a"), store.Replay)
+	age(t, k, "life")
+	check("once forgotten, even a different request", start(k, "life", "c"), store.Started)
 
 	failed := check("a second key", start(k, "life-2", "a"), store.Started).ID
 	if err := db.Failed(ctx, failed); err != nil {
