@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -28,10 +30,32 @@ CAIRNPOST_* environment variables; see the README.`
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Args[1:]); err != nil {
+	err := run(ctx, os.Args[1:])
+	var bad *badFlags
+	switch {
+	case err == nil, errors.Is(err, flag.ErrHelp):
+		// -h printed the flags: that is what was asked for.
+	case errors.As(err, &bad):
+		os.Exit(2) // the flag package has already said what was wrong
+	default:
 		fmt.Fprintln(os.Stderr, "cairnpost:", err)
 		os.Exit(1)
 	}
+}
+
+// badFlags is a command line the flag package refused and explained.
+type badFlags struct{ err error }
+
+func (b *badFlags) Error() string { return b.err.Error() }
+
+// parse reads a command's flags. -h answers flag.ErrHelp; anything the
+// flag package refused answers a *badFlags, already reported.
+func parse(fs *flag.FlagSet, args []string) error {
+	err := fs.Parse(args)
+	if err == nil || errors.Is(err, flag.ErrHelp) {
+		return err
+	}
+	return &badFlags{err}
 }
 
 func run(ctx context.Context, args []string) error {

@@ -25,7 +25,7 @@ func sendCommand(ctx context.Context, args []string) error {
 	text := fs.String("text", "", "the plain-text body")
 	html := fs.String("html", "", "the HTML body")
 	idem := fs.String("idempotency-key", "", "a key that makes sending this twice send it once")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 	key := os.Getenv("CAIRNPOST_API_KEY")
