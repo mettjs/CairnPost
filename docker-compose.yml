@@ -1,0 +1,35 @@
+# CairnPost and its database, for trying it out and for development.
+#   docker compose up -d --build
+# The API is then at http://localhost:8025 and Postgres at localhost:5425.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: cairnpost
+      POSTGRES_PASSWORD: cairnpost
+      POSTGRES_DB: cairnpost
+    ports:
+      - "127.0.0.1:5425:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cairnpost"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  cairnpost:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CAIRNPOST_POSTGRES_DSN: postgres://cairnpost:cairnpost@postgres:5432/cairnpost?sslmode=disable
+      # capture keeps emails in memory and sends nothing: right for a first
+      # look, wrong for anything real.
+      CAIRNPOST_DRIVER: capture
+    ports:
+      - "127.0.0.1:8025:8080"
+
+volumes:
+  postgres:
