@@ -13,7 +13,9 @@ services:
     volumes:
       - postgres:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cairnpost"]
+      # Over TCP: the image's first-run setup server answers on the socket
+      # alone, before the real server is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U cairnpost -d cairnpost"]
       interval: 2s
       timeout: 3s
       retries: 30
