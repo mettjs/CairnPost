@@ -73,9 +73,20 @@ const (
 	// InFlight: the same request is being sent now, or its answer was lost
 	// too recently to send again.
 	InFlight
-	// Mismatch: the key was used before with a different request.
+	// Mismatch: the key was used before with a different request, which was
+	// sent. Only a finished send can mismatch: until then the key is in
+	// flight, whatever the request.
 	Mismatch
 )
+
+// Claim is Start's answer.
+type Claim struct {
+	Outcome Outcome
+	// ID is the message to send (Started) or the one already sent (Replay).
+	ID string
+	// RetryAfter is, for InFlight, how long until a retry is let through.
+	RetryAfter time.Duration
+}
 
 // Start is a send about to be made.
 type Start struct {
@@ -94,11 +105,13 @@ type Start struct {
 // Mail keeps messages and the idempotency keys they were sent under.
 type Mail interface {
 	// Start records a message as sending and claims its Idempotency-Key, in
-	// one step, so that of two racing requests exactly one is Started. The
-	// id is the message to send (Started) or the one already sent (Replay).
-	Start(ctx context.Context, s Start) (Outcome, string, error)
+	// one step, so that of two racing requests exactly one is Started.
+	Start(ctx context.Context, s Start) (Claim, error)
 	// Sent marks a message taken by the upstream and its key done.
 	Sent(ctx context.Context, id, upstreamID string) error
+	// Lost marks a message whose upstream answer never came: its fate is
+	// unknown. Its key stays in flight until the in-doubt window passes.
+	Lost(ctx context.Context, id string) error
 	// Failed marks a message the upstream certainly did not take, and frees
 	// its key so the next try sends at once.
 	Failed(ctx context.Context, id string) error

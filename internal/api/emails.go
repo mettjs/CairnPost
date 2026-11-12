@@ -63,7 +63,7 @@ func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 		IdemKey: r.Header.Get("Idempotency-Key"),
 	})
 	if err != nil {
-		a.failSend(w, err)
+		a.failSend(w, id, err)
 		return
 	}
 	write(w, http.StatusOK, map[string]string{"id": id})
@@ -94,24 +94,26 @@ func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type capturedView struct {
-	ID      string            `json:"id"`
-	At      time.Time         `json:"at"`
-	From    string            `json:"from"`
-	To      string            `json:"to"`
-	ReplyTo string            `json:"reply_to,omitempty"`
-	Subject string            `json:"subject"`
-	HTML    string            `json:"html,omitempty"`
-	Text    string            `json:"text,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
+// CapturedEmail is an email a development driver kept instead of sending.
+type CapturedEmail struct {
+	ID       string            `json:"id"`
+	At       time.Time         `json:"at"`
+	From     string            `json:"from"`
+	FromName string            `json:"from_name,omitempty"`
+	To       string            `json:"to"`
+	ReplyTo  string            `json:"reply_to,omitempty"`
+	Subject  string            `json:"subject"`
+	HTML     string            `json:"html,omitempty"`
+	Text     string            `json:"text,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
 }
 
-// captured is GET /capture/emails: what the capture driver holds, newest
-// first. Mounted only when capture is the driver, for an admin key only.
+// captured is GET /capture/emails: the emails kept instead of sent, newest
+// first. Mounted only when such a driver is in use, for an admin key only.
 func (a *app) captured(w http.ResponseWriter, _ *http.Request) {
-	out := []capturedView{}
-	for _, c := range a.Capture.Held() {
-		out = append(out, capturedView{c.ID, c.At, c.From, c.To, c.ReplyTo, c.Subject, c.HTML, c.Text, c.Headers})
+	out := a.Captured()
+	if out == nil {
+		out = []CapturedEmail{}
 	}
 	write(w, http.StatusOK, map[string]any{"data": out})
 }

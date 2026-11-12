@@ -14,46 +14,62 @@ import (
 
 	"github.com/mettjs/cairnpost/internal/api"
 	"github.com/mettjs/cairnpost/internal/driver"
-	"github.com/mettjs/cairnpost/internal/driver/capture"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
 )
 
-// failing is a driver that answers an error; nil lets the capture driver
-// underneath take the email.
-type failing struct {
-	*capture.Driver
-	err error
+// fake is a driver that keeps what it is handed, or answers an error.
+type fake struct {
+	err  error
+	held []driver.Message
 }
 
-func (f *failing) Send(ctx context.Context, m driver.Message) (string, error) {
+func (*fake) Name() string { return "fake" }
+
+func (f *fake) Send(_ context.Context, m driver.Message) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
-	return f.Driver.Send(ctx, m)
+	f.held = append(f.held, m)
+	return "up-1", nil
+}
+
+// down is a store whose every send fails before it starts.
+type down struct{ store.Store }
+
+func (down) Start(context.Context, store.Start) (store.Claim, error) {
+	return store.Claim{}, errors.New("the database is gone")
 }
 
 type rig struct {
 	t           *testing.T
 	h           http.Handler
-	drv         *failing
+	drv         *fake
 	send, admin string
 }
 
-func newRig(t *testing.T) *rig {
+func newRig(t *testing.T) *rig { return newRigOn(t, memstore.New()) }
+
+func newRigOn(t *testing.T, s store.Store) *rig {
 	t.Helper()
-	s, log := memstore.New(), slog.New(slog.NewTextHandler(io.Discard, nil))
-	drv := &failing{Driver: capture.New(10, time.Now)}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	drv := &fake{}
 	ks := keys.New(s)
 	send, _, _ := ks.Create(context.Background(), "app", store.ScopeSend, "")
 	admin, _, _ := ks.Create(context.Background(), "ops", store.ScopeAdmin, "")
 	h := api.New(api.Deps{
 		Mail: mail.New(s, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 			InDoubtWindow: time.Minute}, log),
-		Keys: ks, Ping: s.Ping, Capture: drv.Driver, Driver: "capture", Version: "test",
-		MaxBodyBytes: 4096, Log: log,
+		Keys: ks, Ping: s.Ping, Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
+		Captured: func() []api.CapturedEmail {
+			var out []api.CapturedEmail
+			for _, m := range drv.held {
+				out = append(out, api.CapturedEmail{From: m.From, To: m.To, Subject: m.Subject})
+			}
+			return out
+		},
 	})
 	return &rig{t: t, h: h, drv: drv, send: send, admin: admin}
 }
@@ -85,8 +101,8 @@ func TestSendAnswersAnIdAndReplaysIt(t *testing.T) {
 		t.Fatalf("send: %d %v", code, first)
 	}
 	code, _, again := r.do("POST", "/emails", r.send, "k1", good)
-	if code != 200 || again["id"] != first["id"] || len(r.drv.Held()) != 1 {
-		t.Fatalf("replay: %d %v, held %d", code, again, len(r.drv.Held()))
+	if code != 200 || again["id"] != first["id"] || len(r.drv.held) != 1 {
+		t.Fatalf("replay: %d %v, held %d", code, again, len(r.drv.held))
 	}
 }
 
@@ -142,13 +158,53 @@ func TestIdempotencyConflictsAreTwoDifferent409s(t *testing.T) {
 	r.drv.err = errors.New("reset")
 	r.do("POST", "/emails", r.send, "k", good)
 	r.drv.err = nil
-	if code, name, _ := r.do("POST", "/emails", r.send, "k", good); code != 409 || name != "concurrent_idempotent_requests" {
-		t.Fatalf("in flight: %d %s", code, name)
+	req := httptest.NewRequest("POST", "/emails", strings.NewReader(good))
+	req.Header.Set("Authorization", "Bearer "+r.send)
+	req.Header.Set("Idempotency-Key", "k")
+	rec := httptest.NewRecorder()
+	r.h.ServeHTTP(rec, req)
+	// The wait said is the in-doubt window's remainder, not a guess.
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), "concurrent_idempotent_requests") ||
+		(rec.Header().Get("Retry-After") != "60" && rec.Header().Get("Retry-After") != "59") {
+		t.Fatalf("in flight: %d %s, Retry-After %q", rec.Code, rec.Body, rec.Header().Get("Retry-After"))
 	}
 	r.do("POST", "/emails", r.send, "k2", good)
 	other := strings.Replace(good, "Body text", "Another body", 1)
 	if code, name, _ := r.do("POST", "/emails", r.send, "k2", other); code != 409 || name != "invalid_idempotent_request" {
 		t.Fatalf("mismatch: %d %s", code, name)
+	}
+}
+
+// A failure of our own, before the provider was asked, never says that an
+// email may have gone.
+func TestOurOwnFailureSaysNothingWasSent(t *testing.T) {
+	r := newRigOn(t, down{memstore.New()})
+	code, name, body := r.do("POST", "/emails", r.send, "k", good)
+	if code != 503 || name != "unavailable" || !strings.Contains(body["message"].(string), "nothing was sent") {
+		t.Fatalf("%d %s %v", code, name, body)
+	}
+}
+
+// A send that failed after it was recorded answers its id, so its caller
+// can ask what became of it.
+func TestAFailedSendAnswersItsId(t *testing.T) {
+	r := newRig(t)
+	r.drv.err = errors.New("reset")
+	code, _, body := r.do("POST", "/emails", r.send, "", good)
+	id, _ := body["id"].(string)
+	if code != 502 || id == "" {
+		t.Fatalf("%d %v", code, body)
+	}
+	if code, _, got := r.do("GET", "/emails/"+id, r.send, "", ""); code != 200 || got["state"] != "unknown" {
+		t.Fatalf("its record: %d %v", code, got)
+	}
+}
+
+func TestValidationSaysWhatToChange(t *testing.T) {
+	r := newRig(t)
+	_, _, body := r.do("POST", "/emails", r.send, "", `{"from":"a@example.com","to":"b@example.org","subject":"s"}`)
+	if body["message"] != `Give "html", "text" or both: an email needs a body.` {
+		t.Fatalf("%v", body["message"])
 	}
 }
 
@@ -190,7 +246,7 @@ func TestCapturedMailNeedsAnAdminKey(t *testing.T) {
 
 func TestHealthNeedsNoKey(t *testing.T) {
 	r := newRig(t)
-	if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["status"] != "ok" || got["driver"] != "capture" {
+	if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["status"] != "ok" || got["driver"] != "fake" {
 		t.Fatalf("%d %v", code, got)
 	}
 	if code, name, _ := r.do("GET", "/nothing", "", "", ""); code != 404 || name != "not_found" {

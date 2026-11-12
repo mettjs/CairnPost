@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mettjs/cairnpost/internal/driver/capture"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 )
@@ -19,9 +18,10 @@ type Deps struct {
 	Keys *keys.Service
 	// Ping reports whether the store answers, for GET /health.
 	Ping func(context.Context) error
-	// Capture is the capture driver when it is the one in use, else nil:
-	// its emails are then readable at GET /capture/emails.
-	Capture *capture.Driver
+	// Captured answers the emails a development driver kept instead of
+	// sending, newest first; nil when the driver in use delivers. With it,
+	// GET /capture/emails is mounted.
+	Captured func() []CapturedEmail
 	// Driver and Version are said by GET /health.
 	Driver, Version string
 	// MaxBodyBytes bounds a request body.
@@ -36,7 +36,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /health", a.health)
 	mux.Handle("POST /emails", a.auth(false, a.sendEmail))
 	mux.Handle("GET /emails/{id}", a.auth(false, a.getEmail))
-	if d.Capture != nil {
+	if d.Captured != nil {
 		mux.Handle("GET /capture/emails", a.auth(true, a.captured))
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {

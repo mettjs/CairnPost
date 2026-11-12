@@ -125,34 +125,44 @@ func (s *Store) setState(id, state, upstreamID string) {
 }
 
 // Start implements store.Mail.
-func (s *Store) Start(_ context.Context, st store.Start) (store.Outcome, string, error) {
+func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if st.IdemKey == "" {
-		return store.Started, s.newMessage(st), nil
+		return store.Claim{Outcome: store.Started, ID: s.newMessage(st)}, nil
 	}
 	at, now := st.KeyID+"\x00"+st.IdemKey, s.Now()
 	row, ok := s.idems[at]
-	if ok && now.Sub(row.created) >= st.TTL {
-		ok = false // remembered long enough: the key is new again
-	}
 	switch {
 	case !ok:
 		id := s.newMessage(st)
 		s.idems[at] = &idem{fingerprint: st.Fingerprint, messageID: id, created: now, tried: now}
-		return store.Started, id, nil
-	case !bytes.Equal(row.fingerprint, st.Fingerprint):
-		return store.Mismatch, "", nil
+		return store.Claim{Outcome: store.Started, ID: id}, nil
+	case now.Sub(row.created) >= st.TTL, !row.done && now.Sub(row.tried) >= st.InDoubt:
+		// Remembered long enough, or its last try's answer never came:
+		// this request sends, and the key's life starts again from now.
+		if s.messages[row.messageID].State == store.StateSending {
+			s.setState(row.messageID, store.StateUnknown, "")
+		}
+		id := s.newMessage(st)
+		*row = idem{fingerprint: st.Fingerprint, messageID: id, created: now, tried: now}
+		return store.Claim{Outcome: store.Started, ID: id}, nil
+	case row.done && !bytes.Equal(row.fingerprint, st.Fingerprint):
+		return store.Claim{Outcome: store.Mismatch}, nil
 	case row.done:
-		return store.Replay, row.messageID, nil
-	case now.Sub(row.tried) < st.InDoubt:
-		return store.InFlight, "", nil
+		return store.Claim{Outcome: store.Replay, ID: row.messageID}, nil
 	}
-	// The last try's answer never came: its message's fate is unknown, and
-	// this request sends again.
-	s.setState(row.messageID, store.StateUnknown, "")
-	row.messageID, row.tried = s.newMessage(st), now
-	return store.Started, row.messageID, nil
+	return store.Claim{Outcome: store.InFlight, RetryAfter: row.tried.Add(st.InDoubt).Sub(now)}, nil
+}
+
+// Lost implements store.Mail.
+func (s *Store) Lost(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.messages[id].State == store.StateSending {
+		s.setState(id, store.StateUnknown, "")
+	}
+	return nil
 }
 
 // Sent implements store.Mail.

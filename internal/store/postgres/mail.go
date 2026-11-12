@@ -35,13 +35,16 @@ func (db *DB) Message(ctx context.Context, id string) (store.Message, error) {
 
 // Sent implements store.Mail.
 func (db *DB) Sent(ctx context.Context, id, upstreamID string) error {
+	// The key's row is touched before the message's, here as in Start, so
+	// two transactions never wait on each other in opposite orders.
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `
-			UPDATE messages SET state = 'sent', upstream_id = $2, updated_at = now()
-			WHERE id = $1::uuid`, id, upstreamID); err != nil {
+		if _, err := tx.Exec(ctx,
+			`UPDATE idempotency_keys SET state = 'done' WHERE message_id = $1::uuid`, id); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE idempotency_keys SET state = 'done' WHERE message_id = $1::uuid`, id)
+		_, err := tx.Exec(ctx, `
+			UPDATE messages SET state = 'sent', upstream_id = $2, updated_at = now()
+			WHERE id = $1::uuid`, id, upstreamID)
 		return err
 	})
 	if err != nil {
@@ -63,6 +66,17 @@ func (db *DB) Failed(ctx context.Context, id string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("postgres: mark a message failed: %w", err)
+	}
+	return nil
+}
+
+// Lost implements store.Mail.
+func (db *DB) Lost(ctx context.Context, id string) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE messages SET state = 'unknown', updated_at = now()
+		WHERE id = $1::uuid AND state = 'sending'`, id)
+	if err != nil {
+		return fmt.Errorf("postgres: mark a message's answer lost: %w", err)
 	}
 	return nil
 }

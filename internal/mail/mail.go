@@ -26,7 +26,22 @@ var (
 	// ErrMismatch: the Idempotency-Key was used with a different request,
 	// which was sent. This one never will be.
 	ErrMismatch = errors.New("mail: this Idempotency-Key was used with a different request")
+	// ErrInDoubt: the upstream's answer was lost, so the email may have
+	// gone. It is the only error after which that is so: every other one
+	// means nothing was sent.
+	ErrInDoubt = errors.New("mail: the upstream's answer was lost; the email may have gone")
 )
+
+// Busy is an ErrInFlight that knows how long until a retry is let through.
+type Busy struct{ After time.Duration }
+
+func (*Busy) Error() string { return ErrInFlight.Error() }
+
+// Unwrap makes a Busy an ErrInFlight.
+func (*Busy) Unwrap() error { return ErrInFlight }
+
+// recordTimeout bounds writing down what became of a send.
+const recordTimeout = 5 * time.Second
 
 // Options are the service's settings.
 type Options struct {
@@ -52,8 +67,10 @@ func New(s store.Mail, d driver.Driver, opt Options, log *slog.Logger) *Service 
 // Send sends one email and answers its id. presented is the caller's API
 // key as it arrived: the request's fingerprint is keyed by it.
 //
-// An error is an *Invalid, ErrDomain, ErrInFlight, ErrMismatch, or the
-// driver's (see driver.Driver for its three kinds).
+// An error is an *Invalid, ErrDomain, a *Busy (ErrInFlight), ErrMismatch,
+// a driver's ErrRejected or ErrUnavailable, ErrInDoubt, or a failure of
+// our own before anything was sent. The id comes back beside an error
+// whenever the send got far enough to have one.
 func (s *Service) Send(ctx context.Context, key store.Key, presented string, r Request) (string, error) {
 	c, err := check(r)
 	if err != nil {
@@ -63,35 +80,38 @@ func (s *Service) Send(ctx context.Context, key store.Key, presented string, r R
 		return "", ErrDomain
 	}
 	start := store.Start{
-		KeyID: key.ID, Sender: c.sender, Recipient: c.recipient, Driver: s.driver.Name(),
+		KeyID: key.ID, Sender: c.msg.From, Recipient: c.msg.To, Driver: s.driver.Name(),
 		IdemKey: r.IdemKey, TTL: s.opt.IdempotencyTTL, InDoubt: s.opt.InDoubtWindow,
 	}
 	if r.IdemKey != "" {
 		start.Fingerprint = fingerprint(presented, c.msg)
 	}
-	outcome, id, err := s.store.Start(ctx, start)
+	claim, err := s.store.Start(ctx, start)
 	if err != nil {
 		return "", fmt.Errorf("mail: record the send: %w", err)
 	}
-	switch outcome {
+	switch claim.Outcome {
 	case store.Replay:
-		return id, nil
+		return claim.ID, nil
 	case store.InFlight:
-		return "", ErrInFlight
+		return "", &Busy{After: claim.RetryAfter}
 	case store.Mismatch:
 		return "", ErrMismatch
 	}
-	return id, s.deliver(ctx, id, c.msg)
+	return claim.ID, s.deliver(ctx, claim.ID, c.msg)
 }
 
-// deliver hands a started message to the driver and records the answer. The
-// record is written even if the caller has gone: the email's fate does not
-// depend on who was waiting for it.
+// deliver hands a started message to the driver and records the answer.
+// Neither step stops because the caller hung up: an upstream call cut off
+// midway is an email that may have gone with nobody knowing, so it runs to
+// its own timeout, and the record is written within its own.
 func (s *Service) deliver(ctx context.Context, id string, m driver.Message) error {
-	sendCtx, cancel := context.WithTimeout(ctx, s.opt.SendTimeout)
+	free := context.WithoutCancel(ctx)
+	sendCtx, cancel := context.WithTimeout(free, s.opt.SendTimeout)
 	upstreamID, err := s.driver.Send(sendCtx, m)
 	cancel()
-	record := context.WithoutCancel(ctx)
+	record, done := context.WithTimeout(free, recordTimeout)
+	defer done()
 	switch {
 	case err == nil:
 		if err := s.store.Sent(record, id, upstreamID); err != nil {
@@ -105,10 +125,13 @@ func (s *Service) deliver(ctx context.Context, id string, m driver.Message) erro
 		}
 		return err
 	default:
-		// The answer was lost: the message stays "sending" and its key in
-		// flight, until the in-doubt window lets a retry through.
-		s.log.Warn("mail: the upstream's answer was lost; the email may have gone", "message", id)
-		return fmt.Errorf("mail: the upstream's answer was lost: %w", err)
+		// The answer was lost. The message's fate is unknown, and its key
+		// stays in flight until the in-doubt window lets a retry through.
+		s.log.Warn("mail: the upstream's answer was lost; the email may have gone", "message", id, "error", err)
+		if lerr := s.store.Lost(record, id); lerr != nil {
+			s.log.Error("mail: a lost answer could not be recorded", "message", id, "error", lerr)
+		}
+		return ErrInDoubt
 	}
 }
 

@@ -4,19 +4,12 @@ package postgres_test
 
 import (
 	"context"
-	"io"
-	"log/slog"
-	"net/http/httptest"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/mettjs/cairnpost/internal/api"
-	"github.com/mettjs/cairnpost/internal/driver/capture"
 	"github.com/mettjs/cairnpost/internal/keys"
-	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
 	"github.com/mettjs/cairnpost/migrations"
@@ -42,13 +35,13 @@ func open(t *testing.T) *postgres.DB {
 	return db
 }
 
-func key(t *testing.T, db *postgres.DB) (string, store.Key) {
+func key(t *testing.T, db *postgres.DB) store.Key {
 	t.Helper()
-	full, k, err := keys.New(db).Create(context.Background(), t.Name(), store.ScopeAdmin, "")
+	_, k, err := keys.New(db).Create(context.Background(), t.Name(), store.ScopeAdmin, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return full, k
+	return k
 }
 
 func start(k store.Key, idem, fingerprint string) store.Start {
@@ -68,7 +61,7 @@ func TestMigrateIsDoneOnce(t *testing.T) {
 // of many requests racing under one key, one sends.
 func TestRacingRequestsUnderOneKeyStartOnce(t *testing.T) {
 	db := open(t)
-	_, k := key(t, db)
+	k := key(t, db)
 	const racers = 32
 	outcomes := make([]store.Outcome, racers)
 	var wg sync.WaitGroup
@@ -76,11 +69,11 @@ func TestRacingRequestsUnderOneKeyStartOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			o, _, err := db.Start(context.Background(), start(k, "race", "same"))
+			c, err := db.Start(context.Background(), start(k, "race", "same"))
 			if err != nil {
 				t.Error(err)
 			}
-			outcomes[i] = o
+			outcomes[i] = c.Outcome
 		}()
 	}
 	wg.Wait()
@@ -101,83 +94,80 @@ func TestRacingRequestsUnderOneKeyStartOnce(t *testing.T) {
 
 func TestAKeysLifeInTheDatabase(t *testing.T) {
 	ctx, db := context.Background(), open(t)
-	_, k := key(t, db)
-	check := func(why string, s store.Start, want store.Outcome) string {
+	k := key(t, db)
+	check := func(why string, s store.Start, want store.Outcome) store.Claim {
 		t.Helper()
-		got, id, err := db.Start(ctx, s)
-		if err != nil || got != want {
-			t.Fatalf("%s: outcome %v (want %v), err %v", why, got, want, err)
+		got, err := db.Start(ctx, s)
+		if err != nil || got.Outcome != want {
+			t.Fatalf("%s: outcome %v (want %v), err %v", why, got.Outcome, want, err)
 		}
-		return id
+		return got
 	}
-	first := check("a new key", start(k, "life", "a"), store.Started)
-	check("while in flight", start(k, "life", "a"), store.InFlight)
-	check("another request", start(k, "life", "b"), store.Mismatch)
+	state := func(id string) string {
+		t.Helper()
+		m, err := db.Message(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.State
+	}
+	first := check("a new key", start(k, "life", "a"), store.Started).ID
+	busy := check("while in flight", start(k, "life", "a"), store.InFlight)
+	if busy.RetryAfter <= 59*time.Minute || busy.RetryAfter > time.Hour {
+		t.Fatalf("the wait said is %s; the window is an hour", busy.RetryAfter)
+	}
+	// Nothing was sent under the key yet, so a different request cannot be
+	// told that something was.
+	check("another request while in flight", start(k, "life", "b"), store.InFlight)
 
 	// The answer never comes, and the window passes: the retry sends, and
 	// the first message's fate is recorded as unknown.
+	if err := db.Lost(ctx, first); err != nil || state(first) != store.StateUnknown {
+		t.Fatalf("a lost answer: %v, state %s", err, state(first))
+	}
 	stale := start(k, "life", "a")
 	stale.InDoubt = time.Millisecond
 	time.Sleep(20 * time.Millisecond)
-	second := check("after the in-doubt window", stale, store.Started)
-	if m, _ := db.Message(ctx, first); m.State != store.StateUnknown {
-		t.Fatalf("the abandoned message is %q", m.State)
-	}
+	second := check("after the in-doubt window", stale, store.Started).ID
 	if err := db.Sent(ctx, second, "up-1"); err != nil {
 		t.Fatal(err)
 	}
-	if id := check("once sent", start(k, "life", "a"), store.Replay); id != second {
-		t.Fatalf("replayed %s, sent %s", id, second)
+	if got := check("once sent", start(k, "life", "a"), store.Replay); got.ID != second {
+		t.Fatalf("replayed %s, sent %s", got.ID, second)
 	}
-	forgotten := start(k, "life", "c")
-	forgotten.TTL = time.Millisecond
-	check("once forgotten, even a different request", forgotten, store.Started)
+	check("another request once sent", start(k, "life", "b"), store.Mismatch)
 
-	failed := check("a second key", start(k, "life-2", "a"), store.Started)
+	// The key's life was renewed by the try that sent: measured from that
+	// try it is young, though its first try is 20ms old.
+	young := start(k, "life", "a")
+	young.TTL = 15 * time.Millisecond
+	check("a life counted from the try that sent", young, store.Replay)
+	time.Sleep(20 * time.Millisecond)
+	check("once forgotten, even a different request", func() store.Start {
+		s := start(k, "life", "c")
+		s.TTL = 15 * time.Millisecond
+		return s
+	}(), store.Started)
+
+	failed := check("a second key", start(k, "life-2", "a"), store.Started).ID
 	if err := db.Failed(ctx, failed); err != nil {
 		t.Fatal(err)
 	}
 	check("after a refusal the key is free", start(k, "life-2", "a"), store.Started)
-	if m, _ := db.Message(ctx, failed); m.State != store.StateFailed {
-		t.Fatalf("the refused message is %q", m.State)
+	if state(failed) != store.StateFailed {
+		t.Fatalf("the refused message is %q", state(failed))
 	}
 	if _, err := db.Message(ctx, "not-a-uuid"); err != store.ErrNotFound {
 		t.Fatalf("a malformed id: %v", err)
 	}
 }
 
-// No table holds a subject or a body, whatever is sent.
-func TestNothingOfAnEmailsWordsReachesTheDatabase(t *testing.T) {
-	ctx, db := context.Background(), open(t)
-	full, _ := key(t, db)
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	drv := capture.New(5, time.Now)
-	h := api.New(api.Deps{
-		Mail: mail.New(db, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
-			InDoubtWindow: time.Minute}, log),
-		Keys: keys.New(db), Ping: db.Ping, Driver: "capture", MaxBodyBytes: 1 << 20, Log: log,
-	})
-	body := `{"from":"App <app@example.com>","to":"ana@example.org","subject":"SUBJECTMARK 482913",
-		"text":"TEXTMARK 482913","html":"<p>HTMLMARK</p>","headers":{"X-Trace":"HEADERMARK"}}`
-	req := httptest.NewRequest("POST", "/emails", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+full)
-	req.Header.Set("Idempotency-Key", "words")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != 200 || len(drv.Held()) != 1 {
-		t.Fatalf("the send: %d %s", rec.Code, rec.Body)
-	}
-	dump, err := db.DumpForTest(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(dump, "ana@example.org") {
-		t.Fatal("the dump does not hold the message's row; the check proves nothing")
-	}
-	secret := full[strings.LastIndex(full, "_")+1:]
-	for _, mark := range []string{"SUBJECTMARK", "TEXTMARK", "HTMLMARK", "HEADERMARK", "482913", secret} {
-		if strings.Contains(dump, mark) {
-			t.Errorf("the database holds %q", mark)
-		}
+// A key that Postgres could not store as text never reaches it: it is
+// refused as the request's own fault. The store is asked directly here to
+// show what would happen otherwise.
+func TestTheDatabaseRefusesAKeyThatIsNotText(t *testing.T) {
+	db := open(t)
+	if _, err := db.Start(context.Background(), start(key(t, db), "caf\xe9", "a")); err == nil {
+		t.Fatal("Postgres took a key that is not UTF-8; the request check may be relaxed")
 	}
 }

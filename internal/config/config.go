@@ -64,6 +64,16 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.MaxBodyBytes, err = number(getenv, "CAIRNPOST_MAX_BODY_BYTES", 1<<20); err != nil {
 		return c, err
 	}
+	// A retry must not be let through while the first try can still be
+	// answered, and a key must outlive the wait for that answer.
+	if c.InDoubtWindow <= c.SendTimeout {
+		return c, fmt.Errorf("config: CAIRNPOST_IN_DOUBT_WINDOW (%s) must be longer than CAIRNPOST_SEND_TIMEOUT (%s), "+
+			"or a retry could be sent while the first try is still being answered", c.InDoubtWindow, c.SendTimeout)
+	}
+	if c.IdempotencyTTL <= c.InDoubtWindow {
+		return c, fmt.Errorf("config: CAIRNPOST_IDEMPOTENCY_TTL (%s) must be longer than CAIRNPOST_IN_DOUBT_WINDOW (%s), "+
+			"or a key would be forgotten while its send is still in doubt", c.IdempotencyTTL, c.InDoubtWindow)
+	}
 	keep, err := number(getenv, "CAIRNPOST_CAPTURE_KEEP", 100)
 	c.CaptureKeep = int(keep)
 	return c, err

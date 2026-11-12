@@ -16,14 +16,17 @@ import (
 
 // fakeDriver answers what it is told to and counts what it was handed.
 type fakeDriver struct {
-	err   error
-	sends int
+	err    error
+	sends  int
+	last   driver.Message
+	ctxErr error // the context's state when Send was called
 }
 
 func (*fakeDriver) Name() string { return "fake" }
 
-func (f *fakeDriver) Send(context.Context, driver.Message) (string, error) {
+func (f *fakeDriver) Send(ctx context.Context, m driver.Message) (string, error) {
 	f.sends++
+	f.last, f.ctxErr = m, ctx.Err()
 	if f.err != nil {
 		return "", f.err
 	}
@@ -106,20 +109,70 @@ func TestALostAnswerBlocksThenLetsARetryThrough(t *testing.T) {
 	r := newRig(t)
 	r.drv.err = errors.New("connection reset")
 	first, err := r.send(request("k"))
-	if err == nil || errors.Is(err, driver.ErrUnavailable) || r.state(t, first) != store.StateSending {
-		t.Fatalf("a lost answer: err %v, state %s", err, r.state(t, first))
+	if !errors.Is(err, mail.ErrInDoubt) || first == "" || r.state(t, first) != store.StateUnknown {
+		t.Fatalf("a lost answer: id %q, err %v, state %s", first, err, r.state(t, first))
 	}
 	r.drv.err = nil
-	if _, err := r.send(request("k")); !errors.Is(err, mail.ErrInFlight) || r.drv.sends != 1 {
+	r.now = r.now.Add(30 * time.Second)
+	var busy *mail.Busy
+	if _, err := r.send(request("k")); !errors.As(err, &busy) || busy.After != 90*time.Second || r.drv.sends != 1 {
 		t.Fatalf("a retry inside the window: err %v, sends %d", err, r.drv.sends)
 	}
-	r.now = r.now.Add(2 * time.Minute)
+	// A different request under the key is in flight too: nothing was sent
+	// under it yet, so it cannot be told that something was.
+	changed := request("k")
+	changed.Text = "654321"
+	if _, err := r.send(changed); !errors.Is(err, mail.ErrInFlight) {
+		t.Fatalf("a changed request while in doubt: %v", err)
+	}
+	r.now = r.now.Add(90 * time.Second)
 	second, err := r.send(request("k"))
 	if err != nil || r.drv.sends != 2 || second == first {
 		t.Fatalf("a retry after the window: err %v, sends %d", err, r.drv.sends)
 	}
 	if r.state(t, first) != store.StateUnknown || r.state(t, second) != store.StateSent {
 		t.Fatalf("states: first %s, second %s", r.state(t, first), r.state(t, second))
+	}
+}
+
+// A key's day runs from the try that sent, not from a first try that was
+// lost: a send that succeeds late is still remembered for its whole life.
+func TestAKeysLifeRunsFromTheTryThatSent(t *testing.T) {
+	r := newRig(t)
+	r.drv.err = errors.New("connection reset")
+	r.send(request("k"))
+	r.drv.err = nil
+	r.now = r.now.Add(23 * time.Hour)
+	sent, err := r.send(request("k"))
+	if err != nil || r.drv.sends != 2 {
+		t.Fatalf("the late retry: err %v, sends %d", err, r.drv.sends)
+	}
+	r.now = r.now.Add(2 * time.Hour)
+	if again, err := r.send(request("k")); err != nil || again != sent || r.drv.sends != 2 {
+		t.Fatalf("a repeat 25 hours after the first try: id %q (sent %q), err %v, sends %d", again, sent, err, r.drv.sends)
+	}
+}
+
+// The upstream call does not stop because the caller hung up.
+func TestACallerHangingUpDoesNotCutTheSendShort(t *testing.T) {
+	r := newRig(t)
+	ctx, hangUp := context.WithCancel(context.Background())
+	hangUp()
+	id, err := r.svc.Send(ctx, r.key, "cp_presented", request("k"))
+	if err != nil || r.drv.ctxErr != nil || r.state(t, id) != store.StateSent {
+		t.Fatalf("err %v, the driver's context: %v", err, r.drv.ctxErr)
+	}
+}
+
+func TestTheDriverGetsBareAddressesAndTheNameApart(t *testing.T) {
+	r := newRig(t)
+	req := request("")
+	req.From, req.To = "José Pérez <app@example.com>", []string{`"a b"@example.org`}
+	if _, err := r.send(req); err != nil {
+		t.Fatal(err)
+	}
+	if m := r.drv.last; m.From != "app@example.com" || m.FromName != "José Pérez" || m.To != `"a b"@example.org` {
+		t.Fatalf("the driver was handed %+v", m)
 	}
 }
 
@@ -158,7 +211,7 @@ func TestRequestsThatCanNeverBeSent(t *testing.T) {
 		"subject":         func(r *mail.Request) { r.Subject = "two\nlines" },
 		"html":            func(r *mail.Request) { r.Text = "" },
 		"headers":         func(r *mail.Request) { r.Headers = map[string]string{"Subject": "x"} },
-		"Idempotency-Key": func(r *mail.Request) { r.IdemKey = string(make([]byte, 257)) },
+		"Idempotency-Key": func(r *mail.Request) { r.IdemKey = "caf\xe9" },
 	}
 	for field, breakIt := range cases {
 		r := newRig(t)

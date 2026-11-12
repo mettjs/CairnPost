@@ -69,12 +69,12 @@ func serve(ctx context.Context) error {
 	// The driver is chosen here and nowhere else.
 	var (
 		drv      driver.Driver
-		captured *capture.Driver
+		captured func() []api.CapturedEmail
 	)
 	switch cfg.Driver {
 	case capture.Name:
-		captured = capture.New(cfg.CaptureKeep, time.Now)
-		drv = captured
+		kept := capture.New(cfg.CaptureKeep, time.Now)
+		drv, captured = kept, func() []api.CapturedEmail { return capturedEmails(kept) }
 		log.Warn("the capture driver is in use: emails are kept in memory and sent to nobody")
 	default:
 		return fmt.Errorf("no driver is built for %q", cfg.Driver)
@@ -83,7 +83,7 @@ func serve(ctx context.Context) error {
 	handler := api.New(api.Deps{
 		Mail: mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 			IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow}, log),
-		Keys: keys.New(db), Ping: db.Ping, Capture: captured,
+		Keys: keys.New(db), Ping: db.Ping, Captured: captured,
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
 	})
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler,
@@ -102,4 +102,14 @@ func serve(ctx context.Context) error {
 	stopCtx, cancel := context.WithTimeout(context.Background(), cfg.SendTimeout+5*time.Second)
 	defer cancel()
 	return srv.Shutdown(stopCtx)
+}
+
+// capturedEmails is what the capture driver holds, as the API shows it.
+func capturedEmails(d *capture.Driver) []api.CapturedEmail {
+	var out []api.CapturedEmail
+	for _, c := range d.Held() {
+		out = append(out, api.CapturedEmail{ID: c.ID, At: c.At, From: c.From, FromName: c.FromName, To: c.To,
+			ReplyTo: c.ReplyTo, Subject: c.Subject, HTML: c.HTML, Text: c.Text, Headers: c.Headers})
+	}
+	return out
 }
