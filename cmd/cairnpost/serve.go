@@ -14,6 +14,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/driver"
 	"github.com/mettjs/cairnpost/internal/driver/capture"
 	"github.com/mettjs/cairnpost/internal/driver/cloudflare"
+	"github.com/mettjs/cairnpost/internal/events"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
@@ -71,6 +72,7 @@ func serve(ctx context.Context) error {
 	var (
 		drv      driver.Driver
 		captured func() []api.CapturedEmail
+		source   driver.Source
 	)
 	switch cfg.Driver {
 	case capture.Name:
@@ -78,9 +80,29 @@ func serve(ctx context.Context) error {
 		drv, captured = kept, func() []api.CapturedEmail { return capturedEmails(kept) }
 		log.Warn("the capture driver is in use: emails are kept in memory and sent to nobody")
 	case cloudflare.Name:
-		drv = cloudflare.New(cfg.Cloudflare.AccountID, cfg.Cloudflare.APIToken)
+		cf := cloudflare.New(cfg.Cloudflare.AccountID, cfg.Cloudflare.APIToken)
+		drv = cf
+		if cfg.Cloudflare.QueueID != "" {
+			source = cf.Events(cfg.Cloudflare.QueueID)
+		}
 	default:
 		return fmt.Errorf("no driver is built for %q", cfg.Driver)
+	}
+
+	// The reader of delivery events runs beside the API and stops with it.
+	var reader *events.Reader
+	reading := make(chan struct{})
+	switch {
+	case source != nil:
+		reader = events.New(db, db.Ping, source, drv.Name(), events.Options{Poll: cfg.EventsPoll,
+			Batch: cfg.EventsBatch, Lease: cfg.EventsLease, Retry: cfg.EventsRetry, Grace: cfg.EventsGrace}, time.Now, log)
+		go func() { defer close(reading); reader.Run(ctx) }()
+	case captured == nil:
+		close(reading)
+		log.Warn("delivery events are not read: an email's record stops at \"sent\", and a bounce is never known",
+			"driver", drv.Name())
+	default:
+		close(reading)
 	}
 
 	handler := api.New(api.Deps{
@@ -88,6 +110,7 @@ func serve(ctx context.Context) error {
 			IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow}, log),
 		Keys: keys.New(db), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
+		Events: eventsHealth(reader),
 	})
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler,
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
@@ -104,7 +127,9 @@ func serve(ctx context.Context) error {
 	log.Info("stopping: letting requests in flight finish")
 	stopCtx, cancel := context.WithTimeout(context.Background(), cfg.SendTimeout+5*time.Second)
 	defer cancel()
-	return srv.Shutdown(stopCtx)
+	err = srv.Shutdown(stopCtx)
+	<-reading // the reader finishes the batch it holds
+	return err
 }
 
 // capturedEmails is what the capture driver holds, as the API shows it.
@@ -135,4 +160,13 @@ func quotaOf(d driver.Driver) func(context.Context) (api.Quota, error) {
 		}
 		return out, nil
 	}
+}
+
+// eventsHealth is how /health says whether delivery events are being read;
+// nil when none are read at all.
+func eventsHealth(r *events.Reader) func() bool {
+	if r == nil {
+		return nil
+	}
+	return r.Healthy
 }
