@@ -129,6 +129,13 @@ button:hover { filter: brightness(1.08); }
 button:active { transform: translateY(1px); }
 button.quiet { color: var(--text); background: transparent; border-color: var(--line); }
 button.quiet:hover { background: var(--sunk); filter: none; }
+/* A button in a row of a list: it reads as the links beside it. */
+button.link {
+  color: var(--accent); background: none; border: 0; padding: 0; min-height: 0;
+  font-weight: inherit; text-decoration: underline; text-underline-offset: 2px;
+}
+button.link:hover { filter: none; text-decoration-thickness: 2px; }
+td.act form { margin: 0; }
 button.danger { background: var(--bad); border-color: var(--bad); color: var(--page); }
 
 form.row {
@@ -251,7 +258,7 @@ dd { margin: 0; }
   td:first-child { font-weight: 600; }
   td:first-child::before { content: none; }
   td.act { text-align: left; padding-top: 0.35rem; }
-  td.act:empty { display: none; }
+  td.act:empty, td[data-label]:empty { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -17,6 +17,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
+	"github.com/mettjs/cairnpost/internal/suppress"
 )
 
 // Root is where the console is mounted.
@@ -26,6 +27,7 @@ const Root = "/console"
 type Deps struct {
 	Keys     *keys.Service
 	Mail     *mail.Service
+	Suppress *suppress.Service
 	Sessions *session.Service
 	// Events, Sending and Pruning report whether delivery events are read,
 	// webhooks sent and old records pruned; nil for one that is off.
@@ -64,10 +66,16 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST "+Root+"/emails/find", c.signed(c.findEmails))
 	// A refused search leaves this address in the browser: asked for
 	// again, it is the list.
-	mux.Handle("GET "+Root+"/emails/find", c.signed(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, Root+"/emails", http.StatusSeeOther)
-	}))
+	mux.Handle("GET "+Root+"/emails/find", c.signed(back("/emails")))
 	mux.Handle("GET "+Root+"/emails/{id}", c.signed(c.emailPage))
+	mux.Handle("GET "+Root+"/suppressions", c.signed(c.suppressionsPage))
+	mux.Handle("POST "+Root+"/suppressions", c.signed(c.addSuppression))
+	mux.Handle("POST "+Root+"/suppressions/find", c.signed(c.findSuppressions))
+	mux.Handle("POST "+Root+"/suppressions/lift", c.signed(c.liftSuppression))
+	mux.Handle("POST "+Root+"/suppressions/lift-all", c.signed(c.liftSuppressions))
+	for _, formOnly := range []string{"find", "lift", "lift-all"} {
+		mux.Handle("GET "+Root+"/suppressions/"+formOnly, c.signed(back("/suppressions")))
+	}
 	mux.Handle("GET "+Root+"/keys", c.signed(c.keysPage))
 	mux.Handle("POST "+Root+"/keys", c.signed(c.createKey))
 	mux.Handle("GET "+Root+"/keys/{prefix}/revoke", c.signed(c.revokePage))

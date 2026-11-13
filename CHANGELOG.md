@@ -54,6 +54,8 @@ Every change a user of CairnPost can notice is written here. The format is
 - The console lists the emails on record, newest first, narrowed to a
   state or a recipient, and shows what happened to each and, where content
   is kept, what it said.
+- The console shows the suppression list, finds an address on it, adds
+  one by hand and lifts one or a sending domain's, asking first.
 - An admin key bound to a sending domain reads that domain's emails only,
   at `GET /emails/{id}` as in the console.
 - An address in `from` or `to` longer than 320 bytes is refused with a 422.

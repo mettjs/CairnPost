@@ -137,3 +137,76 @@ func TestLiftAllIsOneDomainsAndCanBeOneReasons(t *testing.T) {
 		t.Fatalf("another domain's stay: %+v", left)
 	}
 }
+
+// A key bound to a sending domain manages that domain's suppressions:
+// named or not, and never another's.
+func TestAKeyBoundToADomainIsKeptToIt(t *testing.T) {
+	ctx, svc := context.Background(), suppress.New(memstore.New())
+	svc.Add(ctx, "a.example.com", "ana@example.org", "")
+	svc.Add(ctx, "b.example.com", "ana@example.org", "")
+	svc.Add(ctx, "b.example.com", "bo@example.org", "")
+	ours, all := svc.For("a.example.com"), svc.For("")
+	if page, _, err := ours.List(ctx, "", "", 10); err != nil || len(page) != 1 || page[0].Domain != "a.example.com" {
+		t.Fatalf("its list: %+v %v", page, err)
+	}
+	if page, _, err := ours.List(ctx, " A.Example.com ", "", 10); err != nil || len(page) != 1 {
+		t.Fatalf("its list, named: %+v %v", page, err)
+	}
+	if page, _, _ := all.List(ctx, "", "", 10); len(page) != 3 {
+		t.Fatalf("a key bound to none lists %d of 3", len(page))
+	}
+	for what, call := range map[string]func() error{
+		"list":     func() error { _, _, err := ours.List(ctx, "b.example.com", "", 10); return err },
+		"add":      func() error { _, _, err := ours.Add(ctx, "b.example.com", "cy@example.org", ""); return err },
+		"lift":     func() error { return ours.Lift(ctx, "b.example.com", "bo@example.org") },
+		"lift all": func() error { _, err := ours.LiftAll(ctx, "b.example.com", ""); return err },
+	} {
+		if err := call(); !errors.Is(err, suppress.ErrDomain) {
+			t.Errorf("%s of another domain: %v", what, err)
+		}
+	}
+	// An address is found under the key a send looks it up under.
+	if found, err := ours.Of(ctx, "", "ANA@Example.org"); err != nil || len(found) != 1 || found[0].Domain != "a.example.com" {
+		t.Fatalf("an address, for a bound key: %+v %v", found, err)
+	}
+	if found, err := all.Of(ctx, "", "Ana@example.org"); err != nil || len(found) != 2 || found[0].Domain != "a.example.com" {
+		t.Fatalf("an address, for any domain: %+v %v", found, err)
+	}
+	if found, err := all.Of(ctx, "", "nobody@example.org"); err != nil || len(found) != 0 {
+		t.Fatalf("an address that is not suppressed: %+v %v", found, err)
+	}
+	if found, err := all.Of(ctx, "B.Example.com", "ana@example.org"); err != nil || len(found) != 1 || found[0].Domain != "b.example.com" {
+		t.Fatalf("an address, for one domain: %+v %v", found, err)
+	}
+	if _, err := ours.Of(ctx, "b.example.com", "ana@example.org"); !errors.Is(err, suppress.ErrDomain) {
+		t.Fatalf("an address, for another's domain: %v", err)
+	}
+	// An address no list could hold is not suppressed, and is no error.
+	for _, odd := range []string{" ", "a\x00b@example.org", "a\xffb@example.org"} {
+		if found, err := all.Of(ctx, "", odd); err != nil || len(found) != 0 {
+			t.Fatalf("%q: %+v %v", odd, found, err)
+		}
+	}
+	// What a call would act on is checked without reading anything.
+	var invalid *suppress.Invalid
+	for asked, want := range map[string]string{"": "a.example.com", " A.Example.com ": "a.example.com"} {
+		if got, err := ours.Domain(asked); err != nil || got != want {
+			t.Errorf("a bound key asking for %q acts on %q: %v", asked, got, err)
+		}
+	}
+	if got, err := all.Domain(""); err != nil || got != "" {
+		t.Errorf("a key bound to none, naming none: %q %v", got, err)
+	}
+	if _, err := ours.Domain("b.example.com"); !errors.Is(err, suppress.ErrDomain) {
+		t.Errorf("another's domain: %v", err)
+	}
+	if _, err := all.Domain("ana@example.org"); !errors.As(err, &invalid) || invalid.Field != "domain" {
+		t.Errorf("an address where a domain goes: %v", err)
+	}
+	if n, err := ours.LiftAll(ctx, "", ""); err != nil || n != 1 {
+		t.Fatalf("lifting all of its own, unnamed: %d %v", n, err)
+	}
+	if left, _, _ := all.List(ctx, "", "", 10); len(left) != 2 {
+		t.Fatalf("%d left of another domain's 2", len(left))
+	}
+}

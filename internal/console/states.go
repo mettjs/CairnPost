@@ -30,6 +30,31 @@ func wordsOf(state string) stateWords {
 	return stateWords{Label: state, Tone: "off"}
 }
 
+// reasons has words for every reason an address is suppressed for: as a
+// label, and as the end of "because ...".
+var reasons = map[string][2]string{
+	store.ReasonBounce:    {"Bounced for good", "an email to it bounced for good"},
+	store.ReasonComplaint: {"Marked as spam", "its owner marked an email as spam"},
+	store.ReasonManual:    {"Added by hand", "someone added it by hand"},
+}
+
+// why names a reason; one this console does not know by its own name.
+func why(reason string) string {
+	if w, known := reasons[reason]; known {
+		return w[0]
+	}
+	return reason
+}
+
+// because ends the sentence "suppressed because ..." for a reason; one
+// this console does not know is named plainly.
+func because(reason string) string {
+	if w, known := reasons[reason]; known {
+		return w[1]
+	}
+	return "of " + reason
+}
+
 // happened names a kind of event. Each kind moves an email to a state,
 // and is named as that state is.
 func happened(kind string) string {

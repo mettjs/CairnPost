@@ -1,10 +1,10 @@
 package console
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store"
@@ -26,18 +26,6 @@ type emailsView struct {
 	// says this is not the first.
 	Older string
 	Paged bool
-}
-
-// found answers the address the list is narrowed to, "" for none. It is
-// kept with the session and not in the page's URL, so that no proxy's
-// log and no browser's history holds whom this server wrote to, and it
-// ends when the session does.
-func (c *console) found(r *http.Request) (string, error) {
-	held, err := r.Cookie(cookie)
-	if err != nil {
-		return "", nil
-	}
-	return c.Sessions.LookingFor(r.Context(), held.Value)
 }
 
 func (c *console) emailsPage(w http.ResponseWriter, r *http.Request) {
@@ -81,35 +69,18 @@ func (c *console) emailsShown(w http.ResponseWriter, r *http.Request, code int, 
 // findEmails narrows the list: to an address, kept with the session, and
 // to a state, kept in the URL. An empty form shows every email again.
 func (c *console) findEmails(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	if err := r.ParseForm(); err != nil {
-		// More than a form of this page can hold: not read as an empty one.
-		c.emailsShown(w, r, http.StatusUnprocessableEntity, emailsView{
-			Problem: `Give one whole address, such as "ana@example.org".`}, "")
+	if !form(w, r) {
+		c.emailsShown(w, r, http.StatusUnprocessableEntity, emailsView{Problem: notAnAddress}, "")
 		return
 	}
-	typed, state := strings.TrimSpace(r.PostFormValue("to")), r.PostFormValue("state")
+	state := r.PostFormValue("state")
 	if r.PostFormValue("clear") != "" {
-		typed, state = "", ""
+		state = ""
 	}
-	to := ""
-	if typed != "" {
-		var err error
-		if to, err = mail.Recipient(typed); err != nil {
-			// What was typed is shown again only if it is short enough
-			// to have been an address mistyped.
-			typed = strings.ToValidUTF8(typed, "")
-			if len(typed) > 400 {
-				typed = ""
-			}
-			c.emailsShown(w, r, http.StatusUnprocessableEntity, emailsView{State: state, Typed: typed,
-				Problem: `Give one whole address, such as "ana@example.org".`}, "")
-			return
-		}
-	}
-	held, err := r.Cookie(cookie)
-	if err == nil {
-		err = c.Sessions.LookFor(r.Context(), held.Value, to)
+	typed, err := c.look(r)
+	if errors.Is(err, errNotAnAddress) {
+		c.emailsShown(w, r, http.StatusUnprocessableEntity, emailsView{State: state, Typed: typed, Problem: notAnAddress}, "")
+		return
 	}
 	if err != nil {
 		c.Log.Error("console: what to look for could not be kept", "error", err)
