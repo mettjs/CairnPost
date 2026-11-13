@@ -34,7 +34,10 @@ var helpers = template.FuncMap{
 	"meaning":  func(state string) string { return wordsOf(state).Meaning },
 	"tone":     func(state string) string { return wordsOf(state).Tone },
 	"happened": happened,
-	"stateOf":  func(kind string) string { return store.StateOf[kind] },
+	// A reason an address is suppressed for, as a label and in a sentence.
+	"why":     why,
+	"because": because,
+	"stateOf": func(kind string) string { return store.StateOf[kind] },
 }
 
 // parse reads every page at start: a template that does not parse stops

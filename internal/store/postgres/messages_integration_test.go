@@ -91,3 +91,39 @@ func TestMessagesAreListedNewestFirstAndNarrowed(t *testing.T) {
 		same("in state "+state, list(store.MessageQuery{Recipient: to, Domain: domain, State: state, Before: ids[2]})[:1], ids[1])
 	}
 }
+
+// An address's suppressions in force are found by the address alone: for
+// every sending domain, in order, or for one.
+func TestAnAddressesSuppressionsAreFound(t *testing.T) {
+	ctx, db := context.Background(), open(t)
+	k := key(t, db)
+	tail := k.ID[len(k.ID)-12:]
+	address, a, b := "ana-"+tail+"@example.org", "a"+tail+".example.com", "b"+tail+".example.com"
+	for _, s := range []store.Suppression{
+		{Domain: b, Address: address, Reason: store.ReasonManual, Note: "second"},
+		{Domain: a, Address: address, Reason: store.ReasonManual, Note: "first"},
+		{Domain: a, Address: "bo-" + tail + "@example.org", Reason: store.ReasonManual},
+	} {
+		if added, err := db.Suppress(ctx, s); err != nil || !added {
+			t.Fatal(err)
+		}
+	}
+	found, err := db.SuppressionsOf(ctx, "", address)
+	if err != nil || len(found) != 2 || found[0].Domain != a || found[1].Domain != b || found[0].Note != "first" ||
+		found[0].Reason != store.ReasonManual || found[0].CreatedAt.IsZero() {
+		t.Fatalf("for every domain: %+v %v", found, err)
+	}
+	if found, err = db.SuppressionsOf(ctx, b, address); err != nil || len(found) != 1 || found[0].Domain != b {
+		t.Fatalf("for one domain: %+v %v", found, err)
+	}
+	// One that was lifted is no longer in force.
+	if err := db.Unsuppress(ctx, a, address); err != nil {
+		t.Fatal(err)
+	}
+	if found, err = db.SuppressionsOf(ctx, "", address); err != nil || len(found) != 1 || found[0].Domain != b {
+		t.Fatalf("after a lift: %+v %v", found, err)
+	}
+	if found, err = db.SuppressionsOf(ctx, "", "nobody-"+tail+"@example.org"); err != nil || len(found) != 0 {
+		t.Fatalf("an address that is not suppressed: %+v %v", found, err)
+	}
+}

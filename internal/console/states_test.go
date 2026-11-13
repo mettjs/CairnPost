@@ -27,3 +27,18 @@ func TestEveryStateHasWords(t *testing.T) {
 		t.Errorf("a state this console does not know: %+v", w)
 	}
 }
+
+// Every reason an address is suppressed for has words of its own.
+func TestEveryReasonHasWords(t *testing.T) {
+	if len(reasons) != len(store.Reasons) {
+		t.Fatalf("%d reasons have words, of %d", len(reasons), len(store.Reasons))
+	}
+	for _, reason := range store.Reasons {
+		if w := reasons[reason]; w[0] == "" || w[1] == "" || why(reason) != w[0] || because(reason) != w[1] {
+			t.Errorf("%s: %q", reason, w)
+		}
+	}
+	if why("later") != "later" || because("later") != "of later" {
+		t.Errorf("a reason this console does not know: %q, %q", why("later"), because("later"))
+	}
+}

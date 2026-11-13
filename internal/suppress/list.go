@@ -16,7 +16,7 @@ func (s *Service) List(ctx context.Context, domain, cursor string, limit int) ([
 		limit = DefaultLimit
 	}
 	if limit > MaxLimit {
-		return nil, "", &Invalid{fmt.Sprintf(`"limit" must be at most %d.`, MaxLimit)}
+		return nil, "", &Invalid{"limit", fmt.Sprintf(`"limit" must be at most %d.`, MaxLimit)}
 	}
 	if domain != "" {
 		var err error
@@ -29,7 +29,7 @@ func (s *Service) List(ctx context.Context, domain, cursor string, limit int) ([
 		raw, err := base64.RawURLEncoding.DecodeString(cursor)
 		d, a, cut := strings.Cut(string(raw), "\x00")
 		if err != nil || !cut || !plain(d) || !plain(a) {
-			return nil, "", &Invalid{`"after" is not a cursor this list gave.`}
+			return nil, "", &Invalid{"after", `"after" is not a cursor this list gave.`}
 		}
 		after = &store.Suppression{Domain: d, Address: a}
 	}

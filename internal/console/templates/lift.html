@@ -1,0 +1,28 @@
+{{define "title"}}Lift a suppression{{end}}
+{{define "main"}}
+<section class="narrow">
+  {{if .Data.All}}
+  <h1>Lift {{if .Data.Reason}}the suppressions of{{else}}every suppression of{{end}} {{.Data.Domain}}?</h1>
+  <p>{{if .Data.Reason}}Every address suppressed for <code>{{.Data.Domain}}</code> because {{because .Data.Reason}}{{else}}Every address suppressed for <code>{{.Data.Domain}}</code>, for any reason,{{end}} will be sent to again. This is for the day a fault suppressed people wrongly: it cannot be undone as one step.</p>
+  <form class="actions" method="post" action="{{.Root}}/suppressions/lift-all">
+    <input type="hidden" name="domain" value="{{.Data.Domain}}">
+    <input type="hidden" name="reason" value="{{.Data.Reason}}">
+    <input type="hidden" name="in" value="{{.Data.In}}">
+    <input type="hidden" name="confirm" value="1">
+    <button class="danger" type="submit">Lift them</button>
+    <a href="{{.Data.List}}">Keep them</a>
+  </form>
+  {{else}}
+  <h1 class="long">Send to {{.Data.Address}} again?</h1>
+  <p>Emails from <code>{{.Data.Domain}}</code> will go to this address again. If one sent from now on bounces for good, or is marked as spam, the address is suppressed again.</p>
+  <form class="actions" method="post" action="{{.Root}}/suppressions/lift">
+    <input type="hidden" name="domain" value="{{.Data.Domain}}">
+    <input type="hidden" name="address" value="{{.Data.Address}}">
+    <input type="hidden" name="in" value="{{.Data.In}}">
+    <input type="hidden" name="confirm" value="1">
+    <button type="submit">Send to it again</button>
+    <a href="{{.Data.List}}">Keep it suppressed</a>
+  </form>
+  {{end}}
+</section>
+{{end}}

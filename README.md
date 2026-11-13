@@ -289,19 +289,28 @@ them at `GET /capture/emails`: for development and tests.
 The console is at `/console` on the same address as the API. Sign in with
 an admin key; a key that may only send is refused. It shows whether each
 part of the server is working, lists the emails on record and what became
-of each, and lists, makes and revokes API keys. A new key is shown once,
+of each, manages the suppression list, and lists, makes and revokes API
+keys. A new key is shown once,
 on the page that made it.
 
 - A sign-in lasts `CAIRNPOST_CONSOLE_SESSION` (12 hours), ends when you
   sign out, and ends at once if the key is revoked. Make the setting
   shorter and the sign-ins older than it end too.
 - An admin key bound to a sending domain sees, makes and revokes that
-  domain's keys only, and sees that domain's emails only.
+  domain's keys only, and sees that domain's emails and suppressions only.
 - Emails are listed newest first, a hundred to a page, and can be narrowed
   to a state and to one recipient. The address you look for is kept with
   your session on the server, not in the page's address, so it is in no
   proxy's log and not in the browser's history, and it is forgotten when
   the session ends. The list never shows a subject.
+- The suppression list shows who is not sent to and why, with the email
+  it happened to: the first 500 in order of sending domain and address,
+  narrowed to a domain or an address (`cairnpost suppressions list` on
+  the server shows them all). An address is suppressed by hand or sent to again from
+  there, and a sending domain's suppressions can be lifted together; both
+  ask first. Looking for an address narrows the emails and the
+  suppressions alike, so one search answers "was it sent, did it arrive,
+  is it blocked".
 - An email's page shows what happened to it and, where
   `CAIRNPOST_CONTENT_RETENTION` keeps it, what it said: as the text it was
   written in, never drawn as a mail program would.

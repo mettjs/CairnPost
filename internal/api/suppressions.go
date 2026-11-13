@@ -24,21 +24,10 @@ func viewOf(s store.Suppression) suppressionView {
 	return suppressionView{s.Domain, s.Address, s.Reason, s.MessageID, s.Note, s.CreatedAt.UTC()}
 }
 
-// errOtherDomain is a key bound to one sending domain asking about another.
-var errOtherDomain = errors.New("api: the key is bound to another sending domain")
-
-// domainFor is the domain a caller may act on: the one asked for, which a
-// key bound to a domain may only be its own. A bound key that names none
-// gets its own.
-func domainFor(r *http.Request, asked string) (string, error) {
-	bound := callerOf(r).key.Domain
-	switch {
-	case bound == "":
-		return asked, nil
-	case asked == "" || store.Fold(asked) == bound:
-		return bound, nil
-	}
-	return "", errOtherDomain
+// suppressions is the list as the caller's key may use it: a key bound
+// to a sending domain manages that domain's and no other's.
+func (a *app) suppressions(r *http.Request) suppress.Scoped {
+	return a.Suppress.For(callerOf(r).key.Domain)
 }
 
 // failSuppress answers a suppression request that was not carried out.
@@ -49,7 +38,7 @@ func (a *app) failSuppress(w http.ResponseWriter, err error) {
 		fail(w, http.StatusUnprocessableEntity, "validation_error", invalid.Reason)
 	case errors.Is(err, store.ErrNotFound):
 		fail(w, http.StatusNotFound, "not_found", "That address is not suppressed for that domain.")
-	case errors.Is(err, errOtherDomain):
+	case errors.Is(err, suppress.ErrDomain):
 		fail(w, http.StatusForbidden, "domain_not_allowed",
 			"This API key manages the suppressions of its own sending domain only.")
 	default:
@@ -67,12 +56,7 @@ func (a *app) listSuppressions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	domain, err := domainFor(r, q.Get("domain"))
-	if err != nil {
-		a.failSuppress(w, err)
-		return
-	}
-	page, next, err := a.Suppress.List(r.Context(), domain, q.Get("after"), limit)
+	page, next, err := a.suppressions(r).List(r.Context(), q.Get("domain"), q.Get("after"), limit)
 	if err != nil {
 		a.failSuppress(w, err)
 		return
@@ -99,12 +83,7 @@ func (a *app) addSuppression(w http.ResponseWriter, r *http.Request) {
 	if !a.body(w, r, &body, `The body must be JSON with "domain" and "address"; "note" is optional.`) {
 		return
 	}
-	domain, err := domainFor(r, body.Domain)
-	if err != nil {
-		a.failSuppress(w, err)
-		return
-	}
-	s, added, err := a.Suppress.Add(r.Context(), domain, body.Address, body.Note)
+	s, added, err := a.suppressions(r).Add(r.Context(), body.Domain, body.Address, body.Note)
 	if err != nil {
 		a.failSuppress(w, err)
 		return

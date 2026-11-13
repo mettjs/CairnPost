@@ -21,16 +21,12 @@ func (a *app) liftSuppressions(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUnprocessableEntity, "validation_error", shape)
 		return
 	}
-	domain, err := domainFor(r, body.Domain)
-	if err != nil {
-		a.failSuppress(w, err)
-		return
-	}
-	lifted := 1
+	lifted, list := 1, a.suppressions(r)
+	var err error
 	if body.All {
-		lifted, err = a.Suppress.LiftAll(r.Context(), domain, body.Reason)
+		lifted, err = list.LiftAll(r.Context(), body.Domain, body.Reason)
 	} else {
-		err = a.Suppress.Lift(r.Context(), domain, body.Address)
+		err = list.Lift(r.Context(), body.Domain, body.Address)
 	}
 	if err != nil {
 		a.failSuppress(w, err)

@@ -95,20 +95,42 @@ func (db *DB) ListSuppressions(ctx context.Context, domain string, after *store.
 		from = *after
 	}
 	rows, err := db.pool.Query(ctx, `
-		SELECT domain, address, reason, coalesce(message_id::text, ''), coalesce(note, ''), created_at
+		SELECT `+suppressionColumns+`
 		FROM suppressions
 		WHERE lifted_at IS NULL AND ($1 = '' OR domain = $1) AND (domain, address) > ($2, $3)
 		ORDER BY domain, address LIMIT $4`, store.Fold(domain), from.Domain, from.Address, limit)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list suppressions: %w", err)
 	}
-	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (store.Suppression, error) {
-		var s store.Suppression
-		err := row.Scan(&s.Domain, &s.Address, &s.Reason, &s.MessageID, &s.Note, &s.CreatedAt)
-		return s, err
-	})
+	out, err := pgx.CollectRows(rows, scanSuppression)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list suppressions: %w", err)
 	}
 	return out, nil
+}
+
+// SuppressionsOf implements store.Suppressions. An address has a row for
+// each sending domain at most, so nothing limits the answer.
+func (db *DB) SuppressionsOf(ctx context.Context, domain, address string) ([]store.Suppression, error) {
+	sql, args := `SELECT `+suppressionColumns+` FROM suppressions WHERE lifted_at IS NULL AND address = $1`, []any{store.Fold(address)}
+	if domain != "" {
+		sql, args = sql+` AND domain = $2`, append(args, store.Fold(domain))
+	}
+	rows, err := db.pool.Query(ctx, sql+` ORDER BY domain`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: find an address's suppressions: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, scanSuppression)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: find an address's suppressions: %w", err)
+	}
+	return out, nil
+}
+
+const suppressionColumns = `domain, address, reason, coalesce(message_id::text, ''), coalesce(note, ''), created_at`
+
+func scanSuppression(row pgx.CollectableRow) (store.Suppression, error) {
+	var s store.Suppression
+	err := row.Scan(&s.Domain, &s.Address, &s.Reason, &s.MessageID, &s.Note, &s.CreatedAt)
+	return s, err
 }

@@ -1,0 +1,104 @@
+{{define "title"}}Suppressions{{end}}
+{{define "main"}}
+<h1>Suppressions</h1>
+<p class="lede">Addresses this server will not send to. One is added when a receiving server refuses it for good or its owner marks an email as spam, each for the sending domain it happened to.{{if .Data.Bound}} You are signed in with a key that manages <code>{{.Data.Bound}}</code>, so you see that domain's only.{{end}}</p>
+
+<section aria-label="Narrow the list">
+  {{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
+  <form class="row find" method="post" action="{{.Root}}/suppressions/find">
+    <div class="field">
+      <label for="to">Address</label>
+      <input id="to" name="to" value="{{if .Data.Typed}}{{.Data.Typed}}{{else}}{{.Data.To}}{{end}}" spellcheck="false" autocapitalize="off" autocomplete="off" inputmode="email">
+      <p class="hint">A whole address. Leave empty for any.</p>
+    </div>
+    <div class="field">
+      <label for="in">Sending domain</label>
+      {{if .Data.Bound}}<input id="in" name="domain" value="{{.Data.Bound}}" readonly>
+      {{else}}<input id="in" name="domain" value="{{if .Data.TypedDomain}}{{.Data.TypedDomain}}{{else}}{{.Data.Domain}}{{end}}" spellcheck="false" autocapitalize="off">{{end}}
+    </div>
+    <button type="submit">Show</button>
+    {{if or .Data.To (and .Data.Domain (not .Data.Bound))}}<button class="quiet" type="submit" name="clear" value="1">Show all</button>{{end}}
+  </form>
+</section>
+
+<section aria-labelledby="list">
+  <h2 id="list">{{if .Data.To}}Suppressions of <code>{{.Data.To}}</code>{{else}}Suppressed addresses{{end}}{{if .Data.Domain}} for <code>{{.Data.Domain}}</code>{{end}}</h2>
+  {{if .Data.Unread}}
+  <p class="problem" role="alert">The suppressions could not be read. Reload the page to try again.</p>
+  {{else if not .Data.List}}
+  <p class="empty">{{if .Data.To}}This address is not suppressed{{if .Data.Domain}} for that domain{{end}}: emails to it are sent. <a href="{{.Root}}/emails">See the emails sent to it</a>.{{else if .Data.Domain}}No address is suppressed for that domain.{{else}}No address is suppressed.{{end}}</p>
+  {{else}}
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="list">
+    <table>
+      <thead><tr><th>Address</th><th>Sending domain</th><th>Why</th><th>Since</th><th>Note</th><th><span class="sr">Actions</span></th></tr></thead>
+      <tbody>
+      {{range .Data.List}}
+      <tr>
+        <td data-label="Address">{{.Address}}</td>
+        <td data-label="Sending domain"><code>{{.Domain}}</code></td>
+        <td data-label="Why">{{why .Reason}}{{if .MessageID}} <a class="by" href="{{$.Root}}/emails/{{.MessageID}}">the email it happened to</a>{{end}}</td>
+        <td data-label="Since"><time datetime="{{stamp .CreatedAt}}" title="{{when .CreatedAt}}">{{day .CreatedAt}}</time></td>
+        <td data-label="Note" class="wrap">{{.Note}}</td>
+        <td class="act">
+          <form method="post" action="{{$.Root}}/suppressions/lift">
+            <input type="hidden" name="domain" value="{{.Domain}}">
+            <input type="hidden" name="address" value="{{.Address}}">
+            <input type="hidden" name="in" value="{{$.Data.Domain}}">
+            <button class="link" type="submit">Lift</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{if .Data.To}}<p class="hint"><a href="{{.Root}}/emails">See the emails sent to this address</a>.</p>{{end}}
+  {{if .Data.More}}<p class="hint">These are the first {{.Data.Shown}}, in order of sending domain and address. Narrow the list, or run <code>cairnpost suppressions list</code> on the server for them all.</p>{{end}}
+  {{end}}
+</section>
+
+<section aria-labelledby="add">
+  <h2 id="add">Suppress an address</h2>
+  {{if .Data.AddProblem}}<p class="problem" role="alert">{{.Data.AddProblem}}</p>{{end}}
+  <form class="row" method="post" action="{{.Root}}/suppressions">
+    <input type="hidden" name="in" value="{{.Data.Domain}}">
+    <div class="field">
+      <label for="address">Address</label>
+      <input id="address" name="address" value="{{.Data.Add.Address}}" required spellcheck="false" autocapitalize="off" autocomplete="off" inputmode="email">
+    </div>
+    <div class="field">
+      <label for="domain">Sending domain</label>
+      {{if .Data.Bound}}<input id="domain" name="domain" value="{{.Data.Bound}}" readonly>
+      {{else}}<input id="domain" name="domain" value="{{.Data.Add.Domain}}" required spellcheck="false" autocapitalize="off">{{end}}
+    </div>
+    <div class="field">
+      <label for="note">Note</label>
+      <input id="note" name="note" value="{{.Data.Add.Note}}" maxlength="500">
+      <p class="hint">Optional. Why, for whoever reads the list later.</p>
+    </div>
+    <button type="submit">Suppress</button>
+  </form>
+</section>
+
+<section aria-labelledby="all">
+  <h2 id="all">Lift a domain's suppressions</h2>
+  <p class="lede">For the day a fault in a domain's setup, or in the mail provider, suppressed people wrongly. You are asked to confirm.</p>
+  {{if .Data.LiftProblem}}<p class="problem" role="alert">{{.Data.LiftProblem}}</p>{{end}}
+  <form class="row find" method="post" action="{{.Root}}/suppressions/lift-all">
+    <input type="hidden" name="in" value="{{.Data.Domain}}">
+    <div class="field">
+      <label for="of">Sending domain</label>
+      {{if .Data.Bound}}<input id="of" name="domain" value="{{.Data.Bound}}" readonly>
+      {{else}}<input id="of" name="domain" value="{{.Data.Lift.Domain}}" required spellcheck="false" autocapitalize="off">{{end}}
+    </div>
+    <div class="field">
+      <label for="reason">Suppressed because</label>
+      <select id="reason" name="reason">
+        <option value="">Any reason</option>
+        {{range .Data.Reasons}}<option value="{{.}}" {{if eq . $.Data.Lift.Reason}}selected{{end}}>{{why .}}</option>{{end}}
+      </select>
+    </div>
+    <button class="quiet" type="submit">Lift them</button>
+  </form>
+</section>
+{{end}}

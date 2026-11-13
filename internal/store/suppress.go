@@ -76,4 +76,7 @@ type Suppressions interface {
 	// of domain and address, of one domain or of all (""), starting after a
 	// row.
 	ListSuppressions(ctx context.Context, domain string, after *Suppression, limit int) ([]Suppression, error)
+	// SuppressionsOf answers the suppressions in force of one address,
+	// in order of domain: of one domain or of all ("").
+	SuppressionsOf(ctx context.Context, domain, address string) ([]Suppression, error)
 }

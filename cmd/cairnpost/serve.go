@@ -155,7 +155,7 @@ func serve(ctx context.Context) error {
 		if captured != nil {
 			eventsOff = "None to read: this driver keeps emails and sends them to nobody."
 		}
-		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Sessions: session.New(db, cfg.Console.Session),
+		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppress.New(db), Sessions: session.New(db, cfg.Console.Session),
 			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, EventsOff: eventsOff,
 			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP, Log: log})
 		both.Handle(console.Root, pages)

@@ -15,9 +15,10 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
-// Invalid is a request that cannot be carried out as it is. Reason is a
-// whole sentence saying what it must be.
-type Invalid struct{ Reason string }
+// Invalid is a request that cannot be carried out as it is. Field names
+// the part at fault as the API names it; Reason is a whole sentence
+// saying what it must be.
+type Invalid struct{ Field, Reason string }
 
 func (e *Invalid) Error() string { return "suppress: " + e.Reason }
 
@@ -41,6 +42,11 @@ func plain(s string) bool {
 	return utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
 }
 
+// kept says whether text can be a row's key at all: whatever a send was
+// let through with, which is wider than plain. What the list can hold,
+// it can show and lift.
+func kept(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
+
 // domainOf answers a sending domain as the list keeps it. Any domain an
 // email can be sent from must pass, so only what can be no domain at all
 // is refused.
@@ -49,7 +55,7 @@ func domainOf(domain string) (string, error) {
 	ok := plain(domain)
 	domain = store.Fold(domain)
 	if !ok || domain == "" || len(domain) > maxDomain || strings.ContainsAny(domain, "@ ") {
-		return "", &Invalid{`"domain" must be the sending domain the suppression holds for, such as "mail.example.com".`}
+		return "", &Invalid{"domain", `"domain" must be the sending domain the suppression holds for, such as "mail.example.com".`}
 	}
 	return domain, nil
 }
@@ -63,11 +69,11 @@ func (s *Service) Add(ctx context.Context, domain, addr, note string) (store.Sup
 	}
 	bare, ok := address.Bare(addr)
 	if !ok {
-		return store.Suppression{}, false, &Invalid{`"address" must be a bare email address, such as "ana@example.org".`}
+		return store.Suppression{}, false, &Invalid{"address", `"address" must be a bare email address, such as "ana@example.org".`}
 	}
 	note = strings.TrimSpace(note)
 	if len(note) > MaxNote || !plain(note) {
-		return store.Suppression{}, false, &Invalid{fmt.Sprintf(`"note" must be one line of at most %d bytes.`, MaxNote)}
+		return store.Suppression{}, false, &Invalid{"note", fmt.Sprintf(`"note" must be one line of at most %d bytes.`, MaxNote)}
 	}
 	sup := store.Suppression{Domain: domain, Address: store.Fold(bare), Reason: store.ReasonManual, Note: note}
 	added, err := s.store.Suppress(ctx, sup)
@@ -89,8 +95,8 @@ func (s *Service) Lift(ctx context.Context, domain, addr string) error {
 		return err
 	}
 	typed := store.Fold(addr)
-	if typed == "" || !plain(addr) {
-		return &Invalid{`"address" must be the address as the list shows it.`}
+	if typed == "" || !kept(addr) {
+		return &Invalid{"address", `"address" must be the address as the list shows it.`}
 	}
 	tries := []string{typed}
 	if bare, ok := address.Bare(addr); ok && store.Fold(bare) != typed {
@@ -116,7 +122,7 @@ func (s *Service) LiftAll(ctx context.Context, domain, reason string) (int, erro
 		return 0, err
 	}
 	if reason != "" && !slices.Contains(store.Reasons, reason) {
-		return 0, &Invalid{`"reason" must be "bounce", "complaint" or "manual", or left out for all.`}
+		return 0, &Invalid{"reason", `"reason" must be "bounce", "complaint" or "manual", or left out for all.`}
 	}
 	n, err := s.store.UnsuppressAll(ctx, domain, reason)
 	if err != nil {

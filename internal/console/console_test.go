@@ -18,6 +18,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/session"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
+	"github.com/mettjs/cairnpost/internal/suppress"
 )
 
 // rig is a console over a store on a clock the test moves.
@@ -49,7 +50,7 @@ func newRig(t *testing.T, adjust func(*console.Deps)) *rig {
 	r.mail = mail.New(r.s, capture.New(10, func() time.Time { return r.now }),
 		mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour, InDoubtWindow: time.Minute, KeepContent: 24 * time.Hour},
 		slog.New(slog.NewTextHandler(&r.logged, nil)))
-	d := console.Deps{Keys: r.ks, Mail: r.mail, Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
+	d := console.Deps{Keys: r.ks, Mail: r.mail, Suppress: suppress.New(r.s), Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
 		EventsOff: "Not read.", Log: slog.New(slog.NewTextHandler(&r.logged, nil))}
 	if adjust != nil {
 		adjust(&d)

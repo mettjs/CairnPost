@@ -87,3 +87,18 @@ func (s *Store) ListSuppressions(_ context.Context, domain string, after *store.
 	}
 	return out, nil
 }
+
+// SuppressionsOf implements store.Suppressions.
+func (s *Store) SuppressionsOf(_ context.Context, domain, address string) ([]store.Suppression, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []store.Suppression
+	domain, address = store.Fold(domain), store.Fold(address)
+	for _, row := range s.suppressed {
+		if row.lifted == nil && row.Address == address && (domain == "" || row.Domain == domain) {
+			out = append(out, row.Suppression)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
+	return out, nil
+}
