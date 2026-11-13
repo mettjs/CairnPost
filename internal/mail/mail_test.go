@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,5 +300,26 @@ func TestAQuotedAddressIsSuppressedUnderTheFormItIsSentIn(t *testing.T) {
 	r.store.Suppress(context.Background(), store.Suppression{Domain: domain, Address: address, Reason: store.ReasonBounce})
 	if _, err := r.send(req); !errors.Is(err, mail.ErrSuppressed) {
 		t.Fatalf("a send to it: %v", err)
+	}
+}
+
+// An address longer than any server takes is refused, in either place.
+func TestAnAddressHasALongestLength(t *testing.T) {
+	r := newRig(t)
+	long := strings.Repeat("a", 300) + "@" + strings.Repeat("b", 30) + ".example.com"
+	for field, req := range map[string]mail.Request{
+		"from": {From: long, To: []string{"ana@example.org"}, Subject: "s", Text: "t"},
+		"to":   {From: "app@example.com", To: []string{long}, Subject: "s", Text: "t"},
+	} {
+		var invalid *mail.Invalid
+		if _, err := r.send(req); !errors.As(err, &invalid) || invalid.Field != field {
+			t.Errorf("%s: %v", field, err)
+		}
+	}
+	if r.drv.sends != 0 {
+		t.Fatal("something was sent")
+	}
+	if _, err := mail.Recipient(long); err == nil {
+		t.Fatal("an address too long to be one is looked for")
 	}
 }

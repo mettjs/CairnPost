@@ -62,7 +62,7 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | Call | Does |
 |---|---|
 | `POST /emails` | Send one email to one recipient. Answers `{"id": "..."}` once the provider has taken it. |
-| `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any. Where content is kept, an admin key also sees what the email said, as `content`. |
+| `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any, or its sending domain's if it is bound to one. Where content is kept, an admin key also sees what the email said, as `content`. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
 | `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
 | `POST /suppressions` | Stop sending to an address from a domain: `{"domain", "address", "note"}`. The note is optional, one line of at most 500 bytes. Admin key. |
@@ -288,14 +288,23 @@ them at `GET /capture/emails`: for development and tests.
 
 The console is at `/console` on the same address as the API. Sign in with
 an admin key; a key that may only send is refused. It shows whether each
-part of the server is working, and lists, makes and revokes API keys. A new
-key is shown once, on the page that made it.
+part of the server is working, lists the emails on record and what became
+of each, and lists, makes and revokes API keys. A new key is shown once,
+on the page that made it.
 
 - A sign-in lasts `CAIRNPOST_CONSOLE_SESSION` (12 hours), ends when you
   sign out, and ends at once if the key is revoked. Make the setting
   shorter and the sign-ins older than it end too.
 - An admin key bound to a sending domain sees, makes and revokes that
-  domain's keys only.
+  domain's keys only, and sees that domain's emails only.
+- Emails are listed newest first, a hundred to a page, and can be narrowed
+  to a state and to one recipient. The address you look for is kept with
+  your session on the server, not in the page's address, so it is in no
+  proxy's log and not in the browser's history, and it is forgotten when
+  the session ends. The list never shows a subject.
+- An email's page shows what happened to it and, where
+  `CAIRNPOST_CONTENT_RETENTION` keeps it, what it said: as the text it was
+  written in, never drawn as a mail program would.
 - A key made in the console says which key made it, and the server's log
   says who signed in, made a key or revoked one, by the keys' public
   prefixes. If a key leaks, the keys it made can be found.

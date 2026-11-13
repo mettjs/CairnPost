@@ -57,6 +57,20 @@ func (s *Service) Key(ctx context.Context, token string) (store.Key, error) {
 	return k, err
 }
 
+// LookFor keeps the address a session's owner is looking for, "" for
+// none. It ends with the session, however that ends.
+func (s *Service) LookFor(ctx context.Context, token, address string) error {
+	return s.store.LookFor(ctx, hashOf(token), address)
+}
+
+// LookingFor answers that address, "" for none.
+func (s *Service) LookingFor(ctx context.Context, token string) (string, error) {
+	if token == "" {
+		return "", nil
+	}
+	return s.store.LookingFor(ctx, hashOf(token))
+}
+
 // End ends a token's session.
 func (s *Service) End(ctx context.Context, token string) error {
 	return s.store.DeleteSession(ctx, hashOf(token))

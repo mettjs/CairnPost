@@ -141,6 +141,8 @@ type Mail interface {
 	Failed(ctx context.Context, id string) error
 	// Message answers ErrNotFound for an id no message has.
 	Message(ctx context.Context, id string) (Message, error)
+	// Messages lists messages, newest first.
+	Messages(ctx context.Context, q MessageQuery) ([]Message, error)
 	// Content answers what a message said and until when it is shown: if
 	// it was kept, its own time is not up, and it has been kept for less
 	// than keep. Nil otherwise: what is past its time is not answered

@@ -1,0 +1,56 @@
+{{define "title"}}Emails{{end}}
+{{define "main"}}
+<h1>Emails</h1>
+<p class="lede">Every email sent through this server that is still on record, newest first.{{if .Who.Domain}} You are signed in with a key that manages <code>{{.Who.Domain}}</code>, so you see that domain's emails only.{{end}}</p>
+
+<section aria-label="Narrow the list">
+  {{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
+  <form class="row find" method="post" action="{{.Root}}/emails/find">
+    <div class="field">
+      <label for="to">Sent to</label>
+      <input id="to" name="to" value="{{if .Data.Typed}}{{.Data.Typed}}{{else}}{{.Data.To}}{{end}}" spellcheck="false" autocapitalize="off" autocomplete="off" inputmode="email">
+      <p class="hint">A whole address. Leave empty for any.</p>
+    </div>
+    <div class="field">
+      <label for="state">State</label>
+      <select id="state" name="state">
+        <option value="">Any</option>
+        {{range .Data.States}}<option value="{{.}}" {{if eq . $.Data.State}}selected{{end}}>{{label .}}</option>{{end}}
+      </select>
+    </div>
+    <button type="submit">Show</button>
+    {{if or .Data.To .Data.State}}<button class="quiet" type="submit" name="clear" value="1">Show all</button>{{end}}
+  </form>
+</section>
+
+<section aria-labelledby="list">
+  <h2 id="list">{{if .Data.To}}Emails to <code>{{.Data.To}}</code>{{else if .Data.State}}{{label .Data.State}}{{else}}All emails{{end}}{{if and .Data.To .Data.State}}, {{label .Data.State}}{{end}}</h2>
+  {{if .Data.Unread}}
+  <p class="problem" role="alert">The emails could not be read. Reload the page to try again.</p>
+  {{else if not .Data.Emails}}
+  <p class="empty">{{if .Data.Paged}}There are no older emails.{{else if or .Data.To .Data.State}}No email on record matches.{{else}}No email is on record. One appears here as soon as it is sent.{{end}}</p>
+  {{else}}
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="list">
+    <table>
+      <thead><tr><th>To</th><th>From</th><th>State</th><th>Sent</th></tr></thead>
+      <tbody>
+      {{range .Data.Emails}}
+      <tr>
+        <td data-label="To"><a href="{{$.Root}}/emails/{{.ID}}">{{.Recipient}}</a></td>
+        <td data-label="From" class="wrap">{{.Sender}}</td>
+        <td data-label="State"><span class="state state-{{tone .State}}">{{label .State}}</span></td>
+        <td data-label="Sent"><time datetime="{{stamp .CreatedAt}}">{{when .CreatedAt}}</time></td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+  {{if or .Data.Older .Data.Paged}}
+  <p class="pager">
+    {{if .Data.Paged}}<a href="{{.Root}}/emails{{if .Data.State}}?state={{.Data.State}}{{end}}">Newest</a>{{end}}
+    {{if .Data.Older}}<a href="{{.Data.Older}}">Older</a>{{end}}
+  </p>
+  {{end}}
+</section>
+{{end}}

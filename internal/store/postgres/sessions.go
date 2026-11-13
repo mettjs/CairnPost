@@ -45,6 +45,28 @@ func (db *DB) SessionKey(ctx context.Context, hash []byte, ttl time.Duration) (s
 	return k, until, nil
 }
 
+// LookFor implements store.Sessions.
+func (db *DB) LookFor(ctx context.Context, hash []byte, address string) error {
+	_, err := db.pool.Exec(ctx, `UPDATE console_sessions SET looking_for = nullif($2, '') WHERE hash = $1`, hash, address)
+	if err != nil {
+		return fmt.Errorf("postgres: keep what a console session looks for: %w", err)
+	}
+	return nil
+}
+
+// LookingFor implements store.Sessions.
+func (db *DB) LookingFor(ctx context.Context, hash []byte) (string, error) {
+	var address string
+	err := db.pool.QueryRow(ctx, `SELECT coalesce(looking_for, '') FROM console_sessions WHERE hash = $1`, hash).Scan(&address)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("postgres: read what a console session looks for: %w", err)
+	}
+	return address, nil
+}
+
 // DeleteSession implements store.Sessions.
 func (db *DB) DeleteSession(ctx context.Context, hash []byte) error {
 	if _, err := db.pool.Exec(ctx, `DELETE FROM console_sessions WHERE hash = $1`, hash); err != nil {

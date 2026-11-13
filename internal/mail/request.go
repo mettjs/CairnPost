@@ -37,6 +37,10 @@ const (
 	maxSubject     = 998
 	maxHeaderValue = 2048
 	maxIdemKey     = 256
+	// maxAddress is the longest address there can be: 64 bytes before
+	// the "@", 255 after. Longer is not an address any server takes, and
+	// an address is kept in indexes, which hold only so much.
+	maxAddress = 320
 )
 
 var (
@@ -78,6 +82,12 @@ func check(r Request) (checked, error) {
 	to, err := netmail.ParseAddress(r.To[0])
 	if err != nil {
 		return checked{}, &Invalid{"to", `"to" must be an address, such as "ana@example.org".`}
+	}
+	switch {
+	case len(address.Wire(from)) > maxAddress:
+		return checked{}, &Invalid{"from", `The address in "from" must be at most 320 bytes.`}
+	case len(address.Wire(to)) > maxAddress:
+		return checked{}, &Invalid{"to", `The address in "to" must be at most 320 bytes.`}
 	}
 	reply := ""
 	if r.ReplyTo != "" {

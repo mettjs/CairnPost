@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/console"
+	"github.com/mettjs/cairnpost/internal/driver/capture"
 	"github.com/mettjs/cairnpost/internal/keys"
+	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
@@ -24,11 +26,12 @@ type rig struct {
 	h      http.Handler
 	s      *memstore.Store
 	ks     *keys.Service
+	mail   *mail.Service
 	now    time.Time
 	logged bytes.Buffer
 	// admin and send are keys in full; adminKey is the admin key's record.
-	admin, send string
-	adminKey    store.Key
+	admin, send       string
+	adminKey, sendKey store.Key
 }
 
 func newRig(t *testing.T, adjust func(*console.Deps)) *rig {
@@ -40,10 +43,13 @@ func newRig(t *testing.T, adjust func(*console.Deps)) *rig {
 	if r.admin, r.adminKey, err = r.ks.Create(context.Background(), "ops", store.ScopeAdmin, ""); err != nil {
 		t.Fatal(err)
 	}
-	if r.send, _, err = r.ks.Create(context.Background(), "app", store.ScopeSend, ""); err != nil {
+	if r.send, r.sendKey, err = r.ks.Create(context.Background(), "app", store.ScopeSend, ""); err != nil {
 		t.Fatal(err)
 	}
-	d := console.Deps{Keys: r.ks, Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
+	r.mail = mail.New(r.s, capture.New(10, func() time.Time { return r.now }),
+		mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour, InDoubtWindow: time.Minute, KeepContent: 24 * time.Hour},
+		slog.New(slog.NewTextHandler(&r.logged, nil)))
+	d := console.Deps{Keys: r.ks, Mail: r.mail, Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
 		EventsOff: "Not read.", Log: slog.New(slog.NewTextHandler(&r.logged, nil))}
 	if adjust != nil {
 		adjust(&d)

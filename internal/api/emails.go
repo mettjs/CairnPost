@@ -88,12 +88,13 @@ type eventView struct {
 }
 
 // getEmail is GET /emails/{id}: what became of an email, and each thing
-// that happened to it. A key sees the emails it sent; an admin key sees any.
+// that happened to it. A key sees the emails it sent; an admin key sees
+// any, or its sending domain's if it is bound to one.
 func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
-	m, events, err := a.Mail.Message(r.Context(), r.PathValue("id"))
 	c := callerOf(r)
+	m, events, err := a.Mail.MessageFor(r.Context(), c.key, r.PathValue("id"))
 	switch {
-	case errors.Is(err, store.ErrNotFound), err == nil && m.KeyID != c.key.ID && c.key.Scope != store.ScopeAdmin:
+	case errors.Is(err, store.ErrNotFound):
 		fail(w, http.StatusNotFound, "not_found", "No email has this id.")
 	case err != nil:
 		a.Log.Error("api: an email could not be read", "error", err)
@@ -101,12 +102,11 @@ func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Times are answered in UTC, whatever zone the server runs in.
 		view := emailView{m.ID, m.Sender, m.Recipient, m.State, m.CreatedAt.UTC(), m.UpdatedAt.UTC(), []eventView{}, nil}
-		// What it said is for whoever runs CairnPost: an admin key, and
-		// one bound to a sending domain for that domain's only. A send
-		// key is never shown it, not even for its own emails. If it
+		// What it said is for whoever runs CairnPost: an admin key. A
+		// send key is never shown it, not even for its own emails. If it
 		// cannot be read, the record is answered without it.
 		var said map[string]string
-		if c.key.Scope == store.ScopeAdmin && (c.key.Domain == "" || c.key.Domain == store.DomainOf(m.Sender)) {
+		if mail.ReadsContent(c.key) {
 			if view.Content, err = a.Mail.Content(r.Context(), m.ID); err != nil {
 				a.Log.Error("api: an email's kept content could not be read", "error", err)
 			}
