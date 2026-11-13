@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mettjs/cairnpost/internal/address"
 	"github.com/mettjs/cairnpost/internal/driver"
 )
 
@@ -59,13 +60,6 @@ type checked struct {
 	domain string
 }
 
-// bare is an address alone, as it is written on the wire: a local part
-// that needs quotes keeps them.
-func bare(a *netmail.Address) string {
-	s := (&netmail.Address{Address: a.Address}).String()
-	return strings.TrimSuffix(strings.TrimPrefix(s, "<"), ">")
-}
-
 // check validates a request. Its error is always an *Invalid.
 func check(r Request) (checked, error) {
 	from, err := netmail.ParseAddress(r.From)
@@ -90,7 +84,7 @@ func check(r Request) (checked, error) {
 		if err != nil {
 			return checked{}, &Invalid{"reply_to", `"reply_to" must be an address.`}
 		}
-		reply = bare(a)
+		reply = address.Wire(a)
 	}
 	switch {
 	case strings.TrimSpace(r.Subject) == "":
@@ -114,7 +108,7 @@ func check(r Request) (checked, error) {
 		}
 	}
 	return checked{
-		msg: driver.Message{From: bare(from), FromName: from.Name, To: bare(to), ReplyTo: reply,
+		msg: driver.Message{From: address.Wire(from), FromName: from.Name, To: address.Wire(to), ReplyTo: reply,
 			Subject: r.Subject, HTML: r.HTML, Text: r.Text, Headers: r.Headers},
 		domain: strings.ToLower(from.Address[strings.LastIndex(from.Address, "@")+1:]),
 	}, nil
