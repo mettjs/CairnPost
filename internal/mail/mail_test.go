@@ -176,6 +176,17 @@ func TestTheDriverGetsBareAddressesAndTheNameApart(t *testing.T) {
 	}
 }
 
+func TestASendersNameCannotCarryALineBreak(t *testing.T) {
+	r := newRig(t)
+	req := request("")
+	// An encoded word that decodes to "Evil\r\nBcc: x@example.net".
+	req.From = "=?utf-8?b?RXZpbA0KQmNjOiB4QGV4YW1wbGUubmV0?= <app@example.com>"
+	var invalid *mail.Invalid
+	if _, err := r.send(req); !errors.As(err, &invalid) || invalid.Field != "from" || r.drv.sends != 0 {
+		t.Fatalf("err %v, sends %d", err, r.drv.sends)
+	}
+}
+
 func TestARefusalFreesTheKey(t *testing.T) {
 	for _, refusal := range []error{driver.ErrRejected, driver.ErrUnavailable, &driver.Throttled{After: time.Minute}} {
 		r := newRig(t)
