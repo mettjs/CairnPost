@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  # A release is a pushed tag vX.Y.Z, or vX.Y.Z-rc.N for a pre-release.
+  # Nothing else starts one: a mistyped tag publishes nothing.
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  # A run by hand is a rehearsal: everything a release does, except pushing.
+  workflow_dispatch:
+
+# One release at a time, so two tags never race for the same image tags.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/mettjs/cairnpost
+
+jobs:
+  verify:
+    name: the commit may be released
+    runs-on: ubuntu-latest
+    env:
+      CAIRNPOST_TEST_DSN: postgres://cairnpost:cairnpost@localhost:5425/cairnpost?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: A release is cut from main
+        if: github.ref_type == 'tag'
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||
+            { echo "::error::$GITHUB_REF_NAME is not on main; a release is cut from a commit of main"; exit 1; }
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The release does not take CI's word for it: it runs the tests itself.
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./... && go vet -tags=integration ./...
+      - run: docker compose up -d --wait postgres
+      - run: go test -tags=integration -count=1 ./...
+
+  image:
+    name: build, check and push the image
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Which tags this release takes
+        id: tags
+        run: |
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            echo "version=0.0.0-rehearsal" >> "$GITHUB_OUTPUT"
+            echo "list=$IMAGE:rehearsal" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=${GITHUB_REF_NAME#v}
+          list="$IMAGE:$version"
+          case "$version" in
+            *-*) ;; # a pre-release takes its own version and nothing else
+            *)
+              # X.Y and latest follow the highest release, and never move
+              # back: a fix to an older line, or a re-run, leaves them be.
+              releases=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- - | sed 's/^v//')
+              minor=${version%.*}
+              [ "$(echo "$releases" | grep "^$minor\." | sort -V | tail -1)" = "$version" ] && list="$list,$IMAGE:$minor"
+              [ "$(echo "$releases" | sort -V | tail -1)" = "$version" ] && list="$list,$IMAGE:latest"
+              ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+          echo "tags: $list"
+      # Emulation is for running the arm64 image once, to check it; the
+      # build itself cross-compiles and emulates nothing.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: A published version is never overwritten
+        if: github.ref_type == 'tag'
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.tags.outputs.version }}" > /dev/null 2>&1; then
+            echo "::error::$IMAGE:${{ steps.tags.outputs.version }} is already published; cut a new version instead"
+            exit 1
+          fi
+      # Each platform's image is built and run before anything is pushed:
+      # a wrong image is stopped here, not found on the registry.
+      - name: Build for amd64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: cairnpost:check-amd64
+          build-args: VERSION=${{ steps.tags.outputs.version }}
+      - name: Build for arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: cairnpost:check-arm64
+          build-args: VERSION=${{ steps.tags.outputs.version }}
+      - name: Each image says the release's version
+        run: |
+          for arch in amd64 arm64; do
+            said=$(docker run --rm --platform linux/$arch cairnpost:check-$arch version)
+            built=$(docker image inspect cairnpost:check-$arch --format '{{.Architecture}}')
+            echo "$arch: version $said, built for $built"
+            test "$said" = "${{ steps.tags.outputs.version }}"
+            test "$built" = "$arch"
+          done
+      - name: Push
+        if: github.ref_type == 'tag'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+          # The binary's version is the tag's, never a constant edited by hand.
+          build-args: VERSION=${{ steps.tags.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/mettjs/CairnPost
+            org.opencontainers.image.version=${{ steps.tags.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
