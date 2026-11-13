@@ -120,6 +120,9 @@ func (s *Service) deliver(ctx context.Context, id string, m driver.Message) erro
 		}
 		return nil
 	case errors.Is(err, driver.ErrRejected), errors.Is(err, driver.ErrUnavailable):
+		// The caller is told only the kind. The cause, which is the
+		// upstream's status and nothing of the email, is for the operator.
+		s.log.Warn("mail: the upstream refused a send; nothing was sent", "message", id, "error", err)
 		if ferr := s.store.Failed(record, id); ferr != nil {
 			s.log.Error("mail: a refused send's record could not be updated", "message", id, "error", ferr)
 		}

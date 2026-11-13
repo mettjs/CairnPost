@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -33,10 +34,24 @@ type Config struct {
 	// CaptureKeep is CAIRNPOST_CAPTURE_KEEP: how many emails the capture
 	// driver holds in memory. Default 100.
 	CaptureKeep int
+	// Cloudflare is the cloudflare driver's settings.
+	Cloudflare Cloudflare
+}
+
+// Cloudflare is how the cloudflare driver signs in. Both are required when
+// it is the driver.
+type Cloudflare struct {
+	// AccountID is CAIRNPOST_CLOUDFLARE_ACCOUNT_ID, the account whose
+	// sending domains are used.
+	AccountID string
+	// APIToken is CAIRNPOST_CLOUDFLARE_API_TOKEN, a token with the Email
+	// Sending permission. A secret: read here, handed to the driver, and
+	// written nowhere.
+	APIToken string
 }
 
 // Drivers are the values CAIRNPOST_DRIVER takes.
-var Drivers = []string{"capture"}
+var Drivers = []string{"capture", "cloudflare"}
 
 // Load reads the environment through getenv and refuses what cannot run.
 func Load(getenv func(string) string) (Config, error) {
@@ -73,6 +88,14 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.IdempotencyTTL <= c.InDoubtWindow {
 		return c, fmt.Errorf("config: CAIRNPOST_IDEMPOTENCY_TTL (%s) must be longer than CAIRNPOST_IN_DOUBT_WINDOW (%s), "+
 			"or a key would be forgotten while its send is still in doubt", c.IdempotencyTTL, c.InDoubtWindow)
+	}
+	c.Cloudflare = Cloudflare{
+		AccountID: strings.TrimSpace(getenv("CAIRNPOST_CLOUDFLARE_ACCOUNT_ID")),
+		APIToken:  strings.TrimSpace(getenv("CAIRNPOST_CLOUDFLARE_API_TOKEN")),
+	}
+	if c.Driver == "cloudflare" && (c.Cloudflare.AccountID == "" || c.Cloudflare.APIToken == "") {
+		return c, fmt.Errorf("config: the cloudflare driver needs CAIRNPOST_CLOUDFLARE_ACCOUNT_ID and " +
+			"CAIRNPOST_CLOUDFLARE_API_TOKEN (a token with the Email Sending permission)")
 	}
 	keep, err := number(getenv, "CAIRNPOST_CAPTURE_KEEP", 100)
 	c.CaptureKeep = int(keep)

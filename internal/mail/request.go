@@ -5,6 +5,7 @@ import (
 	netmail "net/mail"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/mettjs/cairnpost/internal/driver"
 )
@@ -70,6 +71,11 @@ func check(r Request) (checked, error) {
 	from, err := netmail.ParseAddress(r.From)
 	if err != nil {
 		return checked{}, &Invalid{"from", `"from" must be an address: "Name <you@example.com>" or "you@example.com".`}
+	}
+	if strings.ContainsFunc(from.Name, unicode.IsControl) {
+		// A name is written into a header by whoever delivers; a line break
+		// in it would be a header of the caller's choosing.
+		return checked{}, &Invalid{"from", `The sender's name in "from" must not contain line breaks or control characters.`}
 	}
 	if len(r.To) != 1 {
 		return checked{}, &Invalid{"to", `"to" must be exactly one address: one request sends one email.`}

@@ -21,7 +21,8 @@ CREATE TABLE messages (
     sender      text NOT NULL,
     recipient   text NOT NULL,
     driver      text NOT NULL,
-    -- The upstream's own id for the message, once it took it.
+    -- The upstream's own id for the message, once it took it. NULL for a
+    -- sent message means the upstream took it without saying an id.
     upstream_id text,
     -- sending: handed to the upstream, its answer not yet known.
     -- sent:    the upstream took it.
@@ -29,8 +30,7 @@ CREATE TABLE messages (
     -- unknown: the answer was lost and the send was made again.
     state       text NOT NULL CHECK (state IN ('sending', 'sent', 'failed', 'unknown')),
     created_at  timestamptz NOT NULL DEFAULT now(),
-    updated_at  timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT messages_sent_names_its_upstream CHECK (state <> 'sent' OR upstream_id IS NOT NULL)
+    updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX messages_by_recipient ON messages (recipient, created_at DESC);

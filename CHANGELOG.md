@@ -16,6 +16,8 @@ Every change a user of CairnPost can notice is written here. The format is
   domain; stored hashed, shown once. `cairnpost keys create|list|revoke`.
 - The `capture` driver, for development: it keeps emails in memory, sends
   nothing, and shows them at `GET /capture/emails` to an admin key.
+- The `cloudflare` driver: delivery through Cloudflare Email Sending.
+- `GET /limits`: the provider's sending allowance and how much is used.
 - `cairnpost serve`, `migrate`, `send` and `version`; a Dockerfile and a
   Compose file with Postgres 18.
 

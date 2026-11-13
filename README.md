@@ -9,10 +9,10 @@ A small, self-hostable transactional email service: one HTTP API, API keys
 and idempotent sends, in front of the mail provider you choose. Written in
 Go, backed by Postgres.
 
-**Status: early.** Nothing is released yet, and the only driver is `capture`,
-which keeps emails in memory and sends them to nobody. A real provider,
-delivery events, webhooks and a suppression list come next; the
-[changelog](CHANGELOG.md) says what exists.
+**Status: early.** Nothing is released yet. It sends through Cloudflare
+Email Sending and records that the provider took each email; delivery
+events, webhooks and a suppression list come next, so it does not yet know
+about a bounce. The [changelog](CHANGELOG.md) says what exists.
 
 ## What it is, and is not
 
@@ -55,6 +55,7 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `POST /emails` | Send one email to one recipient. Answers `{"id": "..."}` once the provider has taken it. |
 | `GET /emails/{id}` | What became of an email: `sending`, `sent`, `failed` or `unknown`. A key sees its own emails; an admin key sees any. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
+| `GET /limits` | The provider's sending allowance and how much of it is used, so you know before it runs out. `quota` is `null` for a provider with none to tell. |
 | `GET /health` | Whether the service and its database are up; the driver and version. |
 
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both;
@@ -84,6 +85,35 @@ When a send fails after it was recorded (`rejected_by_upstream`, 429, 502,
 503 `upstream_unavailable`), the error carries the email's `id`, and
 `GET /emails/{id}` says what became of it.
 
+## Drivers
+
+**`cloudflare`** sends through [Cloudflare Email Sending](https://developers.cloudflare.com/email-service/).
+You need a sending domain onboarded in the Cloudflare account, and an API
+token with the *Email Sending* permission. Things worth knowing, each
+measured against the live service:
+
+- A new Cloudflare account may send 200 emails a day. `GET /limits` shows
+  the allowance and what is used.
+- A send answers as soon as Cloudflare has queued the email, typically in
+  under a second. Whether it was delivered or bounced is told later, by
+  events CairnPost does not read yet.
+- Cloudflare has no idempotency of its own: the same request twice is two
+  emails. CairnPost's `Idempotency-Key` is what makes it one.
+- Cloudflare answers the same refusal for a bad address, a header it does
+  not allow, and a sender domain the account has not onboarded. CairnPost
+  passes each on as 422 `rejected_by_upstream`. If a send from a new domain
+  is refused, check that the domain is onboarded.
+- A wrong token or account id is never the email's fault: sends answer 503,
+  nothing is dropped, and the server's log names Cloudflare's status.
+
+Not measured: what Cloudflare answers once the day's allowance is spent.
+So CairnPost does not depend on it: when a send is refused it asks
+Cloudflare for the allowance, and if that is spent the send answers 429
+with the time until it resets.
+
+**`capture`** sends nothing. It keeps the last emails in memory and shows
+them at `GET /capture/emails`: for development and tests.
+
 ## Command line
 
 ```
@@ -105,7 +135,9 @@ sending domain with `--domain`.
 | Variable | Default | Purpose |
 |---|---|---|
 | `CAIRNPOST_POSTGRES_DSN` | required | The database. Postgres 18 or later. |
-| `CAIRNPOST_DRIVER` | required | Who delivers the mail. `capture` is the only one so far. |
+| `CAIRNPOST_DRIVER` | required | Who delivers the mail: `cloudflare` or `capture`. See Drivers. |
+| `CAIRNPOST_CLOUDFLARE_ACCOUNT_ID` | required for `cloudflare` | The Cloudflare account whose sending domains are used. |
+| `CAIRNPOST_CLOUDFLARE_API_TOKEN` | required for `cloudflare` | An API token with the Email Sending permission. A secret. |
 | `CAIRNPOST_ADDR` | `:8080` | Where the API listens. |
 | `CAIRNPOST_IDEMPOTENCY_TTL` | `24h` | How long an `Idempotency-Key` is remembered. |
 | `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. |
