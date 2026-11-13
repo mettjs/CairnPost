@@ -2,8 +2,11 @@ package console
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
 // said is the cookie a sentence for the next page travels in: one word
@@ -22,6 +25,13 @@ var notices = map[string]string{
 	"suppressed-already": "That address was suppressed for that domain already. Nothing changed.",
 	"lifted":             "The suppression was lifted. Emails go to that address again.",
 	"lifted-already":     "That address was no longer suppressed. Nothing changed.",
+	"endpoint-changed":   "The endpoint was changed.",
+	"endpoint-on":        "The endpoint is on. What it was owed when it was turned off is sent now; what happened while it was off is not.",
+	"endpoint-off":       "The endpoint is off. What it is already owed waits. It is told nothing of what happens while it is off, even later.",
+	"retry-off":          "The endpoint is off, so the webhook is tried when it is turned on.",
+	"endpoint-removed":   "The endpoint was removed, with everything it was still owed.",
+	"retried":            "The webhook is being tried again now.",
+	"retry-gone":         "That webhook was delivered meanwhile, or is no longer on record. Nothing changed.",
 	"unkept": "Your browser did not keep the sign-in. The console needs https: over plain http, " +
 		"which is right only on your own machine, start the server with CAIRNPOST_CONSOLE_PLAIN_HTTP=on.",
 }
@@ -40,19 +50,38 @@ func (c *console) heard(w http.ResponseWriter, r *http.Request) string {
 		return ""
 	}
 	c.drop(w, said, false)
-	// A word may carry a count, and nothing but a count.
-	if word, count, counted := strings.Cut(held.Value, ":"); counted {
-		n, err := strconv.Atoi(count)
-		if word != "lifted-all" || err != nil || n < 0 || len(count) > 9 {
+	return flashed(held.Value)
+}
+
+// flashed is what a flash says. Most are one word the console knows. Two
+// carry what cannot be a fixed sentence, each checked for what it is: a
+// count, and what a test of an endpoint met (a status and one of the
+// webhook service's own names for a failure). Anything else says nothing.
+func flashed(flash string) string {
+	parts := strings.Split(flash, ":")
+	switch {
+	case len(parts) == 1:
+		return notices[flash]
+	case parts[0] == "lifted-all" && len(parts) == 2:
+		n, err := strconv.Atoi(parts[1])
+		switch {
+		case err != nil || n < 0 || len(parts[1]) > 9:
 			return ""
-		}
-		switch n {
-		case 0:
+		case n == 0:
 			return "Nothing was lifted: no address was suppressed for that domain and reason."
-		case 1:
+		case n == 1:
 			return "1 address can be sent to again."
 		}
 		return strconv.Itoa(n) + " addresses can be sent to again."
+	case parts[0] == "tested" && len(parts) == 3:
+		status, err := strconv.Atoi(parts[1])
+		if err != nil || status < 0 || status > 999 || (parts[2] != "" && !slices.Contains(webhook.Failures, parts[2])) {
+			return ""
+		}
+		if parts[2] == "" {
+			return "The endpoint took the test webhook. " + met(status, "")
+		}
+		return "The test webhook was not taken. " + met(status, parts[2])
 	}
-	return notices[held.Value]
+	return ""
 }

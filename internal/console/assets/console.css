@@ -104,6 +104,8 @@ h2 { font-size: 1.05rem; margin: 2.5rem 0 0.75rem; font-weight: 650; }
   padding: 0.65rem 0.85rem; border-radius: var(--radius); max-width: 65ch;
 }
 .notice { background: var(--accent-soft); margin: 0 0 1.5rem; }
+.problem a { color: inherit; white-space: nowrap; }
+main > .problem { margin: 0 0 1.5rem; }
 .problem { background: var(--bad-soft); color: var(--bad); }
 
 /* Forms: the label above, the hint below. */
@@ -145,6 +147,20 @@ form.row {
 form.row button { margin-top: 1.55rem; }
 
 .actions { display: flex; align-items: center; gap: 1.25rem; margin-top: 1.5rem; }
+
+/* Choices: one of two, and any of several. */
+fieldset.field { border: 0; padding: 0; margin: 0 0 1rem; min-width: 0; }
+legend { font-weight: 550; font-size: 0.9rem; padding: 0; margin-bottom: 0.3rem; }
+.choice { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; font-size: 0.95rem; padding: 0.15rem 0; }
+.choice input { width: auto; min-height: 0; margin: 0; accent-color: var(--accent); }
+.choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0 1rem; margin: 0.25rem 0 0 1.5rem; }
+
+/* What can be done to the thing a page is about, in a row. */
+.row-actions { margin: 0 0 1.5rem; flex-wrap: wrap; gap: 0.75rem 1rem; }
+.row-actions form { margin: 0; }
+form.narrowing { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.9rem; }
+form.narrowing select { width: auto; }
+.once .after { margin: 0.75rem 0 0; }
 
 /* A secret shown once. */
 

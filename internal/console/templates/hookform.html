@@ -1,0 +1,20 @@
+{{define "hookfields"}}
+    <div class="field">
+      <label for="url">URL</label>
+      <input id="url" name="url" value="{{.URL}}" required spellcheck="false" autocapitalize="off" autocomplete="off" inputmode="url">
+      <p class="hint">Where the webhooks are posted, such as https://app.example.com/webhooks/mail.</p>
+    </div>
+    <fieldset class="field">
+      <legend>Hears about</legend>
+      <label class="choice"><input type="radio" name="hears" value="all" {{if .All}}checked{{end}}> Every event</label>
+      <label class="choice"><input type="radio" name="hears" value="some" {{if not .All}}checked{{end}}> Only these</label>
+      <div class="choices">
+        {{range .Types}}<label class="choice"><input type="checkbox" name="events" value="{{.Type}}" {{if .On}}checked{{end}}> <code>{{.Type}}</code></label>{{end}}
+      </div>
+    </fieldset>
+    <div class="field">
+      <label for="description">Description</label>
+      <input id="description" name="description" value="{{.Description}}">
+      <p class="hint">Optional. What listens there.</p>
+    </div>
+{{end}}

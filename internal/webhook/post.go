@@ -26,6 +26,9 @@ const (
 	FailOther   = "other"
 )
 
+// Failures is every reason a try can fail for.
+var Failures = []string{FailTimeout, FailRefused, FailDNS, FailTLS, FailBlocked, FailStatus, FailOther}
+
 // Result is what a try met: the endpoint's status, 0 for none, and why it
 // failed, "" when it did not.
 type Result struct {

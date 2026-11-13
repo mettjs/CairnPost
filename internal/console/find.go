@@ -22,6 +22,12 @@ func form(w http.ResponseWriter, r *http.Request) bool {
 	return r.ParseForm() == nil
 }
 
+// typed is a field of a form as it is shown again: without the space
+// around it, and with nothing in it that is not text.
+func typed(r *http.Request, field string) string {
+	return strings.ToValidUTF8(strings.TrimSpace(r.PostFormValue(field)), "")
+}
+
 // look keeps, with the session, the address a form asks to look for: its
 // field "to", or none when the form asks to show everything. The lists
 // of emails and of suppressions are both narrowed to it, as one is

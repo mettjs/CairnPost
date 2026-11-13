@@ -140,11 +140,15 @@ func serve(ctx context.Context) error {
 	}
 
 	keyring := keys.New(db).WithMax(cfg.MaxKeys)
+	// One of each service, for the API and the console alike: so that
+	// neither can be given a rule the other lacks.
+	endpoints := webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, time.Now)
+	suppressions := suppress.New(db)
 	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention}, log)
 	var handler http.Handler = api.New(api.Deps{
-		Mail: mailer, Keys: keyring, Suppress: suppress.New(db),
-		Webhooks: webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, time.Now), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
+		Mail: mailer, Keys: keyring, Suppress: suppressions,
+		Webhooks: endpoints, Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
 		Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy,
 	})
@@ -155,7 +159,7 @@ func serve(ctx context.Context) error {
 		if captured != nil {
 			eventsOff = "None to read: this driver keeps emails and sends them to nobody."
 		}
-		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppress.New(db), Sessions: session.New(db, cfg.Console.Session),
+		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppressions, Webhooks: endpoints, Sessions: session.New(db, cfg.Console.Session),
 			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, EventsOff: eventsOff,
 			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP, Log: log})
 		both.Handle(console.Root, pages)

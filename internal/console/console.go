@@ -18,6 +18,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
 // Root is where the console is mounted.
@@ -28,6 +29,7 @@ type Deps struct {
 	Keys     *keys.Service
 	Mail     *mail.Service
 	Suppress *suppress.Service
+	Webhooks *webhook.Service
 	Sessions *session.Service
 	// Events, Sending and Pruning report whether delivery events are read,
 	// webhooks sent and old records pruned; nil for one that is off.
@@ -56,36 +58,7 @@ type console struct {
 // New returns the console's handler, to be mounted at Root.
 func New(d Deps) http.Handler {
 	c := &console{Deps: d, pages: parse(), assets: assetsVersion()}
-	mux := http.NewServeMux()
-	mux.Handle("GET "+Root+"/assets/{file}", c.assetServer())
-	mux.HandleFunc("GET "+Root+"/signin", c.signinPage)
-	mux.HandleFunc("POST "+Root+"/signin", c.signin)
-	mux.Handle("POST "+Root+"/signout", c.signed(c.signout))
-	mux.Handle("GET "+Root+"/{$}", c.signed(c.overview))
-	mux.Handle("GET "+Root+"/emails", c.signed(c.emailsPage))
-	mux.Handle("POST "+Root+"/emails/find", c.signed(c.findEmails))
-	// A refused search leaves this address in the browser: asked for
-	// again, it is the list.
-	mux.Handle("GET "+Root+"/emails/find", c.signed(back("/emails")))
-	mux.Handle("GET "+Root+"/emails/{id}", c.signed(c.emailPage))
-	mux.Handle("GET "+Root+"/suppressions", c.signed(c.suppressionsPage))
-	mux.Handle("POST "+Root+"/suppressions", c.signed(c.addSuppression))
-	mux.Handle("POST "+Root+"/suppressions/find", c.signed(c.findSuppressions))
-	mux.Handle("POST "+Root+"/suppressions/lift", c.signed(c.liftSuppression))
-	mux.Handle("POST "+Root+"/suppressions/lift-all", c.signed(c.liftSuppressions))
-	for _, formOnly := range []string{"find", "lift", "lift-all"} {
-		mux.Handle("GET "+Root+"/suppressions/"+formOnly, c.signed(back("/suppressions")))
-	}
-	mux.Handle("GET "+Root+"/keys", c.signed(c.keysPage))
-	mux.Handle("POST "+Root+"/keys", c.signed(c.createKey))
-	mux.Handle("GET "+Root+"/keys/{prefix}/revoke", c.signed(c.revokePage))
-	mux.Handle("POST "+Root+"/keys/{prefix}/revoke", c.signed(c.revokeKey))
-	mux.HandleFunc("GET "+Root, func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, Root+"/", http.StatusSeeOther)
-	})
-	mux.Handle(Root+"/", c.signed(func(w http.ResponseWriter, r *http.Request) {
-		c.fail(w, r, http.StatusNotFound, "There is no such page.")
-	}))
+	mux := c.routes()
 	// A change is a POST, and a POST from another site is refused before
 	// it is read: the session cookie alone never authorises one.
 	guard := http.NewCrossOriginProtection()

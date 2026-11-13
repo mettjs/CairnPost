@@ -61,8 +61,7 @@ func (c *console) keysPage(w http.ResponseWriter, r *http.Request) {
 // to say; its sentence is passed on.
 func (c *console) createKey(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	form := keyForm{Name: strings.ToValidUTF8(strings.TrimSpace(r.PostFormValue("name")), ""), Scope: r.PostFormValue("scope"),
-		Domain: strings.ToValidUTF8(strings.TrimSpace(r.PostFormValue("domain")), "")}
+	form := keyForm{Name: typed(r, "name"), Scope: r.PostFormValue("scope"), Domain: typed(r, "domain")}
 	refuse := func(code int, why string) { c.keysShown(w, r, code, keysView{Problem: why, Form: form}) }
 	me := who(r)
 	full, made, err := c.Keys.MakeFor(r.Context(), me.Domain, keys.Request{Name: r.PostFormValue("name"), Scope: form.Scope,

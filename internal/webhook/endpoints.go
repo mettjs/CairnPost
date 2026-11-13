@@ -15,8 +15,17 @@ import (
 )
 
 // Invalid is a request that cannot be carried out as it is. Reason is a
-// whole sentence saying what it must be.
-type Invalid struct{ Reason string }
+// whole sentence saying what it must be, naming the part at fault as the
+// API names it. Field is that part, and Must the sentence after its
+// name ("must be ..."), where the sentence begins with it: for whoever
+// names the part in other words.
+type Invalid struct{ Field, Reason, Must string }
+
+// must is an Invalid whose sentence is the field's name and what it must
+// be.
+func must(field, be string) *Invalid {
+	return &Invalid{Field: field, Reason: `"` + field + `" ` + be, Must: be}
+}
 
 func (e *Invalid) Error() string { return "webhook: " + e.Reason }
 
@@ -27,7 +36,7 @@ var ErrDomain = errors.New("webhook: the caller manages another sending domain's
 // Limits of an endpoint and of a list.
 const (
 	maxURL         = 2048
-	maxDescription = 200
+	MaxDescription = 200
 	maxDomain      = 253
 	DefaultLimit   = 50
 	MaxLimit       = 500
@@ -53,9 +62,13 @@ func NewService(s store.Webhooks, p *Poster, insecure bool, perDomain int, now f
 
 func plain(s string) bool { return utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl) }
 
-// checkURL says whether an endpoint can be sent to.
+// checkURL says whether an endpoint can be sent to. A space anywhere in
+// it is refused: a URL is kept and posted to as it is written.
 func (s *Service) checkURL(raw string) error {
 	u, err := neturl.Parse(raw)
+	if strings.ContainsFunc(raw, unicode.IsSpace) {
+		return must("url", "must not have a space in it.")
+	}
 	schemes := `"https://"`
 	if s.insecure {
 		schemes = `"https://" or "http://"`
@@ -63,11 +76,11 @@ func (s *Service) checkURL(raw string) error {
 	switch {
 	case err != nil || len(raw) > maxURL || !plain(raw) || u.Host == "" || u.Hostname() == "",
 		u.Scheme != "https" && !(s.insecure && u.Scheme == "http"):
-		return &Invalid{fmt.Sprintf(`"url" must be an address starting with %s, of at most %d bytes.`, schemes, maxURL)}
+		return must("url", fmt.Sprintf(`must be an address starting with %s, of at most %d bytes.`, schemes, maxURL))
 	case u.User != nil:
-		return &Invalid{`"url" must not carry a user name or a password. A webhook is proven by its signature.`}
+		return must("url", `must not carry a user name or a password. A webhook is proven by its signature.`)
 	case u.Fragment != "":
-		return &Invalid{`"url" must not have a fragment (the part after "#"): it is never sent.`}
+		return must("url", `must not have a fragment (the part after "#"): it is never sent.`)
 	}
 	return nil
 }
@@ -78,7 +91,7 @@ func kindsOf(types []string) ([]string, error) {
 	for _, t := range types {
 		kind := kindOf(t)
 		if kind == "" {
-			return nil, &Invalid{fmt.Sprintf(`"events" must be a list of %s, or left out for all.`, strings.Join(Types(), ", "))}
+			return nil, &Invalid{Field: "events", Reason: fmt.Sprintf(`"events" must be a list of %s, or left out for all.`, strings.Join(Types(), ", "))}
 		}
 		if !slices.Contains(kinds, kind) {
 			kinds = append(kinds, kind)
@@ -88,8 +101,8 @@ func kindsOf(types []string) ([]string, error) {
 }
 
 func checkDescription(d string) error {
-	if len(d) > maxDescription || !plain(d) {
-		return &Invalid{fmt.Sprintf(`"description" must be one line of at most %d bytes.`, maxDescription)}
+	if len(d) > MaxDescription || !plain(d) {
+		return must("description", fmt.Sprintf(`must be one line of at most %d bytes.`, MaxDescription))
 	}
 	return nil
 }
@@ -114,8 +127,9 @@ func (s *Service) Create(ctx context.Context, scope string, n New) (store.Endpoi
 		domain = scope
 	}
 	if len(domain) > maxDomain || !plain(n.Domain) || strings.ContainsAny(domain, "@ /") {
-		return store.Endpoint{}, &Invalid{`"domain" must be a sending domain, such as "mail.example.com", or left out for all.`}
+		return store.Endpoint{}, &Invalid{Field: "domain", Reason: `"domain" must be a sending domain, such as "mail.example.com", or left out for all.`}
 	}
+	n.URL = strings.TrimSpace(n.URL)
 	if err := s.checkURL(n.URL); err != nil {
 		return store.Endpoint{}, err
 	}
@@ -132,8 +146,16 @@ func (s *Service) Create(ctx context.Context, scope string, n New) (store.Endpoi
 	if errors.Is(err, store.ErrLimit) {
 		// Counted for the domain it hears about, so one domain's
 		// endpoints never stand in another's way.
-		return store.Endpoint{}, &Invalid{fmt.Sprintf("That sending domain has %d endpoints already, which is the most "+
-			"(CAIRNPOST_WEBHOOK_MAX_ENDPOINTS). Remove one first.", s.perDomain)}
+		of := "That sending domain has"
+		if domain == "" {
+			of = "Every sending domain together has"
+		}
+		many := "endpoints"
+		if s.perDomain == 1 {
+			many = "endpoint"
+		}
+		return store.Endpoint{}, &Invalid{Field: "endpoints", Reason: fmt.Sprintf("%s %d %s already, which is the most "+
+			"(CAIRNPOST_WEBHOOK_MAX_ENDPOINTS). Remove one first.", of, s.perDomain, many)}
 	}
 	if err != nil {
 		return store.Endpoint{}, fmt.Errorf("webhook: create an endpoint: %w", err)

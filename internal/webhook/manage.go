@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mettjs/cairnpost/internal/store"
@@ -47,11 +48,13 @@ func (s *Service) Update(ctx context.Context, scope, id string, c Change) (store
 	if _, err := s.Get(ctx, scope, id); err != nil {
 		return store.Endpoint{}, err
 	}
-	change := store.EndpointChange{URL: c.URL, Enabled: c.Enabled}
+	change := store.EndpointChange{Enabled: c.Enabled}
 	if c.URL != nil {
-		if err := s.checkURL(*c.URL); err != nil {
+		address := strings.TrimSpace(*c.URL)
+		if err := s.checkURL(address); err != nil {
 			return store.Endpoint{}, err
 		}
+		change.URL = &address
 	}
 	if c.Types != nil {
 		kinds, err := kindsOf(*c.Types)
@@ -97,11 +100,11 @@ func (s *Service) Deliveries(ctx context.Context, scope, id, state, cursor strin
 	}
 	switch {
 	case limit > MaxLimit:
-		return nil, "", &Invalid{fmt.Sprintf(`"limit" must be at most %d.`, MaxLimit)}
-	case state != "" && state != store.DeliveryPending && state != store.DeliveryDelivered && state != store.DeliveryFailed:
-		return nil, "", &Invalid{`"state" must be "pending", "delivered" or "failed", or left out for all.`}
+		return nil, "", &Invalid{Field: "limit", Reason: fmt.Sprintf(`"limit" must be at most %d.`, MaxLimit)}
+	case state != "" && !slices.Contains(store.DeliveryStates, state):
+		return nil, "", &Invalid{Field: "state", Reason: `"state" must be "pending", "delivered" or "failed", or left out for all.`}
 	case !plain(cursor) || len(cursor) > 64:
-		return nil, "", &Invalid{`"after" is not a cursor this list gave.`}
+		return nil, "", &Invalid{Field: "after", Reason: `"after" is not a cursor this list gave.`}
 	}
 	if _, err := s.Get(ctx, scope, id); err != nil {
 		return nil, "", err

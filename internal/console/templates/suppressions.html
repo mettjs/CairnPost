@@ -3,6 +3,9 @@
 <h1>Suppressions</h1>
 <p class="lede">Addresses this server will not send to. One is added when a receiving server refuses it for good or its owner marks an email as spam, each for the sending domain it happened to.{{if .Data.Bound}} You are signed in with a key that manages <code>{{.Data.Bound}}</code>, so you see that domain's only.{{end}}</p>
 
+{{if .Data.AddProblem}}<p class="problem" role="alert">The address was not suppressed. {{.Data.AddProblem}} <a href="#add">Go to the form</a></p>{{end}}
+{{if .Data.LiftProblem}}<p class="problem" role="alert">Nothing was lifted. {{.Data.LiftProblem}} <a href="#all">Go to the form</a></p>{{end}}
+
 <section aria-label="Narrow the list">
   {{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
   <form class="row find" method="post" action="{{.Root}}/suppressions/find">
@@ -59,7 +62,6 @@
 
 <section aria-labelledby="add">
   <h2 id="add">Suppress an address</h2>
-  {{if .Data.AddProblem}}<p class="problem" role="alert">{{.Data.AddProblem}}</p>{{end}}
   <form class="row" method="post" action="{{.Root}}/suppressions">
     <input type="hidden" name="in" value="{{.Data.Domain}}">
     <div class="field">
@@ -83,7 +85,6 @@
 <section aria-labelledby="all">
   <h2 id="all">Lift a domain's suppressions</h2>
   <p class="lede">For the day a fault in a domain's setup, or in the mail provider, suppressed people wrongly. You are asked to confirm.</p>
-  {{if .Data.LiftProblem}}<p class="problem" role="alert">{{.Data.LiftProblem}}</p>{{end}}
   <form class="row find" method="post" action="{{.Root}}/suppressions/lift-all">
     <input type="hidden" name="in" value="{{.Data.Domain}}">
     <div class="field">
