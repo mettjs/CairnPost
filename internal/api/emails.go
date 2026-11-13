@@ -41,19 +41,8 @@ type sendBody struct {
 // the mail provider has taken the email, with the email's id.
 func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 	var body sendBody
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, a.MaxBodyBytes))
-	// A field CairnPost does not know is refused, never dropped: an email
-	// sent without the cc its caller asked for is worse than no email.
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&body); err != nil {
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
-			fail(w, http.StatusRequestEntityTooLarge, "request_too_large", "The request body is larger than this server accepts.")
-			return
-		}
-		fail(w, http.StatusUnprocessableEntity, "validation_error",
-			"The body must be JSON with from, to, subject and html or text; reply_to and headers are optional. "+
-				"No other field is supported.")
+	if !a.body(w, r, &body, "The body must be JSON with from, to, subject and html or text; "+
+		"reply_to and headers are optional. No other field is supported.") {
 		return
 	}
 	c := callerOf(r)

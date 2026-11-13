@@ -187,6 +187,32 @@ func TestASendersNameCannotCarryALineBreak(t *testing.T) {
 	}
 }
 
+// A suppressed recipient is not sent to. A request that was sent before the
+// address was suppressed still answers its id: it is the same email.
+func TestASuppressedRecipientIsNotSentTo(t *testing.T) {
+	r := newRig(t)
+	before, _ := r.send(request("earlier"))
+	r.store.Suppress(context.Background(), store.Suppression{Domain: "example.com", Address: "ANA@example.org", Reason: store.ReasonBounce})
+	for _, idem := range []string{"", "new"} {
+		if _, err := r.send(request(idem)); !errors.Is(err, mail.ErrSuppressed) || r.drv.sends != 1 {
+			t.Fatalf("key %q: err %v, sends %d", idem, err, r.drv.sends)
+		}
+	}
+	if again, err := r.send(request("earlier")); err != nil || again != before {
+		t.Fatalf("a replay of what was sent before: %q %v", again, err)
+	}
+	// Another sending domain has its own list.
+	other := request("")
+	other.From = "app@other.example"
+	if _, err := r.send(other); err != nil {
+		t.Fatalf("from another domain: %v", err)
+	}
+	r.store.Unsuppress(context.Background(), "example.com", "ana@example.org")
+	if _, err := r.send(request("new")); err != nil {
+		t.Fatalf("once lifted: %v", err)
+	}
+}
+
 func TestARefusalFreesTheKey(t *testing.T) {
 	for _, refusal := range []error{driver.ErrRejected, driver.ErrUnavailable, &driver.Throttled{After: time.Minute}} {
 		r := newRig(t)
@@ -232,5 +258,46 @@ func TestRequestsThatCanNeverBeSent(t *testing.T) {
 		if _, err := r.send(req); !errors.As(err, &invalid) || invalid.Field != field || r.drv.sends != 0 {
 			t.Errorf("%s: err %v, sends %d", field, err, r.drv.sends)
 		}
+	}
+}
+
+// A key whose earlier try got no answer, retried once its recipient is
+// suppressed: nothing is sent, and the refusal carries the earlier try's
+// id, because that email may have gone. The key is then free.
+func TestASuppressedRetryOfATryInDoubtSaysWhichTry(t *testing.T) {
+	r := newRig(t)
+	r.drv.err = errors.New("connection reset")
+	first, err := r.send(request("k"))
+	if !errors.Is(err, mail.ErrInDoubt) || first == "" {
+		t.Fatalf("the first try: %q %v", first, err)
+	}
+	r.drv.err = nil
+	r.store.Suppress(context.Background(), store.Suppression{Domain: "example.com", Address: "ana@example.org", Reason: store.ReasonBounce})
+	r.now = r.now.Add(3 * time.Minute)
+	id, err := r.send(request("k"))
+	if !errors.Is(err, mail.ErrSuppressed) || id != first || r.drv.sends != 1 || r.state(t, first) != store.StateUnknown {
+		t.Fatalf("the retry: %q (want %q) %v, sends %d, state %s", id, first, err, r.drv.sends, r.state(t, first))
+	}
+	r.store.Unsuppress(context.Background(), "example.com", "ana@example.org")
+	if id, err := r.send(request("k")); err != nil || id == first {
+		t.Fatalf("once lifted, the key sends anew: %q %v", id, err)
+	}
+}
+
+// An address with a local part that needs quotes is suppressed and looked
+// up under one form, whichever path wrote it.
+func TestAQuotedAddressIsSuppressedUnderTheFormItIsSentIn(t *testing.T) {
+	r := newRig(t)
+	req := request("")
+	req.To = []string{`"Ana Maria"@example.org`}
+	id, err := r.send(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := r.store.Message(context.Background(), id)
+	domain, address := store.SuppressionKey(m.Sender, m.Recipient)
+	r.store.Suppress(context.Background(), store.Suppression{Domain: domain, Address: address, Reason: store.ReasonBounce})
+	if _, err := r.send(req); !errors.Is(err, mail.ErrSuppressed) {
+		t.Fatalf("a send to it: %v", err)
 	}
 }

@@ -21,6 +21,9 @@ const usage = `CairnPost: a small transactional email service.
   cairnpost keys create           make an API key (shown once)
   cairnpost keys list             list API keys
   cairnpost keys revoke PREFIX    end an API key
+  cairnpost suppressions list     list the addresses not sent to
+  cairnpost suppressions add      stop sending to an address
+  cairnpost suppressions remove   send to an address again
   cairnpost send                  send an email through a running server
   cairnpost version               print the version
 
@@ -70,6 +73,8 @@ func run(ctx context.Context, args []string) error {
 		return migrate(ctx)
 	case "keys":
 		return keysCommand(ctx, args[1:])
+	case "suppressions":
+		return suppressionsCommand(ctx, args[1:])
 	case "send":
 		return sendCommand(ctx, args[1:])
 	case "version":

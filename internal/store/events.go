@@ -46,6 +46,11 @@ type Event struct {
 	// name for what happened; either may be "".
 	Code, Reason string
 	At           time.Time
+	// Sender and Recipient are the email's addresses as the event gives
+	// them, "" when it does not. They are used only when no message has the
+	// event's upstream id, to suppress an address that bounced for good
+	// all the same; they are never kept with the event.
+	Sender, Recipient string
 }
 
 // Recorded is what RecordEvent did with an event.
@@ -87,7 +92,10 @@ type Events interface {
 	// RecordEvent records an event and what follows from it, in one step:
 	// either all of it is kept or none, so an event handed over twice has
 	// its effects once. An event that says the email was never sent frees
-	// the Idempotency-Key it was sent under, as a refusal at send does.
+	// the Idempotency-Key it was sent under, as a refusal at send does. A
+	// bounce for good, or a complaint, suppresses the address, also when
+	// the event answers NoMessage and names the addresses itself; such an
+	// event never brings back a suppression that was lifted.
 	RecordEvent(ctx context.Context, e Event) (Recorded, error)
 	// EventsOf is a message's events, oldest first.
 	EventsOf(ctx context.Context, messageID string) ([]Event, error)

@@ -77,12 +77,18 @@ const (
 	// sent. Only a finished send can mismatch: until then the key is in
 	// flight, whatever the request.
 	Mismatch
+	// Suppressed: the recipient is on the sending domain's suppression
+	// list, so nothing is sent. Only a send that would start is refused: a
+	// request already sent is still a Replay. If the key's earlier try was
+	// left in doubt, the claim carries that try's message id.
+	Suppressed
 )
 
 // Claim is Start's answer.
 type Claim struct {
 	Outcome Outcome
-	// ID is the message to send (Started) or the one already sent (Replay).
+	// ID is the message to send (Started), the one already sent (Replay),
+	// or an earlier try left in doubt (Suppressed), "" when there is none.
 	ID string
 	// RetryAfter is, for InFlight, how long until a retry is let through.
 	RetryAfter time.Duration
@@ -124,6 +130,7 @@ type Store interface {
 	Keys
 	Mail
 	Events
+	Suppressions
 	// Ping reports whether the store can be reached.
 	Ping(ctx context.Context) error
 }

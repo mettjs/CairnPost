@@ -100,13 +100,16 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 		h.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	const body = `{"from":"NAMEMARKQ <app@example.com>","to":"rule-one@example.org","subject":"SUBJECTMARKQ",
+	// An address of this run's own: the bounce below suppresses it, and the
+	// database outlives the run.
+	to := "rule-one-" + k.Prefix + "@example.org"
+	body := `{"from":"NAMEMARKQ <app@example.com>","to":"` + to + `","subject":"SUBJECTMARKQ",
 		"text":"TEXTMARKQ","html":"<p>HTMLMARKQ</p>","headers":{"X-Trace":"HEADERMARKQ"}}`
 	if code := send("words", body); code != 200 || len(kept.Held()) != 1 {
 		t.Fatalf("the send: %d", code)
 	}
 	// A refused request passes through validation and its error path too.
-	if code := send("words-2", strings.Replace(body, `"to":"rule-one@example.org"`, `"to":"SUBJECTMARKQ"`, 1)); code != 422 {
+	if code := send("words-2", strings.Replace(body, `"to":"`+to+`"`, `"to":"SUBJECTMARKQ"`, 1)); code != 422 {
 		t.Fatalf("the refused send: %d", code)
 	}
 	// An upstream's event carries the subject too, and a receiving server's
@@ -121,7 +124,7 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 			return
 		}
 		event := `{"type":"cf.email.sending.message.bounced","metadata":{"eventTimestamp":"2026-01-02T03:04:05Z"},` +
-			`"payload":{"eventId":"rule-one-` + upstreamID + `","messageId":"` + upstreamID + `","recipient":"rule-one@example.org",` +
+			`"payload":{"eventId":"rule-one-` + upstreamID + `","messageId":"` + upstreamID + `","recipient":"` + to + `",` +
 			`"subject":"SUBJECTMARKQ","delivery":{"smtpResponse":"DETAILMARKQ"},` +
 			`"bounce":{"type":"hard","classification":"permanent_failure","reason":"DETAILMARKQ SUBJECTMARKQ"}}}`
 		body, _ := json.Marshal(map[string]any{"success": true, "result": map[string]any{
@@ -141,7 +144,7 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 	if !strings.Contains(held, "permanent_failure") {
 		t.Fatal("the event did not reach the tables; the check proves nothing")
 	}
-	if !strings.Contains(held, "rule-one@example.org") || !strings.Contains(logged.String(), "POST /emails") {
+	if !strings.Contains(held, to) || !strings.Contains(logged.String(), "POST /emails") {
 		t.Fatal("the dump or the log is empty of this test's send; the check proves nothing")
 	}
 	secret := full[len(k.Prefix)+1:]

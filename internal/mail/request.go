@@ -9,6 +9,7 @@ import (
 
 	"github.com/mettjs/cairnpost/internal/address"
 	"github.com/mettjs/cairnpost/internal/driver"
+	"github.com/mettjs/cairnpost/internal/store"
 )
 
 // Request is a send as a caller asks for it.
@@ -110,6 +111,6 @@ func check(r Request) (checked, error) {
 	return checked{
 		msg: driver.Message{From: address.Wire(from), FromName: from.Name, To: address.Wire(to), ReplyTo: reply,
 			Subject: r.Subject, HTML: r.HTML, Text: r.Text, Headers: r.Headers},
-		domain: strings.ToLower(from.Address[strings.LastIndex(from.Address, "@")+1:]),
+		domain: store.DomainOf(from.Address),
 	}, nil
 }

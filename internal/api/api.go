@@ -12,12 +12,14 @@ import (
 	"github.com/mettjs/cairnpost/internal/driver"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
+	"github.com/mettjs/cairnpost/internal/suppress"
 )
 
 // Deps is what the API is built from.
 type Deps struct {
-	Mail *mail.Service
-	Keys *keys.Service
+	Mail     *mail.Service
+	Keys     *keys.Service
+	Suppress *suppress.Service
 	// Ping reports whether the store answers, for GET /health.
 	Ping func(context.Context) error
 	// Captured answers the emails a development driver kept instead of
@@ -45,6 +47,9 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST /emails", a.auth(false, a.sendEmail))
 	mux.Handle("GET /emails/{id}", a.auth(false, a.getEmail))
 	mux.Handle("GET /limits", a.auth(false, a.limits))
+	mux.Handle("GET /suppressions", a.auth(true, a.listSuppressions))
+	mux.Handle("POST /suppressions", a.auth(true, a.addSuppression))
+	mux.Handle("POST /suppressions/lift", a.auth(true, a.liftSuppressions))
 	if d.Captured != nil {
 		mux.Handle("GET /capture/emails", a.auth(true, a.captured))
 	}

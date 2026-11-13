@@ -67,12 +67,14 @@ func (r *rig) readerOn(s store.Events, ping func(context.Context) error) *events
 }
 
 // sent records a message the upstream took under an id, and answers ours.
-func (r *rig) sent(upstreamID string) string {
+func (r *rig) sent(upstreamID string) string { return r.sentTo(upstreamID, "ana@example.org") }
+
+func (r *rig) sentTo(upstreamID, recipient string) string {
 	r.t.Helper()
 	c, err := r.store.Start(context.Background(), store.Start{KeyID: "k", Sender: "app@example.com",
-		Recipient: "ana@example.org", Driver: "fake"})
-	if err != nil {
-		r.t.Fatal(err)
+		Recipient: recipient, Driver: "fake"})
+	if err != nil || c.Outcome != store.Started {
+		r.t.Fatalf("the send did not start: %v %v", c.Outcome, err)
 	}
 	if err := r.store.Sent(context.Background(), c.ID, upstreamID); err != nil {
 		r.t.Fatal(err)
@@ -157,11 +159,47 @@ func TestAMessageOnlyMovesForward(t *testing.T) {
 		}
 	}
 	// An email the upstream took and then would not send is no longer "sent".
-	other := r.sent("up-2")
+	other := r.sentTo("up-2", "bo@example.org") // the first address complained, and is suppressed
 	r.queue.items = []driver.Received{r.event("l", "f1", "up-2", driver.Failed)}
 	r.reader.Pass(context.Background())
 	if r.state(other) != store.StateFailed {
 		t.Fatalf("a failed email is %s", r.state(other))
+	}
+}
+
+// Only a bounce for good and a complaint suppress an address, and then for
+// the domain that sent.
+func TestOnlyAHardBounceOrAComplaintSuppresses(t *testing.T) {
+	for name, c := range map[string]struct {
+		kind      string
+		permanent bool
+		code      string
+		reason    string
+	}{
+		"a hard bounce": {driver.Bounced, true, "5.1.1", store.ReasonBounce},
+		"a complaint":   {driver.Complained, false, "", store.ReasonComplaint},
+		"a soft bounce": {driver.Bounced, false, "4.2.2", ""},
+		"a delivery":    {driver.Delivered, false, "", ""},
+		"a deferral":    {driver.Deferred, false, "", ""},
+		"a failure":     {driver.Failed, false, "", ""},
+		// Refused for good, but over the sender's standing, not the
+		// mailbox: a broken signature must not shut out everyone written to.
+		"a policy refusal": {driver.Bounced, true, "5.7.26", ""},
+	} {
+		r := newRig(t)
+		id := r.sent("up-1")
+		e := r.event("l", "e", "up-1", c.kind)
+		e.Event.Permanent, e.Event.Code = c.permanent, c.code
+		r.queue.items = []driver.Received{e, e} // handed over twice: still one suppression
+		r.reader.Pass(context.Background())
+		list, _ := r.store.ListSuppressions(context.Background(), "", nil, 10)
+		switch {
+		case c.reason == "" && len(list) != 0:
+			t.Errorf("%s suppressed %+v", name, list)
+		case c.reason != "" && (len(list) != 1 || list[0].Reason != c.reason || list[0].Domain != "example.com" ||
+			list[0].Address != "ana@example.org" || list[0].MessageID != id):
+			t.Errorf("%s: %+v", name, list)
+		}
 	}
 }
 
@@ -298,5 +336,87 @@ func TestRunStopsAndFinishesItsPass(t *testing.T) {
 	}
 	if !r.reader.Healthy() || strings.Join(r.queue.done, ",") != "l1" {
 		t.Fatalf("healthy %v, done %v", r.reader.Healthy(), r.queue.done)
+	}
+}
+
+func (r *rig) suppressed() []store.Suppression {
+	r.t.Helper()
+	list, err := r.store.ListSuppressions(context.Background(), "", nil, 10)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return list
+}
+
+func (r *rig) hardBounce(eventID, upstreamID string) driver.Received {
+	e := r.event("l", eventID, upstreamID, driver.Bounced)
+	e.Event.Permanent, e.Event.Code = true, "5.1.1"
+	return e
+}
+
+// A suppression lifted by hand stays lifted when a late event arrives about
+// an email sent before the lift; an email sent after it suppresses again.
+func TestALiftIsNotUndoneByAnOlderEmailsEvent(t *testing.T) {
+	r := newRig(t)
+	r.sent("up-1")
+	r.sent("up-2") // both sent before anything bounced
+	r.queue.items = []driver.Received{r.hardBounce("e1", "up-1")}
+	r.reader.Pass(context.Background())
+	r.now = r.now.Add(time.Minute)
+	if err := r.store.Unsuppress(context.Background(), "example.com", "ana@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	r.now = r.now.Add(time.Minute)
+	r.queue.items = []driver.Received{r.hardBounce("e2", "up-2")}
+	r.reader.Pass(context.Background())
+	if list := r.suppressed(); len(list) != 0 {
+		t.Fatalf("an email sent before the lift suppressed again: %+v", list)
+	}
+	later := r.sent("up-3")
+	r.now = r.now.Add(time.Minute)
+	r.queue.items = []driver.Received{r.hardBounce("e3", "up-3")}
+	r.reader.Pass(context.Background())
+	if list := r.suppressed(); len(list) != 1 || list[0].MessageID != later {
+		t.Fatalf("an email sent after the lift: %+v", list)
+	}
+}
+
+// A bounce for good about an email with no record here still suppresses,
+// when the event names the addresses itself.
+func TestABounceOfAnEmailWithNoRecordStillSuppresses(t *testing.T) {
+	r := newRig(t)
+	named := r.hardBounce("e1", "up-unknown")
+	named.Event.Sender, named.Event.Recipient = "app@Example.com", "Gone@example.org"
+	nameless := r.hardBounce("e2", "up-unknown-2")
+	r.queue.items = []driver.Received{named, nameless}
+	r.reader.Pass(context.Background())
+	list := r.suppressed()
+	if len(list) != 1 || list[0].Domain != "example.com" || list[0].Address != "gone@example.org" ||
+		list[0].Reason != store.ReasonBounce || list[0].MessageID != "" {
+		t.Fatalf("%+v", list)
+	}
+	if strings.Contains(r.logged.String(), "gone@") || strings.Contains(r.logged.String(), "Gone@") {
+		t.Fatalf("the log names the address: %s", r.logged.String())
+	} // When that email was sent is not known, so it never undoes a lift;
+	// and when a recorded email then bounces, the suppression names it.
+	r.now = r.now.Add(time.Minute)
+	if err := r.store.Unsuppress(context.Background(), "example.com", "gone@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	r.now = r.now.Add(time.Minute)
+	again := r.hardBounce("e3", "up-unknown-3")
+	again.Event.Sender, again.Event.Recipient = "app@example.com", "gone@example.org"
+	r.queue.items = []driver.Received{again}
+	r.reader.Pass(context.Background())
+	if list := r.suppressed(); len(list) != 0 {
+		t.Fatalf("an email with no record undid a lift: %+v", list)
+	}
+	first := r.hardBounce("e4", "up-unknown-4")
+	first.Event.Sender, first.Event.Recipient = "app@example.com", "new@example.org"
+	id := r.sentTo("up-5", "new@example.org")
+	r.queue.items = []driver.Received{first, r.hardBounce("e5", "up-5")}
+	r.reader.Pass(context.Background())
+	if list := r.suppressed(); len(list) != 1 || list[0].MessageID != id {
+		t.Fatalf("a suppression with no message was not given the one that bounced next: %+v", list)
 	}
 }

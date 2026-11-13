@@ -18,6 +18,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
+	"github.com/mettjs/cairnpost/internal/suppress"
 	"github.com/mettjs/cairnpost/migrations"
 )
 
@@ -108,7 +109,7 @@ func serve(ctx context.Context) error {
 	handler := api.New(api.Deps{
 		Mail: mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 			IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow}, log),
-		Keys: keys.New(db), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
+		Keys: keys.New(db), Suppress: suppress.New(db), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
 		Events: eventsHealth(reader),
 	})

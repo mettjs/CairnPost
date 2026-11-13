@@ -124,6 +124,7 @@ func (r *Reader) Pass(ctx context.Context) (int, error) {
 		done, back               []string
 		kept, unnamed, strangers int
 		notOurs, lastTry         int
+		suppressing              int
 		failed                   error
 	)
 	for _, item := range items {
@@ -143,7 +144,9 @@ func (r *Reader) Pass(ctx context.Context) (int, error) {
 			e.At = r.now()
 		}
 		outcome, err := r.store.RecordEvent(ctx, store.Event{Driver: r.driver, UpstreamEventID: e.ID,
-			UpstreamID: e.UpstreamID, Kind: kind, Permanent: e.Permanent, Code: e.Code, Reason: e.Reason, At: e.At})
+			UpstreamID: e.UpstreamID, Kind: kind, Permanent: e.Permanent, Code: e.Code, Reason: e.Reason, At: e.At,
+			Sender: e.Sender, Recipient: e.Recipient})
+		_, suppresses := store.SuppressionFor(kind, e.Permanent, e.Code)
 		switch {
 		case err != nil:
 			failed = err
@@ -155,10 +158,16 @@ func (r *Reader) Pass(ctx context.Context) (int, error) {
 			back = append(back, item.Lease)
 		case outcome == store.NoMessage:
 			strangers++
+			if suppresses && e.Sender != "" && e.Recipient != "" {
+				suppressing++
+			}
 			done = append(done, item.Lease)
 		default:
 			if outcome == store.Kept {
 				kept++
+				if suppresses {
+					suppressing++
+				}
 			}
 			done = append(done, item.Lease)
 		}
@@ -169,7 +178,7 @@ func (r *Reader) Pass(ctx context.Context) (int, error) {
 	// Counts only: an event's addresses stay out of the log.
 	if kept+strangers+notOurs > 0 {
 		r.log.Info("events: a batch was read", "recorded", kept, "about_emails_not_ours", strangers,
-			"not_email_events", notOurs, "handed_back", len(back))
+			"not_email_events", notOurs, "handed_back", len(back), "suppressing", suppressing)
 	}
 	if unnamed > 0 {
 		r.log.Warn("events: events that do not name their email were dropped; the upstream's format may have changed",

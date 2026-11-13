@@ -15,6 +15,13 @@ Every change a user of CairnPost can notice is written here. The format is
   that happened to it.
 - Delivery events: with `CAIRNPOST_CLOUDFLARE_QUEUE_ID` set, CairnPost reads
   what Cloudflare says became of each email and records it.
+- Suppression: an address that bounces for good or complains is no longer
+  sent to from that sending domain; a send to it answers 422
+  `recipient_suppressed`. A refusal that is about the sender (status class
+  5.7) suppresses nobody. `GET /suppressions`, `POST /suppressions`,
+  `POST /suppressions/lift` and `cairnpost suppressions list|add|remove`
+  show the list, add to it by hand, and lift one entry or a whole domain's.
+  A lift is remembered, so a late bounce of an older email does not undo it.
 - API keys with a scope (`send` or `admin`), optionally bound to one sending
   domain; stored hashed, shown once. `cairnpost keys create|list|revoke`.
 - The `cloudflare` driver: delivery through Cloudflare Email Sending.

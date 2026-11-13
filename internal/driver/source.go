@@ -38,6 +38,10 @@ type Event struct {
 	Code, Reason string
 	// At is when it happened; zero when the upstream did not say.
 	At time.Time
+	// Sender and Recipient are the email's addresses when the upstream
+	// names them, bare and as written on the wire, "" otherwise. They are
+	// for suppressing an address whose email has no record; never logged.
+	Sender, Recipient string
 }
 
 // Received is one item taken from an upstream's stream of events.

@@ -59,6 +59,15 @@ func (a *app) failSend(w http.ResponseWriter, id string, err error) {
 	case errors.Is(err, mail.ErrDomain):
 		p = problem{http.StatusForbidden, "domain_not_allowed",
 			"This API key may only send from its own domain. Use a key for this domain, or change the from address.", ""}
+	case errors.Is(err, mail.ErrSuppressed):
+		p = problem{http.StatusUnprocessableEntity, "recipient_suppressed",
+			"This address is on the suppression list for the sending domain: an earlier email to it bounced for good " +
+				"or was marked as spam, or it was added by hand. Nothing was sent now. " +
+				"If that is wrong, an admin can lift it with POST /suppressions/lift.", id}
+		if id != "" {
+			p.Message += " An earlier try under this Idempotency-Key got no answer from the mail provider and may " +
+				"have gone: the id is that try's."
+		}
 	case errors.Is(err, mail.ErrMismatch):
 		p = problem{http.StatusConflict, "invalid_idempotent_request",
 			"This Idempotency-Key was already used with a different request, which was sent. Use a new key for a new email.", ""}
@@ -90,4 +99,24 @@ func (a *app) failSend(w http.ResponseWriter, id string, err error) {
 			"CairnPost could not record the send, so nothing was sent. Try again shortly.", ""}
 	}
 	write(w, p.StatusCode, p)
+}
+
+// body reads a request's JSON into v, and answers false, having said why,
+// when it cannot. shape is the sentence saying what the body must be.
+func (a *app) body(w http.ResponseWriter, r *http.Request, v any, shape string) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, a.MaxBodyBytes))
+	// A field CairnPost does not know is refused, never dropped: an email
+	// sent without the cc its caller asked for is worse than no email.
+	dec.DisallowUnknownFields()
+	err := dec.Decode(v)
+	var tooBig *http.MaxBytesError
+	switch {
+	case err == nil:
+		return true
+	case errors.As(err, &tooBig):
+		fail(w, http.StatusRequestEntityTooLarge, "request_too_large", "The request body is larger than this server accepts.")
+	default:
+		fail(w, http.StatusUnprocessableEntity, "validation_error", shape)
+	}
+	return false
 }

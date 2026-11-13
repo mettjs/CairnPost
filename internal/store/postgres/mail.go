@@ -87,12 +87,23 @@ func (db *DB) Lost(ctx context.Context, id string) error {
 	return nil
 }
 
-// insertMessage records a message as sending and answers its id.
+// insertMessage records a message as sending and answers its id. It is the
+// one way a send starts, so it is where a suppressed recipient is refused:
+// it then records nothing and answers "". One statement does both.
+//
+// The list is read here, when the send starts, and not again: a send
+// started in the second or so before a bounce is recorded still goes.
 func insertMessage(ctx context.Context, tx pgx.Tx, s store.Start) (string, error) {
+	domain, address := store.SuppressionKey(s.Sender, s.Recipient)
 	var id string
 	err := tx.QueryRow(ctx, `
 		INSERT INTO messages (api_key_id, sender, recipient, driver, state)
-		VALUES ($1::uuid, $2, $3, $4, 'sending') RETURNING id::text`,
-		s.KeyID, s.Sender, s.Recipient, s.Driver).Scan(&id)
+		SELECT $1::uuid, $2, $3, $4, 'sending'
+		WHERE NOT EXISTS (SELECT 1 FROM suppressions WHERE domain = $5 AND address = $6 AND lifted_at IS NULL)
+		RETURNING id::text`,
+		s.KeyID, s.Sender, s.Recipient, s.Driver, domain, address).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
 	return id, err
 }
