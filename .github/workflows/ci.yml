@@ -35,7 +35,7 @@ jobs:
       # The database comes from the project's own Compose file: the tests
       # run against exactly what a self-hoster runs.
       - run: docker compose up -d --wait postgres
-      - run: go test -tags=integration -count=1 ./...
+      - run: go test -tags=integration -count=1 -p 1 ./...
 
   image:
     name: image builds and answers

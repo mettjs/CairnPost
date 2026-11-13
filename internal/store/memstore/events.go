@@ -44,7 +44,6 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 	}
 	e.ID, e.MessageID = s.next("evt"), m.ID
 	e.Sender, e.Recipient = "", "" // never kept with the event
-	s.events = append(s.events, e)
 	if suppresses {
 		domain, address := store.SuppressionKey(m.Sender, m.Recipient)
 		s.suppress(store.Suppression{Domain: domain, Address: address, Reason: reason, MessageID: m.ID}, since(m.CreatedAt))
@@ -52,7 +51,11 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 		if row := s.suppressed[slot(domain, address)]; row.lifted == nil && row.Reason == reason && row.MessageID == "" {
 			row.MessageID = m.ID
 		}
+		// Whether the address is on the list now is kept with the event.
+		e.Suppressed = s.inForce(domain, address)
 	}
+	s.events = append(s.events, e)
+	s.owe(e, store.DomainOf(m.Sender))
 	if store.Moves(m.State, e.Kind, newer) {
 		to := store.StateOf[e.Kind]
 		if to == store.StateFailed {

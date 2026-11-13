@@ -120,3 +120,18 @@ func (a *app) body(w http.ResponseWriter, r *http.Request, v any, shape string) 
 	}
 	return false
 }
+
+// limitOf reads ?limit=, 0 for none, and answers false, having said why,
+// for one that is no page size.
+func limitOf(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		fail(w, http.StatusUnprocessableEntity, "validation_error", `"limit" must be a whole number above zero.`)
+		return 0, false
+	}
+	return n, true
+}

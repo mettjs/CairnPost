@@ -10,6 +10,7 @@ import (
 
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
 // suppressionsCommand manages the suppression list straight in the
@@ -103,9 +104,15 @@ func suppressionsCommand(ctx context.Context, args []string) error {
 // plain is an error as a person reads it: a request's own fault is its
 // sentence, without the package's name in front.
 func plain(err error) error {
-	var invalid *suppress.Invalid
-	if errors.As(err, &invalid) {
+	var (
+		invalid *suppress.Invalid
+		badHook *webhook.Invalid
+	)
+	switch {
+	case errors.As(err, &invalid):
 		return errors.New(invalid.Reason)
+	case errors.As(err, &badHook):
+		return errors.New(badHook.Reason)
 	}
 	return err
 }

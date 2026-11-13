@@ -24,6 +24,9 @@ const usage = `CairnPost: a small transactional email service.
   cairnpost suppressions list     list the addresses not sent to
   cairnpost suppressions add      stop sending to an address
   cairnpost suppressions remove   send to an address again
+  cairnpost webhooks create       have a URL told what becomes of emails
+  cairnpost webhooks list         list the webhook endpoints
+  cairnpost webhooks remove ID    remove a webhook endpoint
   cairnpost send                  send an email through a running server
   cairnpost version               print the version
 
@@ -75,6 +78,8 @@ func run(ctx context.Context, args []string) error {
 		return keysCommand(ctx, args[1:])
 	case "suppressions":
 		return suppressionsCommand(ctx, args[1:])
+	case "webhooks":
+		return webhooksCommand(ctx, args[1:])
 	case "send":
 		return sendCommand(ctx, args[1:])
 	case "version":

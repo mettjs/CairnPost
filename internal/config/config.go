@@ -52,6 +52,38 @@ type Config struct {
 	EventsRetry time.Duration
 	// Cloudflare is the cloudflare driver's settings.
 	Cloudflare Cloudflare
+	// Webhook is how events are delivered to endpoints.
+	Webhook Webhook
+}
+
+// Webhook is how events are delivered to the endpoints that hear about
+// them.
+type Webhook struct {
+	// Timeout is CAIRNPOST_WEBHOOK_TIMEOUT: the most one try may take.
+	// Default 10s.
+	Timeout time.Duration
+	// Retries is CAIRNPOST_WEBHOOK_RETRIES: the waits before each further
+	// try, separated by commas. A webhook is tried once, then once after
+	// each wait, then given up. Default 5s,5m,30m,2h,5h,10h,10h.
+	Retries []time.Duration
+	// Workers is CAIRNPOST_WEBHOOK_WORKERS: how many webhooks are being
+	// sent at once, to all endpoints together. Default 8.
+	Workers int
+	// PerEndpoint is CAIRNPOST_WEBHOOK_PER_ENDPOINT: how many are being
+	// sent at once to one endpoint. Under Workers, it keeps an endpoint
+	// that hangs from holding up the others. Default 2.
+	PerEndpoint int
+	// MaxEndpoints is CAIRNPOST_WEBHOOK_MAX_ENDPOINTS: how many endpoints
+	// may hear about one sending domain, and how many about all. Every
+	// event is checked against them. Default 20.
+	MaxEndpoints int
+	// Poll is CAIRNPOST_WEBHOOK_POLL: how long the sender rests when
+	// nothing is due. Default 2s.
+	Poll time.Duration
+	// AllowPrivate is CAIRNPOST_WEBHOOK_ALLOW_PRIVATE: let an endpoint be
+	// plain http, and at an address that is not on the public internet.
+	// For an application on the same private network. Default false.
+	AllowPrivate bool
 }
 
 // Cloudflare is how the cloudflare driver signs in. Both are required when
@@ -140,7 +172,11 @@ func Load(getenv func(string) string) (Config, error) {
 			"CAIRNPOST_CLOUDFLARE_API_TOKEN (a token with the Email Sending permission)")
 	}
 	keep, err := number(getenv, "CAIRNPOST_CAPTURE_KEEP", 100)
+	if err != nil {
+		return c, err
+	}
 	c.CaptureKeep = int(keep)
+	c.Webhook, err = webhook(getenv)
 	return c, err
 }
 

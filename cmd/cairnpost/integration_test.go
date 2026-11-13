@@ -5,6 +5,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -25,6 +28,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
+	"github.com/mettjs/cairnpost/internal/webhook"
 	"github.com/mettjs/cairnpost/migrations"
 )
 
@@ -82,6 +86,7 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 	var logged bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	kept := capture.New(5, time.Now)
+	poster := webhook.NewPoster(5*time.Second, true, 2, "test", time.Now)
 	ks := keys.New(db)
 	full, k, err := ks.Create(ctx, t.Name(), store.ScopeAdmin, "")
 	if err != nil {
@@ -91,7 +96,28 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 		Mail: mail.New(db, kept, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 			InDoubtWindow: time.Minute}, log),
 		Keys: ks, Ping: db.Ping, Driver: capture.Name, MaxBodyBytes: 1 << 20, Log: log,
+		Webhooks: webhook.NewService(db, poster, true, 20, time.Now),
 	})
+	// An application's endpoint, told what becomes of this run's emails.
+	var hooks []*http.Request
+	var hookBodies []string
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		hooks, hookBodies = append(hooks, r), append(hookBodies, string(b))
+	}))
+	defer app.Close()
+	// A sending domain of this run's own: the database outlives the run,
+	// and the endpoint must hear about no other test's emails.
+	domain := strings.ToLower(k.Prefix) + ".example.com"
+	req := httptest.NewRequest("POST", "/webhooks", strings.NewReader(`{"url":"`+app.URL+`/HOOKPATHMARKQ","domain":"`+domain+`"}`))
+	req.Header.Set("Authorization", "Bearer "+full)
+	made := httptest.NewRecorder()
+	h.ServeHTTP(made, req)
+	var endpoint struct{ ID, Secret string }
+	if json.Unmarshal(made.Body.Bytes(), &endpoint); made.Code != 201 || !strings.HasPrefix(endpoint.Secret, "whsec_") {
+		t.Fatalf("the endpoint: %d %s", made.Code, made.Body)
+	}
+	defer db.DeleteEndpoint(ctx, endpoint.ID)
 	send := func(idem, body string) int {
 		req := httptest.NewRequest("POST", "/emails", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+full)
@@ -103,7 +129,7 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 	// An address of this run's own: the bounce below suppresses it, and the
 	// database outlives the run.
 	to := "rule-one-" + k.Prefix + "@example.org"
-	body := `{"from":"NAMEMARKQ <app@example.com>","to":"` + to + `","subject":"SUBJECTMARKQ",
+	body := `{"from":"NAMEMARKQ <app@` + domain + `>","to":"` + to + `","subject":"SUBJECTMARKQ",
 		"text":"TEXTMARKQ","html":"<p>HTMLMARKQ</p>","headers":{"X-Trace":"HEADERMARKQ"}}`
 	if code := send("words", body); code != 200 || len(kept.Held()) != 1 {
 		t.Fatalf("the send: %d", code)
@@ -137,6 +163,37 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 		Lease: time.Minute, Retry: time.Second, Grace: time.Minute}, time.Now, log)
 	if n, err := reader.Pass(ctx); n != 1 || err != nil {
 		t.Fatalf("the event: %d %v", n, err)
+	}
+	// The event is owed to the endpoint, and paid: signed, and with nothing
+	// of the email's words.
+	worker := webhook.NewWorker(db, poster, webhook.Options{Poll: 50 * time.Millisecond, Workers: 4,
+		PerEndpoint: 2, Retries: []time.Duration{time.Minute}}, log)
+	if _, err := worker.Pass(ctx); err != nil || len(hooks) != 1 {
+		t.Fatalf("the webhook: %d received, %v", len(hooks), err)
+	}
+	key, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(endpoint.Secret, "whsec_"))
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(hooks[0].Header.Get("svix-id") + "." + hooks[0].Header.Get("svix-timestamp") + "." + hookBodies[0]))
+	if hooks[0].Header.Get("svix-signature") != "v1,"+base64.StdEncoding.EncodeToString(mac.Sum(nil)) {
+		t.Fatal("the webhook's signature does not check with the secret the endpoint was given")
+	}
+	if !strings.Contains(hookBodies[0], `"type":"email.bounced"`) || !strings.Contains(hookBodies[0], `"bounce":{"type":"Permanent"}`) ||
+		!strings.Contains(hookBodies[0], to) || strings.Contains(hookBodies[0], "MARKQ") {
+		t.Fatalf("the webhook: %s", hookBodies[0])
+	}
+	// Neither the signing secret nor the endpoint's URL, which can hold a
+	// token, is logged; and the secret is not said again.
+	list := httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/webhooks/"+endpoint.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+full)
+	h.ServeHTTP(list, req)
+	for _, mark := range []string{endpoint.Secret, strings.TrimPrefix(endpoint.Secret, "whsec_"), "HOOKPATHMARKQ", app.URL} {
+		if strings.Contains(logged.String(), mark) {
+			t.Errorf("the log holds %q", mark)
+		}
+	}
+	if list.Code != 200 || strings.Contains(list.Body.String(), "whsec_") {
+		t.Errorf("the endpoint, read again, says its secret: %d %s", list.Code, list.Body)
 	}
 	held := dump(t, dsn)
 	// The event was recorded, by what Cloudflare called it; the receiving

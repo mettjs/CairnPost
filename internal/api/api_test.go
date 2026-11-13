@@ -19,6 +19,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
 // fake is a driver that keeps what it is handed, or answers an error.
@@ -84,7 +85,8 @@ func newRigBuilt(t *testing.T, s store.Store, adjust func(*api.Deps)) *rig {
 	deps := api.Deps{
 		Mail: mail.New(s, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 			InDoubtWindow: time.Minute}, log),
-		Keys: ks, Suppress: suppress.New(s), Ping: s.Ping, Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
+		Keys: ks, Suppress: suppress.New(s), Ping: s.Ping,
+		Webhooks: webhook.NewService(s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, time.Now), Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
 		Captured: func() []api.CapturedEmail {
 			var out []api.CapturedEmail
 			for _, m := range drv.held {
@@ -115,6 +117,16 @@ func (r *rig) do(method, path, key, idem, body string) (int, string, map[string]
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	name, _ := out["name"].(string)
 	return rec.Code, name, out
+}
+
+// raw answers a response's body as it was written.
+func (r *rig) raw(method, path, key string) string {
+	r.t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	rec := httptest.NewRecorder()
+	r.h.ServeHTTP(rec, req)
+	return rec.Body.String()
 }
 
 func TestSendAnswersAnIdAndReplaysIt(t *testing.T) {
@@ -411,14 +423,17 @@ func TestHealthNeedsNoKey(t *testing.T) {
 	if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["status"] != "ok" || got["driver"] != "fake" {
 		t.Fatalf("%d %v", code, got)
 	}
-	if _, _, got := r.do("GET", "/health", "", "", ""); got["events"] != "off" {
-		t.Fatalf("with no events to read: %v", got)
+	if _, _, got := r.do("GET", "/health", "", "", ""); got["events"] != "off" || got["webhooks"] != "off" {
+		t.Fatalf("with no events to read and no webhooks sent: %v", got)
 	}
-	for healthy, want := range map[bool]string{true: "reading", false: "failing"} {
-		r := newRigWith(t, func(d *api.Deps) { d.Events = func() bool { return healthy } })
-		// Events that are not read do not make the service unavailable.
-		if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["events"] != want {
-			t.Fatalf("events healthy=%v: %d %v", healthy, code, got)
+	for healthy, want := range map[bool][2]string{true: {"reading", "sending"}, false: {"failing", "failing"}} {
+		r := newRigWith(t, func(d *api.Deps) {
+			d.Events, d.Sending = func() bool { return healthy }, func() bool { return healthy }
+		})
+		// Events not read, or webhooks not sent, do not make the service
+		// unavailable: mail still goes.
+		if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["events"] != want[0] || got["webhooks"] != want[1] {
+			t.Fatalf("healthy=%v: %d %v", healthy, code, got)
 		}
 	}
 	if code, name, _ := r.do("GET", "/nothing", "", "", ""); code != 404 || name != "not_found" {

@@ -43,23 +43,38 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		if err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `
+		var eventID string
+		err = tx.QueryRow(ctx, `
 			INSERT INTO events (message_id, driver, upstream_event_id, kind, permanent, code, reason, occurred_at)
 			VALUES ($1::uuid, $2, $3, $4, $5, nullif($6, ''), nullif($7, ''), $8)
-			ON CONFLICT (driver, upstream_event_id) DO NOTHING`,
-			messageID, e.Driver, e.UpstreamEventID, e.Kind, e.Permanent, e.Code, e.Reason, e.At)
+			ON CONFLICT (driver, upstream_event_id) DO NOTHING RETURNING id::text`,
+			messageID, e.Driver, e.UpstreamEventID, e.Kind, e.Permanent, e.Code, e.Reason, e.At).Scan(&eventID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			outcome = store.Duplicate
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() == 0 {
-			outcome = store.Duplicate
-			return nil
+		// A new event is owed to the endpoints that hear about it, whether
+		// or not it moves the message's state.
+		if err := oweWebhooks(ctx, tx, eventID, store.DomainOf(sender), e.Kind); err != nil {
+			return err
 		}
 		// A bounce for good, or a complaint, suppresses the address for the
 		// domain that sent, in the same step as the event that says so.
 		if suppresses {
 			domain, address := store.SuppressionKey(sender, recipient)
 			if err := suppressByEvent(ctx, tx, domain, address, reason, messageID, sentAt); err != nil {
+				return err
+			}
+			// Whether the address is on the list now is kept with the
+			// event: a suppression that was lifted is not brought back by
+			// an older email, and the webhook must not say it was.
+			if _, err := tx.Exec(ctx, `
+				UPDATE events SET suppressed = true WHERE id = $1::uuid AND EXISTS (
+					SELECT 1 FROM suppressions WHERE domain = $2 AND address = $3 AND lifted_at IS NULL)`,
+				eventID, domain, address); err != nil {
 				return err
 			}
 		}
