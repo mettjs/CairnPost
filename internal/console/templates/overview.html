@@ -1,0 +1,19 @@
+{{define "title"}}Overview{{end}}
+{{define "main"}}
+<h1>Overview</h1>
+<p class="lede">What this server is doing right now.</p>
+<dl class="parts">
+  {{range .Data.Parts}}
+  <div class="part">
+    <dt>{{.Name}}</dt>
+    <dd><span class="state state-{{.State}}">{{if eq .State "ok"}}Working{{else if eq .State "failing"}}Failing{{else}}Off{{end}}</span> {{.Says}}</dd>
+  </div>
+  {{end}}
+</dl>
+<h2>This server</h2>
+<dl class="facts">
+  <div><dt>Mail provider</dt><dd><code>{{.Data.Driver}}</code></dd></div>
+  <div><dt>Version</dt><dd><code>{{.Version}}</code></dd></div>
+  <div><dt>Signed in as</dt><dd>{{.Who.Name}} <code>{{.Who.Prefix}}</code>{{if .Who.Domain}}, managing <code>{{.Who.Domain}}</code> only{{end}}</dd></div>
+</dl>
+{{end}}

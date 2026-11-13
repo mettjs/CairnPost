@@ -30,6 +30,10 @@ services:
       # capture keeps emails in memory and sends nothing: right for a first
       # look, wrong for anything real.
       CAIRNPOST_DRIVER: capture
+      # The console is at http://localhost:8025/console. Over plain http,
+      # which this is, its session cookie needs this; never set it on a
+      # server others can reach.
+      CAIRNPOST_CONSOLE_PLAIN_HTTP: "on"
     ports:
       - "127.0.0.1:8025:8080"
 

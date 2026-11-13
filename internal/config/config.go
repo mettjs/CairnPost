@@ -68,6 +68,11 @@ type Config struct {
 	Cloudflare Cloudflare
 	// Webhook is how events are delivered to endpoints.
 	Webhook Webhook
+	// Console is the management console.
+	Console Console
+	// MaxKeys is CAIRNPOST_MAX_KEYS: how many live API keys one sending
+	// domain may have, and how many bound to none. Default 200.
+	MaxKeys int
 }
 
 // Webhook is how events are delivered to the endpoints that hear about
@@ -203,7 +208,13 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.Retention, err = retention(getenv, c.IdempotencyTTL, retries); err != nil {
 		return c, err
 	}
-	c.ContentRetention, err = contentRetention(getenv, c.Retention)
+	if c.ContentRetention, err = contentRetention(getenv, c.Retention); err != nil {
+		return c, err
+	}
+	if c.Console, err = console(getenv); err != nil {
+		return c, err
+	}
+	c.MaxKeys, err = MaxKeys(getenv)
 	return c, err
 }
 

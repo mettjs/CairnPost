@@ -1,0 +1,12 @@
+{{define "title"}}Revoke a key{{end}}
+{{define "main"}}
+<section class="narrow">
+  <h1>Revoke "{{.Data.Key.Name}}"?</h1>
+  <p>Anything using <code>{{.Data.Key.Prefix}}</code> is refused from the moment you confirm. This cannot be undone; make a new key to replace it.</p>
+  {{if .Data.Mine}}<p class="problem">This is the key you are signed in with. Revoking it signs you out, and you will need another admin key to come back.</p>{{end}}
+  <form class="actions" method="post" action="{{.Root}}/keys/{{.Data.Key.Prefix}}/revoke">
+    <button class="danger" type="submit">Revoke key</button>
+    <a href="{{.Root}}/keys">Keep it</a>
+  </form>
+</section>
+{{end}}

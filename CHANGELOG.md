@@ -47,6 +47,14 @@ Every change a user of CairnPost can notice is written here. The format is
   (30 days at most), what each email said, and what the receiving server
   said about a bounce or a delay, is kept for that long and shown by
   `GET /emails/{id}` to an admin key. Never logged, never in a webhook.
+- A console at `/console`, served by the same binary: sign in with an
+  admin key to see whether each part of the server is working and to list,
+  make and revoke API keys. `CAIRNPOST_CONSOLE`, `CAIRNPOST_CONSOLE_SESSION`
+  and `CAIRNPOST_CONSOLE_PLAIN_HTTP` set it up.
+- A key's name is plain text on one line, a hundred characters at most,
+  and its sending domain a host name; a sending domain holds
+  `CAIRNPOST_MAX_KEYS` live keys (200). A key made in the console records
+  which key made it.
 - `cairnpost serve`, `migrate`, `send` and `version`; a Dockerfile and a
   Compose file with Postgres 18.
 - Images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`, published with

@@ -23,22 +23,30 @@ const (
 
 // Key is an API key as it is kept: never the key itself.
 type Key struct {
-	ID        string
-	Name      string
-	Prefix    string
-	Hash      []byte
-	Scope     string
-	Domain    string // "" for any sending domain
+	ID     string
+	Name   string
+	Prefix string
+	Hash   []byte
+	Scope  string
+	Domain string // "" for any sending domain
+	// CreatedBy is the prefix of the key that made this one, "" for a key
+	// made on the command line.
+	CreatedBy string
 	CreatedAt time.Time
 	RevokedAt *time.Time
 }
 
 // Keys keeps API keys.
 type Keys interface {
-	CreateKey(ctx context.Context, k Key) (Key, error)
+	// CreateKey keeps a key, unless its sending domain (or, for a key of
+	// no domain, the keys of none) already has max live keys: then
+	// ErrLimit. A max of 0 is no limit.
+	CreateKey(ctx context.Context, k Key, max int) (Key, error)
 	// KeyByPrefix answers ErrNotFound for a prefix no key has.
 	KeyByPrefix(ctx context.Context, prefix string) (Key, error)
-	ListKeys(ctx context.Context) ([]Key, error)
+	// ListKeys answers keys newest first: those bound to a sending
+	// domain, or every key for "". At most limit of them; 0 for all.
+	ListKeys(ctx context.Context, domain string, limit int) ([]Key, error)
 	// RevokeKey answers ErrNotFound for a prefix no live key has.
 	RevokeKey(ctx context.Context, prefix string) error
 }
@@ -148,6 +156,7 @@ type Store interface {
 	Suppressions
 	Webhooks
 	Pruning
+	Sessions
 	// Ping reports whether the store can be reached.
 	Ping(ctx context.Context) error
 }

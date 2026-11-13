@@ -1,0 +1,16 @@
+{{define "title"}}Sign in{{end}}
+{{define "main"}}
+<section class="signin">
+  <h1>CairnPost</h1>
+  <p class="lede">Sign in with an admin key to manage this server.</p>
+  {{if .Data}}<p class="problem" role="alert">{{.Data}}</p>{{end}}
+  <form method="post" action="{{.Root}}/signin">
+    <div class="field">
+      <label for="key">Admin key</label>
+      <input id="key" name="key" type="password" autocomplete="off" spellcheck="false" required autofocus>
+      <p class="hint">It starts with <code>cp_</code>. Make one on the server with <code>cairnpost keys create -scope admin</code>.</p>
+    </div>
+    <button type="submit">Sign in</button>
+  </form>
+</section>
+{{end}}

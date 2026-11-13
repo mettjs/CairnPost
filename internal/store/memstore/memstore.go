@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +34,7 @@ type Store struct {
 	idems      map[string]*idem   // by key id + "\x00" + idempotency key
 	contents   map[string]content // by message id
 	details    map[string]content // by event id
+	sessions   map[string]session // by the hash of the token
 	events     []store.Event
 	suppressed map[string]*suppression
 	endpoints  []*store.Endpoint
@@ -42,7 +45,7 @@ type Store struct {
 func New() *Store {
 	return &Store{Now: time.Now, keys: map[string]store.Key{},
 		messages: map[string]store.Message{}, idems: map[string]*idem{},
-		suppressed: map[string]*suppression{}, contents: map[string]content{}, details: map[string]content{}}
+		suppressed: map[string]*suppression{}, contents: map[string]content{}, details: map[string]content{}, sessions: map[string]session{}}
 }
 
 var _ store.Store = (*Store)(nil)
@@ -56,11 +59,20 @@ func (s *Store) next(kind string) string {
 func (*Store) Ping(context.Context) error { return nil }
 
 // CreateKey implements store.Keys.
-func (s *Store) CreateKey(_ context.Context, k store.Key) (store.Key, error) {
+func (s *Store) CreateKey(_ context.Context, k store.Key, max int) (store.Key, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, taken := s.keys[k.Prefix]; taken {
 		return store.Key{}, fmt.Errorf("memstore: prefix %s is taken", k.Prefix)
+	}
+	live := 0
+	for _, had := range s.keys {
+		if had.RevokedAt == nil && had.Domain == k.Domain {
+			live++
+		}
+	}
+	if max != 0 && live >= max {
+		return store.Key{}, store.ErrLimit
 	}
 	k.ID, k.CreatedAt = s.next("key"), s.Now()
 	s.keys[k.Prefix] = k
@@ -79,12 +91,24 @@ func (s *Store) KeyByPrefix(_ context.Context, prefix string) (store.Key, error)
 }
 
 // ListKeys implements store.Keys.
-func (s *Store) ListKeys(context.Context) ([]store.Key, error) {
+func (s *Store) ListKeys(_ context.Context, domain string, limit int) ([]store.Key, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]store.Key, 0, len(s.keys))
 	for _, k := range s.keys {
-		out = append(out, k)
+		if domain == "" || k.Domain == domain {
+			out = append(out, k)
+		}
+	}
+	// Newest first; ids are made in order, and settle a tie.
+	slices.SortFunc(out, func(a, b store.Key) int {
+		if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.ID, a.ID)
+	})
+	if limit != 0 && len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

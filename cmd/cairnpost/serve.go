@@ -11,6 +11,7 @@ import (
 
 	"github.com/mettjs/cairnpost/internal/api"
 	"github.com/mettjs/cairnpost/internal/config"
+	"github.com/mettjs/cairnpost/internal/console"
 	"github.com/mettjs/cairnpost/internal/driver"
 	"github.com/mettjs/cairnpost/internal/driver/capture"
 	"github.com/mettjs/cairnpost/internal/driver/cloudflare"
@@ -18,6 +19,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/prune"
+	"github.com/mettjs/cairnpost/internal/session"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
 	"github.com/mettjs/cairnpost/internal/suppress"
 	"github.com/mettjs/cairnpost/internal/webhook"
@@ -137,14 +139,33 @@ func serve(ctx context.Context) error {
 			"and shown to admin keys", "for", cfg.ContentRetention.String())
 	}
 
-	handler := api.New(api.Deps{
+	keyring := keys.New(db).WithMax(cfg.MaxKeys)
+	var handler http.Handler = api.New(api.Deps{
 		Mail: mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 			IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention}, log),
-		Keys: keys.New(db), Suppress: suppress.New(db),
+		Keys: keyring, Suppress: suppress.New(db),
 		Webhooks: webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, time.Now), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
 		Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy,
 	})
+	if cfg.Console.On {
+		// The console is served beside the API, under its own path.
+		both := http.NewServeMux()
+		eventsOff := "Not read: no queue of events is set. An email's record stops at \"sent\", and a bounce is never known."
+		if captured != nil {
+			eventsOff = "None to read: this driver keeps emails and sends them to nobody."
+		}
+		pages := console.New(console.Deps{Keys: keyring, Sessions: session.New(db, cfg.Console.Session),
+			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, EventsOff: eventsOff,
+			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP, Log: log})
+		both.Handle(console.Root, pages)
+		both.Handle(console.Root+"/", pages)
+		both.Handle("/", handler)
+		handler = both
+		if cfg.Console.PlainHTTP {
+			log.Warn("the console's session cookie may travel over plain http (CAIRNPOST_CONSOLE_PLAIN_HTTP)")
+		}
+	}
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler,
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 		// The slowest answers are a send and the try-out of a webhook
