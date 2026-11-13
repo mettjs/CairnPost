@@ -43,7 +43,7 @@ func (db *DB) Sent(ctx context.Context, id, upstreamID string) error {
 			return err
 		}
 		_, err := tx.Exec(ctx, `
-			UPDATE messages SET state = 'sent', upstream_id = $2, updated_at = now()
+			UPDATE messages SET state = 'sent', upstream_id = nullif($2, ''), updated_at = now()
 			WHERE id = $1::uuid`, id, upstreamID)
 		return err
 	})
