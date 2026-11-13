@@ -33,6 +33,12 @@ type answer struct {
 // already one of the driver's kinds; what Cloudflare answered is the
 // answer's to judge.
 func (d *Driver) ask(ctx context.Context, method, path string, body any) (answer, error) {
+	return d.askUpTo(ctx, 1<<20, method, path, body)
+}
+
+// askUpTo is ask for a call whose answer can be large: limit is the most
+// of it that is read.
+func (d *Driver) askUpTo(ctx context.Context, limit int64, method, path string, body any) (answer, error) {
 	var payload io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -67,7 +73,7 @@ func (d *Driver) ask(ctx context.Context, method, path string, body any) (answer
 			Code int `json:"code"`
 		} `json:"errors"`
 	}
-	raw, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(res.Body, limit))
 	if err == nil && json.Unmarshal(raw, &envelope) == nil && envelope.Success != nil {
 		a.readable, a.success, a.result = true, *envelope.Success, envelope.Result
 		if len(envelope.Errors) > 0 {

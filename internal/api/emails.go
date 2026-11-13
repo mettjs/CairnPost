@@ -70,18 +70,31 @@ func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 }
 
 type emailView struct {
-	ID        string    `json:"id"`
-	From      string    `json:"from"`
-	To        string    `json:"to"`
-	State     string    `json:"state"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string      `json:"id"`
+	From      string      `json:"from"`
+	To        string      `json:"to"`
+	State     string      `json:"state"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
+	Events    []eventView `json:"events"`
 }
 
-// getEmail is GET /emails/{id}: what became of an email. A key sees the
-// emails it sent; an admin key sees any.
+// eventView is one thing that happened to an email after it was sent.
+type eventView struct {
+	Type string    `json:"type"`
+	At   time.Time `json:"at"`
+	// Permanent says, for a bounce, that the address will never take mail.
+	Permanent bool `json:"permanent,omitempty"`
+	// Code is the receiving server's status ("5.1.1"); Reason the mail
+	// provider's short name for what happened ("permanent_failure").
+	Code   string `json:"code,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// getEmail is GET /emails/{id}: what became of an email, and each thing
+// that happened to it. A key sees the emails it sent; an admin key sees any.
 func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
-	m, err := a.Mail.Message(r.Context(), r.PathValue("id"))
+	m, events, err := a.Mail.Message(r.Context(), r.PathValue("id"))
 	c := callerOf(r)
 	switch {
 	case errors.Is(err, store.ErrNotFound), err == nil && m.KeyID != c.key.ID && c.key.Scope != store.ScopeAdmin:
@@ -90,7 +103,12 @@ func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
 		a.Log.Error("api: an email could not be read", "error", err)
 		fail(w, http.StatusServiceUnavailable, "unavailable", "The email could not be read. Try again shortly.")
 	default:
-		write(w, http.StatusOK, emailView{m.ID, m.Sender, m.Recipient, m.State, m.CreatedAt, m.UpdatedAt})
+		// Times are answered in UTC, whatever zone the server runs in.
+		view := emailView{m.ID, m.Sender, m.Recipient, m.State, m.CreatedAt.UTC(), m.UpdatedAt.UTC(), []eventView{}}
+		for _, e := range events {
+			view.Events = append(view.Events, eventView{e.Kind, e.At.UTC(), e.Permanent, e.Code, e.Reason})
+		}
+		write(w, http.StatusOK, view)
 	}
 }
 

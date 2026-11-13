@@ -34,6 +34,22 @@ type Config struct {
 	// CaptureKeep is CAIRNPOST_CAPTURE_KEEP: how many emails the capture
 	// driver holds in memory. Default 100.
 	CaptureKeep int
+	// EventsPoll is CAIRNPOST_EVENTS_POLL: how long the reader of delivery
+	// events rests after finding none. Default 5s.
+	EventsPoll time.Duration
+	// EventsGrace is CAIRNPOST_EVENTS_GRACE: how long an event about an
+	// email with no record is kept waiting for that record before it is
+	// let go. Default 2m.
+	EventsGrace time.Duration
+	// EventsBatch is CAIRNPOST_EVENTS_BATCH: how many events are taken at
+	// once, 100 at most. Default 50.
+	EventsBatch int
+	// EventsLease is CAIRNPOST_EVENTS_LEASE: how long a batch taken stays
+	// this reader's, and so how long it has to record it. Default 1m.
+	EventsLease time.Duration
+	// EventsRetry is CAIRNPOST_EVENTS_RETRY: how long an event handed back
+	// waits before it is given again. Default 30s.
+	EventsRetry time.Duration
 	// Cloudflare is the cloudflare driver's settings.
 	Cloudflare Cloudflare
 }
@@ -48,6 +64,11 @@ type Cloudflare struct {
 	// Sending permission. A secret: read here, handed to the driver, and
 	// written nowhere.
 	APIToken string
+	// QueueID is CAIRNPOST_CLOUDFLARE_QUEUE_ID: the Queue an Email Sending
+	// event subscription publishes to, read by HTTP pull. Optional: without
+	// it delivery events are not read, and an email's record stops at
+	// "sent". The token then also needs the Queues permission.
+	QueueID string
 }
 
 // Drivers are the values CAIRNPOST_DRIVER takes.
@@ -92,7 +113,28 @@ func Load(getenv func(string) string) (Config, error) {
 	c.Cloudflare = Cloudflare{
 		AccountID: strings.TrimSpace(getenv("CAIRNPOST_CLOUDFLARE_ACCOUNT_ID")),
 		APIToken:  strings.TrimSpace(getenv("CAIRNPOST_CLOUDFLARE_API_TOKEN")),
+		QueueID:   strings.TrimSpace(getenv("CAIRNPOST_CLOUDFLARE_QUEUE_ID")),
 	}
+	if c.EventsPoll, err = duration(getenv, "CAIRNPOST_EVENTS_POLL", 5*time.Second); err != nil {
+		return c, err
+	}
+	if c.EventsGrace, err = duration(getenv, "CAIRNPOST_EVENTS_GRACE", 2*time.Minute); err != nil {
+		return c, err
+	}
+	if c.EventsLease, err = duration(getenv, "CAIRNPOST_EVENTS_LEASE", time.Minute); err != nil {
+		return c, err
+	}
+	if c.EventsRetry, err = duration(getenv, "CAIRNPOST_EVENTS_RETRY", 30*time.Second); err != nil {
+		return c, err
+	}
+	batch, err := number(getenv, "CAIRNPOST_EVENTS_BATCH", 50)
+	if err != nil {
+		return c, err
+	}
+	if batch > 100 {
+		return c, fmt.Errorf("config: CAIRNPOST_EVENTS_BATCH must be at most 100 (got %d)", batch)
+	}
+	c.EventsBatch = int(batch)
 	if c.Driver == "cloudflare" && (c.Cloudflare.AccountID == "" || c.Cloudflare.APIToken == "") {
 		return c, fmt.Errorf("config: the cloudflare driver needs CAIRNPOST_CLOUDFLARE_ACCOUNT_ID and " +
 			"CAIRNPOST_CLOUDFLARE_API_TOKEN (a token with the Email Sending permission)")

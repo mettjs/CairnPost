@@ -1,0 +1,126 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/mettjs/cairnpost/internal/store"
+)
+
+// RecordEvent implements store.Events.
+func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, error) {
+	outcome := store.Kept
+	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		// The message's row is locked while its state is decided, so two
+		// events about one email are applied one after the other.
+		var (
+			messageID, state string
+			newer            bool
+		)
+		err := tx.QueryRow(ctx, `
+			SELECT m.id::text, m.state,
+			       NOT EXISTS (SELECT 1 FROM events e WHERE e.message_id = m.id AND e.kind = m.state AND e.occurred_at >= $3)
+			FROM messages m WHERE m.driver = $1 AND m.upstream_id = $2 FOR UPDATE OF m`,
+			e.Driver, e.UpstreamID, e.At).Scan(&messageID, &state, &newer)
+		if errors.Is(err, pgx.ErrNoRows) {
+			outcome = store.NoMessage
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO events (message_id, driver, upstream_event_id, kind, permanent, code, reason, occurred_at)
+			VALUES ($1::uuid, $2, $3, $4, $5, nullif($6, ''), nullif($7, ''), $8)
+			ON CONFLICT (driver, upstream_event_id) DO NOTHING`,
+			messageID, e.Driver, e.UpstreamEventID, e.Kind, e.Permanent, e.Code, e.Reason, e.At)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			outcome = store.Duplicate
+			return nil
+		}
+		if !store.Moves(state, e.Kind, newer) {
+			return nil
+		}
+		to := store.StateOf[e.Kind]
+		if to == store.StateFailed {
+			// The email never went: its key is free for a retry, as after
+			// a refusal at send.
+			if _, err := tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE message_id = $1::uuid`, messageID); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE messages SET state = $2, updated_at = now() WHERE id = $1::uuid`, messageID, to)
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("postgres: record an event: %w", err)
+	}
+	return outcome, nil
+}
+
+// EventsOf implements store.Events.
+func (db *DB) EventsOf(ctx context.Context, messageID string) ([]store.Event, error) {
+	if !uuidShape.MatchString(messageID) {
+		return nil, nil
+	}
+	events, err := eventsOf(ctx, db.pool, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: read a message's events: %w", err)
+	}
+	return events, nil
+}
+
+// Record implements store.Events: both reads see one snapshot, so the state
+// answered never disagrees with the events answered beside it.
+func (db *DB) Record(ctx context.Context, messageID string) (store.Message, []store.Event, error) {
+	if !uuidShape.MatchString(messageID) {
+		return store.Message{}, nil, store.ErrNotFound
+	}
+	var (
+		m      store.Message
+		events []store.Event
+	)
+	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
+		func(tx pgx.Tx) (err error) {
+			if m, err = message(ctx, tx, messageID); err != nil {
+				return err
+			}
+			events, err = eventsOf(ctx, tx, messageID)
+			return err
+		})
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Message{}, nil, err
+	}
+	if err != nil {
+		return store.Message{}, nil, fmt.Errorf("postgres: read a message's record: %w", err)
+	}
+	return m, events, nil
+}
+
+// querier is what a pool and a transaction both do.
+type querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func eventsOf(ctx context.Context, q querier, messageID string) ([]store.Event, error) {
+	rows, err := q.Query(ctx, `
+		SELECT id::text, message_id::text, driver, upstream_event_id, kind, permanent,
+		       coalesce(code, ''), coalesce(reason, ''), occurred_at
+		FROM events WHERE message_id = $1::uuid ORDER BY occurred_at, id`, messageID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (store.Event, error) {
+		var e store.Event
+		err := row.Scan(&e.ID, &e.MessageID, &e.Driver, &e.UpstreamEventID, &e.Kind, &e.Permanent,
+			&e.Code, &e.Reason, &e.At)
+		return e, err
+	})
+}

@@ -238,6 +238,9 @@ func TestAnEmailIsReadByItsSenderAndByAdmins(t *testing.T) {
 	if code != 200 || got["state"] != "sent" || got["to"] != "ana@example.org" {
 		t.Fatalf("its sender: %d %v", code, got)
 	}
+	if list, ok := got["events"].([]any); !ok || len(list) != 0 {
+		t.Fatalf("an email with no events yet answered %v", got["events"])
+	}
 	if _, has := got["subject"]; has {
 		t.Fatal("an email's record answered a subject")
 	}
@@ -311,6 +314,16 @@ func TestHealthNeedsNoKey(t *testing.T) {
 	r := newRig(t)
 	if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["status"] != "ok" || got["driver"] != "fake" {
 		t.Fatalf("%d %v", code, got)
+	}
+	if _, _, got := r.do("GET", "/health", "", "", ""); got["events"] != "off" {
+		t.Fatalf("with no events to read: %v", got)
+	}
+	for healthy, want := range map[bool]string{true: "reading", false: "failing"} {
+		r := newRigWith(t, func(d *api.Deps) { d.Events = func() bool { return healthy } })
+		// Events that are not read do not make the service unavailable.
+		if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["events"] != want {
+			t.Fatalf("events healthy=%v: %d %v", healthy, code, got)
+		}
 	}
 	if code, name, _ := r.do("GET", "/nothing", "", "", ""); code != 404 || name != "not_found" {
 		t.Fatalf("an unknown path: %d %s", code, name)

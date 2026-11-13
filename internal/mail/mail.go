@@ -51,17 +51,24 @@ type Options struct {
 	IdempotencyTTL, InDoubtWindow time.Duration
 }
 
+// Store is what the service keeps its records in.
+type Store interface {
+	store.Mail
+	store.Events
+}
+
 // Service sends mail.
 type Service struct {
 	store  store.Mail
+	events store.Events
 	driver driver.Driver
 	opt    Options
 	log    *slog.Logger
 }
 
 // New returns the service.
-func New(s store.Mail, d driver.Driver, opt Options, log *slog.Logger) *Service {
-	return &Service{store: s, driver: d, opt: opt, log: log}
+func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
+	return &Service{store: s, events: s, driver: d, opt: opt, log: log}
 }
 
 // Send sends one email and answers its id. presented is the caller's API
@@ -138,9 +145,10 @@ func (s *Service) deliver(ctx context.Context, id string, m driver.Message) erro
 	}
 }
 
-// Message answers a message's record; store.ErrNotFound for none.
-func (s *Service) Message(ctx context.Context, id string) (store.Message, error) {
-	return s.store.Message(ctx, id)
+// Message answers a message's record and what happened to it since, oldest
+// first, as they stood at one moment; store.ErrNotFound for none.
+func (s *Service) Message(ctx context.Context, id string) (store.Message, []store.Event, error) {
+	return s.events.Record(ctx, id)
 }
 
 // fingerprint is a digest of a request keyed by the caller's API key, which

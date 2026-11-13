@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -183,5 +184,133 @@ func TestTheDatabaseRefusesAKeyThatIsNotText(t *testing.T) {
 	db := open(t)
 	if _, err := db.Start(context.Background(), start(key(t, db), "caf\xe9", "a")); err == nil {
 		t.Fatal("Postgres took a key that is not UTF-8; the request check may be relaxed")
+	}
+}
+
+// sent records a message the upstream took under an id, and answers ours.
+func sent(t *testing.T, db *postgres.DB, k store.Key, upstreamID string) string {
+	t.Helper()
+	c, err := db.Start(context.Background(), start(k, "", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Sent(context.Background(), c.ID, upstreamID); err != nil {
+		t.Fatal(err)
+	}
+	return c.ID
+}
+
+func TestAnEventIsKeptOnceAndMovesItsMessageForward(t *testing.T) {
+	ctx, db := context.Background(), open(t)
+	k := key(t, db)
+	up := "<" + k.ID + "@example.com>" // an upstream id no other run has used
+	id := sent(t, db, k, up)
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	event := func(eventID, kind string) store.Event {
+		return store.Event{Driver: "test", UpstreamEventID: k.ID + eventID, UpstreamID: up, Kind: kind, At: at}
+	}
+	record := func(why string, e store.Event, want store.Recorded, state string) {
+		t.Helper()
+		got, err := db.RecordEvent(ctx, e)
+		m, _ := db.Message(ctx, id)
+		if err != nil || got != want || m.State != state {
+			t.Fatalf("%s: outcome %v (want %v), state %s (want %s), err %v", why, got, want, m.State, state, err)
+		}
+	}
+	record("a delivery", event("1", store.EventDelivered), store.Kept, store.StateDelivered)
+	record("the same event again", event("1", store.EventDelivered), store.Duplicate, store.StateDelivered)
+	record("a late deferral", event("2", store.EventDeferred), store.Kept, store.StateDelivered)
+	bounce := event("3", store.EventComplained)
+	bounce.Code, bounce.Reason = "5.1.1", "abuse"
+	record("a complaint after delivery", bounce, store.Kept, store.StateComplained)
+
+	stranger := event("4", store.EventDelivered)
+	stranger.UpstreamID = "<nobody-" + k.ID + "@example.com>"
+	if got, err := db.RecordEvent(ctx, stranger); err != nil || got != store.NoMessage {
+		t.Fatalf("an event about no known email: %v %v", got, err)
+	}
+	// The same upstream id under another driver is another email.
+	elsewhere := event("5", store.EventBounced)
+	elsewhere.Driver = "another"
+	if got, err := db.RecordEvent(ctx, elsewhere); err != nil || got != store.NoMessage {
+		t.Fatalf("another driver's event: %v %v", got, err)
+	}
+	got, err := db.EventsOf(ctx, id)
+	if err != nil || len(got) != 3 || got[2].Code != "5.1.1" || got[2].Reason != "abuse" || !got[0].At.Equal(at) {
+		t.Fatalf("the message's events: %+v %v", got, err)
+	}
+}
+
+// Of two outcomes the later stands, in either order of arrival; an email
+// that failed after it was taken frees its key; and a message is read with
+// its events as one.
+func TestOutcomesKeysAndTheRecordAsOne(t *testing.T) {
+	ctx, db := context.Background(), open(t)
+	k := key(t, db)
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	for n, order := range [][]string{{store.EventDelivered, store.EventBounced}, {store.EventBounced, store.EventDelivered}} {
+		up := fmt.Sprintf("<order-%d-%s@example.com>", n, k.ID)
+		id := sent(t, db, k, up)
+		for _, kind := range order {
+			when := at
+			if kind == store.EventBounced {
+				when = at.Add(time.Minute) // the bounce happened after the delivery
+			}
+			if _, err := db.RecordEvent(ctx, store.Event{Driver: "test", UpstreamEventID: up + kind, UpstreamID: up, Kind: kind, At: when}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		m, events, err := db.Record(ctx, id)
+		if err != nil || m.State != store.StateBounced || len(events) != 2 {
+			t.Fatalf("arriving as %v: state %s, %d events, %v", order, m.State, len(events), err)
+		}
+	}
+	claim := start(k, "fails-later", "f")
+	first, _ := db.Start(ctx, claim)
+	up := "<fails-" + k.ID + "@example.com>"
+	if err := db.Sent(ctx, first.ID, up); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RecordEvent(ctx, store.Event{Driver: "test", UpstreamEventID: up, UpstreamID: up, Kind: store.EventFailed, At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := db.Start(ctx, claim); err != nil || again.Outcome != store.Started {
+		t.Fatalf("a retry after the email failed: %v %v", again.Outcome, err)
+	}
+	if _, _, err := db.Record(ctx, "not-a-uuid"); err != store.ErrNotFound {
+		t.Fatalf("a malformed id: %v", err)
+	}
+}
+
+// Many readers handing over the same event at once keep it once.
+func TestRacingReadersKeepAnEventOnce(t *testing.T) {
+	ctx, db := context.Background(), open(t)
+	k := key(t, db)
+	up := "<race-" + k.ID + "@example.com>"
+	id := sent(t, db, k, up)
+	const racers = 16
+	kept := make([]store.Recorded, racers)
+	var wg sync.WaitGroup
+	for i := range racers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := db.RecordEvent(ctx, store.Event{Driver: "test", UpstreamEventID: "race-" + k.ID,
+				UpstreamID: up, Kind: store.EventDelivered, At: time.Now()})
+			if err != nil {
+				t.Error(err)
+			}
+			kept[i] = got
+		}()
+	}
+	wg.Wait()
+	n := 0
+	for _, got := range kept {
+		if got == store.Kept {
+			n++
+		}
+	}
+	if events, _ := db.EventsOf(ctx, id); n != 1 || len(events) != 1 {
+		t.Fatalf("%d readers kept the event, the message has %d", n, len(events))
 	}
 }

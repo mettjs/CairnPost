@@ -27,6 +27,9 @@ type Deps struct {
 	// Quota answers the upstream's sending allowance; nil when the driver
 	// in use has none to tell.
 	Quota func(context.Context) (Quota, error)
+	// Events reports whether delivery events are being read; nil when the
+	// driver in use has none to read.
+	Events func() bool
 	// Driver and Version are said by GET /health.
 	Driver, Version string
 	// MaxBodyBytes bounds a request body.
@@ -86,7 +89,15 @@ func (a *app) logged(next http.Handler) http.Handler {
 func (a *app) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version}
+	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version, "events": "off"}
+	// Whether delivery events are being read is said and does not change
+	// the status: mail still goes while they are not.
+	if a.Events != nil {
+		body["events"] = "reading"
+		if !a.Events() {
+			body["events"] = "failing"
+		}
+	}
 	if err := a.Ping(ctx); err != nil {
 		a.Log.Error("api: the database does not answer", "error", err)
 		body["status"] = "unavailable"
