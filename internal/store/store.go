@@ -159,6 +159,7 @@ type Store interface {
 	Webhooks
 	Pruning
 	Sessions
+	Domains
 	// Ping reports whether the store can be reached.
 	Ping(ctx context.Context) error
 }

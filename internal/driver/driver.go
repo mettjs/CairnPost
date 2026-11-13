@@ -75,3 +75,24 @@ type Quota struct {
 type Limited interface {
 	Quota(ctx context.Context) (Quota, error)
 }
+
+// What a DNS record of a sending domain is for.
+const (
+	// UseDKIM is the key receivers check an email's signature against.
+	UseDKIM = "dkim"
+	// UseSPF says which servers may send for the name bounces go to.
+	UseSPF = "spf"
+	// UseBounce is where a receiving server sends a bounce.
+	UseBounce = "bounce"
+)
+
+// Record is one DNS record an upstream asks of a domain before it sends
+// as it: where it is, and enough of what it holds to tell that it is
+// there. The upstream's own values, a key above all, are not known here.
+type Record struct {
+	Use string
+	// Name is the full name it is at; Type is "TXT" or "MX".
+	Name, Type string
+	// Include is, for an SPF record, the include it must name.
+	Include string
+}

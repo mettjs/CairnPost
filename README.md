@@ -289,8 +289,8 @@ them at `GET /capture/emails`: for development and tests.
 The console is at `/console` on the same address as the API. Sign in with
 an admin key; a key that may only send is refused. It shows whether each
 part of the server is working, lists the emails on record and what became
-of each, manages the suppression list and the webhook endpoints, and
-lists, makes and revokes API keys. A new key is shown once,
+of each, manages the suppression list and the webhook endpoints, checks
+each sending domain's DNS, and lists, makes and revokes API keys. A new key is shown once,
 on the page that made it.
 
 - A sign-in lasts `CAIRNPOST_CONSOLE_SESSION` (12 hours), ends when you
@@ -317,6 +317,14 @@ on the page that made it.
   it. "Send a test" posts a signed `webhook.test` and says how the
   endpoint answered. Its page lists what it was sent, fifty to a page,
   and tries again what was not delivered.
+- Domains lists the domains mail is sent from, and checks one's DNS: the
+  records the mail provider asks for (for Cloudflare: its DKIM key, SPF
+  and bounce address) and the DMARC policy, each in place, missing or not
+  right, with what was found. A parent's DMARC record is named as one
+  that may speak for a subdomain. It reads public DNS and asks the provider
+  nothing, so "in place" means found and well formed, not that a key is
+  the provider's own. A key bound to no domain can check any domain,
+  also before anything is sent from it.
 - An email's page shows what happened to it and, where
   `CAIRNPOST_CONTENT_RETENTION` keeps it, what it said: as the text it was
   written in, never drawn as a mail program would.
@@ -346,6 +354,7 @@ cairnpost suppressions remove   send to an address again
 cairnpost webhooks create       have a URL told what becomes of emails
 cairnpost webhooks list         list the webhook endpoints
 cairnpost webhooks remove ID    remove a webhook endpoint
+cairnpost domains check DOMAIN  see whether a domain's DNS is ready
 cairnpost send                  send an email through a running server
 cairnpost version               print the version
 ```
@@ -353,6 +362,13 @@ cairnpost version               print the version
 `keys`, `suppressions`, `webhooks` and `migrate` work on the database directly, so they run where the
 server runs. A key has a scope, `send` or `admin`, and may be bound to one
 sending domain with `--domain`.
+
+`domains check` reads public DNS only: it needs no database and no
+credentials, so it can be run before anything else is set up. It looks for
+the records of the provider named by `CAIRNPOST_DRIVER`, or by
+`-provider` before the domain (`cairnpost domains check -provider
+cloudflare mail.example.com`), and ends as a failure when one is missing,
+or when no provider it knows is named.
 
 ## Configuration
 
@@ -377,6 +393,7 @@ sending domain with `--domain`.
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
+| `CAIRNPOST_DNS_TIMEOUT` | `6s` | The most one check of a domain's DNS records may take, in the console and in `domains check`: a second at least, a minute at most. Raise it where the first DNS server is slow to answer. |
 | `CAIRNPOST_CONSOLE` | `on` | Serve the console at `/console`. `off` leaves it out. |
 | `CAIRNPOST_CONSOLE_SESSION` | `12h` | How long a sign-in to the console lasts: a minute at least, 30 days at most. |
 | `CAIRNPOST_CONSOLE_PLAIN_HTTP` | `off` | Let the console's session cookie travel without TLS, for a console opened over plain http in development. |

@@ -12,6 +12,8 @@ import (
 	"github.com/mettjs/cairnpost/internal/api"
 	"github.com/mettjs/cairnpost/internal/config"
 	"github.com/mettjs/cairnpost/internal/console"
+	"github.com/mettjs/cairnpost/internal/dnscheck"
+	"github.com/mettjs/cairnpost/internal/domains"
 	"github.com/mettjs/cairnpost/internal/driver"
 	"github.com/mettjs/cairnpost/internal/driver/capture"
 	"github.com/mettjs/cairnpost/internal/driver/cloudflare"
@@ -159,7 +161,8 @@ func serve(ctx context.Context) error {
 		if captured != nil {
 			eventsOff = "None to read: this driver keeps emails and sends them to nobody."
 		}
-		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppressions, Webhooks: endpoints, Sessions: session.New(db, cfg.Console.Session),
+		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppressions, Webhooks: endpoints,
+			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
 			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, EventsOff: eventsOff,
 			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP, Log: log})
 		both.Handle(console.Root, pages)

@@ -27,6 +27,7 @@ const usage = `CairnPost: a small transactional email service.
   cairnpost webhooks create       have a URL told what becomes of emails
   cairnpost webhooks list         list the webhook endpoints
   cairnpost webhooks remove ID    remove a webhook endpoint
+  cairnpost domains check DOMAIN  see whether a domain's DNS is ready to send from
   cairnpost send                  send an email through a running server
   cairnpost version               print the version
 
@@ -80,6 +81,8 @@ func run(ctx context.Context, args []string) error {
 		return suppressionsCommand(ctx, args[1:])
 	case "webhooks":
 		return webhooksCommand(ctx, args[1:])
+	case "domains":
+		return domainsCommand(ctx, args[1:])
 	case "send":
 		return sendCommand(ctx, args[1:])
 	case "version":

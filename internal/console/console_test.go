@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/console"
+	"github.com/mettjs/cairnpost/internal/dnscheck"
+	"github.com/mettjs/cairnpost/internal/domains"
 	"github.com/mettjs/cairnpost/internal/driver/capture"
+	"github.com/mettjs/cairnpost/internal/driver/cloudflare"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
@@ -24,11 +27,14 @@ import (
 
 // rig is a console over a store on a clock the test moves.
 type rig struct {
-	t      *testing.T
-	h      http.Handler
-	s      *memstore.Store
-	ks     *keys.Service
-	mail   *mail.Service
+	t    *testing.T
+	h    http.Handler
+	s    *memstore.Store
+	ks   *keys.Service
+	mail *mail.Service
+	// dns is what the DNS the console looks up holds: text records by
+	// name, and "mx:" before a name that has an MX record.
+	dns    map[string][]string
 	now    time.Time
 	logged bytes.Buffer
 	// admin and send are keys in full; adminKey is the admin key's record.
@@ -64,6 +70,7 @@ func newRigOn(t *testing.T, adjust func(*rig, *console.Deps)) *rig {
 	d := console.Deps{Keys: r.ks, Mail: r.mail, Suppress: suppress.New(r.s),
 		Webhooks: webhook.NewService(r.s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, time.Now), Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
 		EventsOff: "Not read.", Log: slog.New(slog.NewTextHandler(&r.logged, nil))}
+	d.Domains = domains.New(r.s, &dnscheck.Checker{Resolver: resolver{r}, Timeout: time.Second}, "cloudflare", cloudflare.Records)
 	adjust(r, &d)
 	r.h = console.New(d)
 	return r

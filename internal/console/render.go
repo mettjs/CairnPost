@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mettjs/cairnpost/internal/domains"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/webhook"
 )
@@ -43,7 +44,9 @@ var helpers = template.FuncMap{
 	"deliveryLabel": func(state string) string { label, _ := deliveryWords(state); return label },
 	"deliveryTone":  func(state string) string { _, tone := deliveryWords(state); return tone },
 	"typeOf":        webhook.TypeOf,
-	"stateOf":       func(kind string) string { return store.StateOf[kind] },
+	// Whether a sending domain is a name that can be looked up.
+	"isHost":  func(name string) bool { _, ok := domains.Host(name); return ok },
+	"stateOf": func(kind string) string { return store.StateOf[kind] },
 }
 
 // parse reads every page at start: a template that does not parse stops

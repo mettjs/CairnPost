@@ -4,9 +4,11 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
@@ -125,5 +127,61 @@ func TestAnAddressesSuppressionsAreFound(t *testing.T) {
 	}
 	if found, err = db.SuppressionsOf(ctx, "", "nobody-"+tail+"@example.org"); err != nil || len(found) != 0 {
 		t.Fatalf("an address that is not suppressed: %+v %v", found, err)
+	}
+}
+
+// The sending domains are those live keys are bound to and those mail
+// was sent from, each once, in order of name.
+func TestSendingDomainsAreThoseOfKeysAndOfMail(t *testing.T) {
+	ctx, db := context.Background(), open(t)
+	k := key(t, db)
+	tail := k.ID[len(k.ID)-12:]
+	sent, bound, both, gone := "a"+tail+".example.com", "b"+tail+".example.com", "c"+tail+".example.com", "d"+tail+".example.com"
+	for _, domain := range []string{bound, both, both, gone} {
+		_, made, err := keys.New(db).Create(ctx, "k", store.ScopeSend, domain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if domain == gone {
+			if err := db.RevokeKey(ctx, made.Prefix); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, sender := range []string{"app@" + sent, "app@" + strings.ToUpper(both), "other@" + sent} {
+		s := start(k, "", "")
+		s.Sender = sender
+		if _, err := db.Start(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := db.SendingDomains(ctx, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]store.SendingDomain{}
+	last := ""
+	for _, d := range all {
+		if d.Name <= last {
+			t.Fatalf("%q after %q: not in order, or twice", d.Name, last)
+		}
+		if last = d.Name; strings.Contains(d.Name, tail) {
+			got[d.Name] = d
+		}
+	}
+	if len(got) != 3 || got[sent].Keys != 0 || got[sent].LastSent == nil || got[bound].Keys != 1 || got[bound].LastSent != nil ||
+		got[both].Keys != 2 || got[both].LastSent == nil {
+		t.Fatalf("%+v", got)
+	}
+	if few, err := db.SendingDomains(ctx, 1); err != nil || len(few) != 1 {
+		t.Fatalf("the first one: %+v %v", few, err)
+	}
+	if one, err := db.SendingDomain(ctx, both); err != nil || one.Keys != 2 || one.LastSent == nil || one.Name != both {
+		t.Fatalf("one by name: %+v %v", one, err)
+	}
+	for _, none := range []string{gone, "nothing-" + tail + ".example.com"} {
+		if _, err := db.SendingDomain(ctx, none); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("%s: %v", none, err)
+		}
 	}
 }

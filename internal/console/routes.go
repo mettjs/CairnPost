@@ -40,6 +40,8 @@ func (c *console) routes() *http.ServeMux {
 	mux.Handle("GET "+Root+"/webhooks/{id}/enabled", toEndpoint)
 	mux.Handle("GET "+Root+"/webhooks/{id}/test", toEndpoint)
 	mux.Handle("GET "+Root+"/webhooks/{id}/deliveries/{delivery}/retry", toEndpoint)
+	mux.Handle("GET "+Root+"/domains", c.signed(c.domainsPage))
+	mux.Handle("GET "+Root+"/domains/{name}", c.signed(c.domainPage))
 	mux.Handle("GET "+Root+"/keys", c.signed(c.keysPage))
 	mux.Handle("POST "+Root+"/keys", c.signed(c.createKey))
 	mux.Handle("GET "+Root+"/keys/{prefix}/revoke", c.signed(c.revokePage))
