@@ -29,8 +29,9 @@ exists.
 - It does not track opens or clicks.
 - It is for transactional email: it does not send newsletters or manage
   audiences.
-- It comes with a small console to manage keys, domains and suppressions,
-  served by the same binary. (Planned; not built yet.)
+- It comes with a small console, served by the same binary at `/console`:
+  sign in with an admin key to see how the server is doing and manage its
+  API keys. More pages are being added.
 - It leans on Go's standard library. Its one direct dependency is the
   Postgres driver, [pgx](https://github.com/jackc/pgx).
 
@@ -283,6 +284,30 @@ with the time until it resets.
 **`capture`** sends nothing. It keeps the last emails in memory and shows
 them at `GET /capture/emails`: for development and tests.
 
+## Console
+
+The console is at `/console` on the same address as the API. Sign in with
+an admin key; a key that may only send is refused. It shows whether each
+part of the server is working, and lists, makes and revokes API keys. A new
+key is shown once, on the page that made it.
+
+- A sign-in lasts `CAIRNPOST_CONSOLE_SESSION` (12 hours), ends when you
+  sign out, and ends at once if the key is revoked. Make the setting
+  shorter and the sign-ins older than it end too.
+- An admin key bound to a sending domain sees, makes and revokes that
+  domain's keys only.
+- A key made in the console says which key made it, and the server's log
+  says who signed in, made a key or revoked one, by the keys' public
+  prefixes. If a key leaks, the keys it made can be found.
+- A sending domain may have `CAIRNPOST_MAX_KEYS` live keys (200), and so
+  may the keys bound to no domain. Revoking one makes room.
+- The session cookie is marked `Secure`, so the console needs https. To
+  open it over plain http on your own machine, set
+  `CAIRNPOST_CONSOLE_PLAIN_HTTP=on`.
+- A change asked for from another site is refused, pages are never cached
+  or framed, and no page runs a script that is not the console's own.
+- `CAIRNPOST_CONSOLE=off` leaves the console out; the API is unchanged.
+
 ## Command line
 
 ```
@@ -328,13 +353,17 @@ sending domain with `--domain`.
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
+| `CAIRNPOST_CONSOLE` | `on` | Serve the console at `/console`. `off` leaves it out. |
+| `CAIRNPOST_CONSOLE_SESSION` | `12h` | How long a sign-in to the console lasts: a minute at least, 30 days at most. |
+| `CAIRNPOST_CONSOLE_PLAIN_HTTP` | `off` | Let the console's session cookie travel without TLS, for a console opened over plain http in development. |
+| `CAIRNPOST_MAX_KEYS` | `200` | How many keys that are not revoked one sending domain may have, and how many the keys bound to no domain may be. |
 | `CAIRNPOST_WEBHOOK_TIMEOUT` | `10s` | The most one try at delivering a webhook may take. |
 | `CAIRNPOST_WEBHOOK_RETRIES` | `5s,5m,30m,2h,5h,10h,10h` | The waits before each further try. A webhook is tried once, then once after each wait, then given up. |
 | `CAIRNPOST_WEBHOOK_WORKERS` | `8` | How many webhooks are being sent at once, to all endpoints together. |
 | `CAIRNPOST_WEBHOOK_PER_ENDPOINT` | `2` | How many are being sent at once to one endpoint. Under the number of workers, it keeps an endpoint that hangs from holding up the others. |
 | `CAIRNPOST_WEBHOOK_MAX_ENDPOINTS` | `20` | How many endpoints may hear about one sending domain, and how many about all. |
 | `CAIRNPOST_WEBHOOK_POLL` | `2s` | How long the sender rests when nothing is due. |
-| `CAIRNPOST_WEBHOOK_ALLOW_PRIVATE` | `false` | Let an endpoint be plain `http://` and at an address that is not on the public internet: for an application on the same private network. |
+| `CAIRNPOST_WEBHOOK_ALLOW_PRIVATE` | `off` | Let an endpoint be plain `http://` and at an address that is not on the public internet: for an application on the same private network. |
 
 `cairnpost send` reads `CAIRNPOST_URL` and `CAIRNPOST_API_KEY`.
 

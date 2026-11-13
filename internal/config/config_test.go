@@ -56,10 +56,11 @@ func TestWebhookSettings(t *testing.T) {
 		t.Fatalf("set: %+v %v", c.Webhook, err)
 	}
 	for name, value := range map[string]string{
-		"CAIRNPOST_WEBHOOK_RETRIES": "5s,soon", "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE": "yes",
+		"CAIRNPOST_WEBHOOK_RETRIES": "5s,soon", "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE": "yes", "CAIRNPOST_MAX_KEYS": "0",
 		"CAIRNPOST_WEBHOOK_WORKERS": "65", "CAIRNPOST_WEBHOOK_TIMEOUT": "0s", "CAIRNPOST_WEBHOOK_PER_ENDPOINT": "9",
 		"CAIRNPOST_WEBHOOK_MAX_ENDPOINTS": "1001",
 	} {
+		name = strings.TrimSpace(name)
 		if _, err := Load(env(append(base, name, value)...)); err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("%s=%s: %v", name, value, err)
 		}
@@ -114,5 +115,32 @@ func TestRetention(t *testing.T) {
 	}
 	if _, err := Load(env(append(base, "CAIRNPOST_PRUNE_EVERY", "never")...)); err == nil || !strings.Contains(err.Error(), "CAIRNPOST_PRUNE_EVERY") {
 		t.Errorf("CAIRNPOST_PRUNE_EVERY: %v", err)
+	}
+}
+
+func TestConsoleSettings(t *testing.T) {
+	base := []string{"CAIRNPOST_POSTGRES_DSN", "postgres://x", "CAIRNPOST_DRIVER", "capture"}
+	c, err := Load(env(base...))
+	if err != nil || !c.Console.On || c.Console.Session != 12*time.Hour || c.Console.PlainHTTP {
+		t.Fatalf("defaults: %+v %v", c.Console, err)
+	}
+	c, err = Load(env(append(base, "CAIRNPOST_CONSOLE", "OFF", "CAIRNPOST_CONSOLE_SESSION", "30m", "CAIRNPOST_CONSOLE_PLAIN_HTTP", "true")...))
+	if err != nil || c.Console.On || c.Console.Session != 30*time.Minute || !c.Console.PlainHTTP {
+		t.Fatalf("set: %+v %v", c.Console, err)
+	}
+	c, err = Load(env(append(base, "CAIRNPOST_CONSOLE_SESSION", "1m", "CAIRNPOST_MAX_KEYS", "7", "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE", "on")...))
+	if err != nil || c.Console.Session != time.Minute || c.MaxKeys != 7 || !c.Webhook.AllowPrivate {
+		t.Fatalf("the shortest session, a key limit, on: %+v %d %v", c.Console, c.MaxKeys, err)
+	}
+	if c, err = Load(env(base...)); err != nil || c.MaxKeys != 200 {
+		t.Fatalf("the key limit's default: %d %v", c.MaxKeys, err)
+	}
+	for _, bad := range [][2]string{
+		{"CAIRNPOST_CONSOLE", "maybe"}, {"CAIRNPOST_CONSOLE_SESSION", "721h"}, {"CAIRNPOST_CONSOLE_SESSION", "500ms"},
+		{"CAIRNPOST_CONSOLE_PLAIN_HTTP", "yes please"}, {"CAIRNPOST_MAX_KEYS", "100001"}, {"CAIRNPOST_MAX_KEYS", "many"},
+	} {
+		if _, err := Load(env(append(base, bad[0], bad[1])...)); err == nil || !strings.Contains(err.Error(), bad[0]) {
+			t.Errorf("%s=%s: %v", bad[0], bad[1], err)
+		}
 	}
 }

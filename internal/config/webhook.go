@@ -64,12 +64,5 @@ func MaxEndpoints(getenv func(string) string) (int, error) {
 // AllowPrivate reads CAIRNPOST_WEBHOOK_ALLOW_PRIVATE on its own, for a
 // command that needs that one setting and not a whole configuration.
 func AllowPrivate(getenv func(string) string) (bool, error) {
-	switch v := strings.ToLower(strings.TrimSpace(getenv("CAIRNPOST_WEBHOOK_ALLOW_PRIVATE"))); v {
-	case "", "false", "0":
-		return false, nil
-	case "true", "1":
-		return true, nil
-	default:
-		return false, fmt.Errorf("config: CAIRNPOST_WEBHOOK_ALLOW_PRIVATE must be true or false (got %q)", v)
-	}
+	return flag(getenv, "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE", false)
 }

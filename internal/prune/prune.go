@@ -81,7 +81,7 @@ func (p *Pruner) Run(ctx context.Context) {
 		}
 		if c != (Counts{}) {
 			// Counts only: no address and no id.
-			p.log.Info("prune: forgot what was kept long enough", "contents", c.Contents, "details", c.Details, "idempotency_keys", c.Keys,
+			p.log.Info("prune: forgot what was kept long enough", "contents", c.Contents, "details", c.Details, "console_sessions", c.Sessions, "idempotency_keys", c.Keys,
 				"emails", c.Emails, "lifted_suppressions", c.Lifted)
 		}
 		select {
@@ -93,7 +93,7 @@ func (p *Pruner) Run(ctx context.Context) {
 }
 
 // Counts is how much a pass deleted.
-type Counts struct{ Contents, Details, Keys, Emails, Lifted int }
+type Counts struct{ Contents, Details, Sessions, Keys, Emails, Lifted int }
 
 // Pass prunes everything due now. What emails said, and what was said of
 // them, goes first and each on its own: it is the most private thing
@@ -103,11 +103,12 @@ type Counts struct{ Contents, Details, Keys, Emails, Lifted int }
 func (p *Pruner) Pass(ctx context.Context) (Counts, error) {
 	var (
 		c    Counts
-		errs [3]error
+		errs [4]error
 	)
 	c.Contents, errs[0] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneContents(ctx, batch) })
 	c.Details, errs[1] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneDetails(ctx, batch) })
-	errs[2] = p.records(ctx, &c)
+	c.Sessions, errs[2] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneSessions(ctx, batch) })
+	errs[3] = p.records(ctx, &c)
 	return c, errors.Join(errs[:]...)
 }
 

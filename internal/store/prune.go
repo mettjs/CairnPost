@@ -16,6 +16,8 @@ type Pruning interface {
 	PruneContents(ctx context.Context, limit int) (int, error)
 	// PruneDetails does the same for what receiving servers said.
 	PruneDetails(ctx context.Context, limit int) (int, error)
+	// PruneSessions deletes console sessions whose time is up.
+	PruneSessions(ctx context.Context, limit int) (int, error)
 	// PruneKeys forgets Idempotency-Keys remembered for ttl or longer: the
 	// ones a new request would take over anyway. A message one of them
 	// left with no answer is recorded as unknown, as a takeover would.

@@ -1,0 +1,224 @@
+/* The console's one stylesheet. System fonts, one accent, one corner
+   radius, hairlines instead of boxes. Light and dark follow the system. */
+
+:root {
+  color-scheme: light dark;
+  --page: #fbfbfa;
+  --raised: #ffffff;
+  --sunk: #f1f1ef;
+  --line: #dcdcd8;
+  --text: #1c1d1f;
+  --soft: #5b5e63;
+  --accent: #0b6e63;
+  --on-accent: #ffffff;
+  --accent-soft: #e3f1ee;
+  --bad: #a4262c;
+  --bad-soft: #fbeceb;
+  --warn-soft: #fbf3dc;
+  --radius: 6px;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #141516;
+    --raised: #1b1c1e;
+    --sunk: #202123;
+    --line: #34363a;
+    --text: #ececea;
+    --soft: #a3a6ab;
+    --accent: #4fc4b4;
+    --on-accent: #0c1413;
+    --accent-soft: #16302c;
+    --bad: #f0928d;
+    --bad-soft: #3a1c1b;
+    --warn-soft: #36301a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+  font: 15px/1.5 var(--sans);
+}
+
+a { color: var(--accent); text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+
+code {
+  font: 0.9em var(--mono);
+  background: var(--sunk);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+/* The bar across the top: name, pages, who is signed in. */
+
+.top {
+  display: flex; align-items: center; gap: 1.5rem;
+  min-height: 56px; padding: 0 1.25rem;
+  background: var(--raised); border-bottom: 1px solid var(--line);
+}
+
+.mark { font-weight: 650; letter-spacing: -0.01em; color: var(--text); text-decoration: none; }
+
+.top nav { display: flex; gap: 0.25rem; flex: 1; overflow-x: auto; }
+
+.top nav a {
+  padding: 0.35rem 0.7rem; border-radius: var(--radius);
+  color: var(--soft); text-decoration: none; white-space: nowrap;
+}
+.top nav a:hover { color: var(--text); background: var(--sunk); }
+.top nav a[aria-current="page"] { color: var(--text); background: var(--sunk); font-weight: 550; }
+
+.who { display: flex; align-items: center; gap: 0.75rem; margin: 0; }
+.who-name { color: var(--soft); font-size: 0.9rem; white-space: nowrap; }
+
+/* The page. */
+
+main { max-width: 1080px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+main.alone { max-width: 26rem; padding-top: 12vh; }
+
+h1 { font-size: 1.6rem; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 0.4rem; font-weight: 650; }
+h2 { font-size: 1.05rem; margin: 2.5rem 0 0.75rem; font-weight: 650; }
+
+.lede { color: var(--soft); max-width: 65ch; margin: 0 0 1.5rem; }
+.narrow { max-width: 36rem; }
+.empty { color: var(--soft); padding: 1.25rem 0; border-top: 1px solid var(--line); }
+
+.notice, .problem {
+  padding: 0.65rem 0.85rem; border-radius: var(--radius); max-width: 65ch;
+}
+.notice { background: var(--accent-soft); margin: 0 0 1.5rem; }
+.problem { background: var(--bad-soft); color: var(--bad); }
+
+/* Forms: the label above, the hint below. */
+
+.field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 1rem; }
+label { font-weight: 550; font-size: 0.9rem; }
+.hint { color: var(--soft); font-size: 0.85rem; margin: 0; }
+
+input, select {
+  font: inherit; color: var(--text); background: var(--raised);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 0.5rem 0.65rem; min-height: 2.4rem; width: 100%;
+}
+input[readonly] { background: var(--sunk); color: var(--soft); }
+
+button {
+  font: inherit; font-weight: 550; cursor: pointer;
+  color: var(--on-accent); background: var(--accent);
+  border: 1px solid var(--accent); border-radius: var(--radius);
+  padding: 0.5rem 0.9rem; min-height: 2.4rem; white-space: nowrap;
+}
+button:hover { filter: brightness(1.08); }
+button:active { transform: translateY(1px); }
+button.quiet { color: var(--text); background: transparent; border-color: var(--line); }
+button.quiet:hover { background: var(--sunk); filter: none; }
+button.danger { background: var(--bad); border-color: var(--bad); color: var(--page); }
+
+form.row {
+  display: grid; gap: 0 1rem; align-items: start;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr) auto;
+}
+form.row button { margin-top: 1.55rem; }
+
+.actions { display: flex; align-items: center; gap: 1.25rem; margin-top: 1.5rem; }
+
+/* A secret shown once. */
+
+.once {
+  background: var(--warn-soft); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; margin: 1.5rem 0;
+}
+.once h2 { margin: 0 0 0.25rem; }
+.once p { margin: 0 0 0.75rem; }
+.secret { display: flex; gap: 0.75rem; align-items: center; }
+.secret code { flex: 1; padding: 0.55rem 0.7rem; background: var(--raised); border: 1px solid var(--line); user-select: all; }
+
+/* Lists of things: a table that scrolls inside its own height, so a long
+   list never makes a long page. */
+
+.scroll { max-height: 60vh; overflow: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+th, td { text-align: left; padding: 0.6rem 0.9rem 0.6rem 0; vertical-align: top; white-space: nowrap; }
+th {
+  position: sticky; top: 0; background: var(--page);
+  color: var(--soft); font-weight: 550; font-size: 0.82rem;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+tbody tr + tr td { border-top: 1px solid var(--line); }
+td:first-child { white-space: normal; overflow-wrap: anywhere; }
+td:last-child, th:last-child { padding-right: 0; }
+td.act { text-align: right; padding-right: 0; }
+tr.gone td { color: var(--soft); }
+.by { display: block; color: var(--soft); font-size: 0.82rem; }
+
+.tag {
+  font-size: 0.75rem; padding: 0.05rem 0.4rem; border-radius: var(--radius);
+  background: var(--accent-soft); color: var(--text);
+}
+
+/* The overview: each part of the server, and how it is doing. */
+
+.parts, .facts { margin: 0; border-top: 1px solid var(--line); }
+.parts > div, .facts > div {
+  display: grid; grid-template-columns: 11rem 1fr; gap: 1rem;
+  padding: 0.75rem 0; border-bottom: 1px solid var(--line);
+}
+dt { color: var(--soft); }
+dd { margin: 0; }
+
+.state { font-weight: 600; margin-right: 0.4rem; }
+.state-ok { color: var(--accent); }
+.state-failing { color: var(--bad); }
+.state-off { color: var(--soft); }
+
+.signin h1 { margin-bottom: 0.25rem; }
+.signin button { width: 100%; }
+
+/* A phone: one column, and the bar wraps under the name. */
+
+@media (max-width: 720px) {
+  .top { flex-wrap: wrap; gap: 0.25rem 1rem; padding: 0.6rem 1rem; }
+  .top nav { order: 3; flex-basis: 100%; }
+  .who { margin-left: auto; }
+  .who-name { display: none; }
+  main { padding: 1.25rem 1rem 3rem; }
+  form.row { grid-template-columns: 1fr; }
+  form.row button { margin-top: 0; }
+  .parts > div, .facts > div { grid-template-columns: 1fr; gap: 0.15rem; }
+  .secret { flex-direction: column; align-items: stretch; }
+
+  /* A table becomes a list: each row a block, each cell named. */
+  thead { display: none; }
+  table, tbody, tr, td { display: block; }
+  tbody tr { padding: 0.7rem 0; }
+  tbody tr + tr { border-top: 1px solid var(--line); }
+  tbody tr + tr td { border-top: 0; }
+  td { padding: 0.1rem 0; white-space: normal; }
+  td[data-label]::before { content: attr(data-label) ": "; color: var(--soft); }
+  td:first-child { font-weight: 600; }
+  td:first-child::before { content: none; }
+  td.act { text-align: left; padding-top: 0.35rem; }
+  td.act:empty { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:active { transform: none; }
+}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/mettjs/cairnpost/internal/config"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/store"
 )
@@ -43,7 +44,11 @@ func keysCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	defer db.Close()
-	svc := keys.New(db)
+	most, err := config.MaxKeys(os.Getenv)
+	if err != nil {
+		return err
+	}
+	svc := keys.New(db).WithMax(most)
 	switch args[0] {
 	case "create":
 		full, k, err := svc.Create(ctx, name, scope, domain)
