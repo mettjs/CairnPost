@@ -18,8 +18,17 @@ func (db *DB) Message(ctx context.Context, id string) (store.Message, error) {
 	if !uuidShape.MatchString(id) {
 		return store.Message{}, store.ErrNotFound
 	}
+	m, err := message(ctx, db.pool, id)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return store.Message{}, fmt.Errorf("postgres: read a message: %w", err)
+	}
+	return m, err
+}
+
+// message reads one message by a well-formed id; store.ErrNotFound for none.
+func message(ctx context.Context, q querier, id string) (store.Message, error) {
 	var m store.Message
-	err := db.pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT id::text, api_key_id::text, sender, recipient, driver, coalesce(upstream_id, ''),
 		       state, created_at, updated_at
 		FROM messages WHERE id = $1::uuid`, id).Scan(
@@ -27,10 +36,7 @@ func (db *DB) Message(ctx context.Context, id string) (store.Message, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.Message{}, store.ErrNotFound
 	}
-	if err != nil {
-		return store.Message{}, fmt.Errorf("postgres: read a message: %w", err)
-	}
-	return m, nil
+	return m, err
 }
 
 // Sent implements store.Mail.

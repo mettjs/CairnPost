@@ -30,6 +30,7 @@ type Store struct {
 	keys     map[string]store.Key // by prefix
 	messages map[string]store.Message
 	idems    map[string]*idem // by key id + "\x00" + idempotency key
+	events   []store.Event
 }
 
 // New returns an empty store on the wall clock.

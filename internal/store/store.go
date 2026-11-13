@@ -123,6 +123,7 @@ type Mail interface {
 type Store interface {
 	Keys
 	Mail
+	Events
 	// Ping reports whether the store can be reached.
 	Ping(ctx context.Context) error
 }
