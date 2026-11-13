@@ -29,8 +29,8 @@ type Driver interface {
 	// Name is what a message's row says delivered it.
 	Name() string
 	// Send answers the upstream's id for the message once the upstream has
-	// taken it. Its errors come in three kinds, and a caller acts on the
-	// kind alone:
+	// taken it; "" when the upstream took it without saying an id. Its
+	// errors come in three kinds, and a caller acts on the kind alone:
 	//
 	//   - wrapping ErrRejected: the message itself is at fault and will
 	//     never be taken. Nothing was sent.
@@ -57,3 +57,21 @@ func (*Throttled) Error() string { return "driver: the upstream's sending limit 
 
 // Unwrap makes a Throttled an ErrUnavailable.
 func (*Throttled) Unwrap() error { return ErrUnavailable }
+
+// Quota is an upstream's sending allowance and how much of it is used.
+type Quota struct {
+	Limit int
+	// Per is the period the limit covers, as the upstream names it ("day").
+	Per  string
+	Used int
+	// Over is the upstream saying the allowance is spent.
+	Over bool
+	// ResetsAt is when the period turns over; zero when the upstream did
+	// not say.
+	ResetsAt time.Time
+}
+
+// Limited is a driver whose upstream can say what its allowance is.
+type Limited interface {
+	Quota(ctx context.Context) (Quota, error)
+}
