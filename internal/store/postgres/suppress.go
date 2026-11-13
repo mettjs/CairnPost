@@ -74,11 +74,14 @@ func (db *DB) Unsuppress(ctx context.Context, domain, address string) error {
 	return nil
 }
 
-// UnsuppressAll implements store.Suppressions.
+// UnsuppressAll implements store.Suppressions. The rows are taken in the
+// list's order, as every writer of many of them takes them.
 func (db *DB) UnsuppressAll(ctx context.Context, domain, reason string) (int, error) {
 	tag, err := db.pool.Exec(ctx, `
-		UPDATE suppressions SET lifted_at = now()
-		WHERE domain = $1 AND lifted_at IS NULL AND ($2 = '' OR reason = $2)`, store.Fold(domain), reason)
+		UPDATE suppressions SET lifted_at = now() WHERE (domain, address) IN (
+			SELECT domain, address FROM suppressions
+			WHERE domain = $1 AND lifted_at IS NULL AND ($2 = '' OR reason = $2)
+			ORDER BY domain, address FOR UPDATE)`, store.Fold(domain), reason)
 	if err != nil {
 		return 0, fmt.Errorf("postgres: lift a domain's suppressions: %w", err)
 	}

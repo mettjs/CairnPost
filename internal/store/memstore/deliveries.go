@@ -100,13 +100,12 @@ func (s *Store) ListDeliveries(_ context.Context, endpointID, state, before stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []store.Delivery
-	past := before == ""
 	for i := len(s.deliveries) - 1; i >= 0 && len(out) < limit; i-- {
 		d := s.deliveries[i]
-		if past && d.EndpointID == endpointID && (state == "" || d.State == state) {
+		// By id, not by meeting the row named: it may have been pruned.
+		if (before == "" || d.ID < before) && d.EndpointID == endpointID && (state == "" || d.State == state) {
 			out = append(out, d.Delivery)
 		}
-		past = past || d.ID == before
 	}
 	return out, nil
 }

@@ -88,9 +88,7 @@ func claim(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
 // answered with the refusal: its email may have gone, and its caller
 // should be able to ask.
 func takeOver(ctx context.Context, tx pgx.Tx, s store.Start, old string, inDoubt bool) (store.Claim, error) {
-	if _, err := tx.Exec(ctx, `
-		UPDATE messages SET state = 'unknown', updated_at = now()
-		WHERE id = $1::uuid AND state = 'sending'`, old); err != nil {
+	if err := markUnknown(ctx, tx, old); err != nil {
 		return store.Claim{}, err
 	}
 	id, err := insertMessage(ctx, tx, s)

@@ -78,11 +78,13 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 				return err
 			}
 		}
-		if !store.Moves(state, e.Kind, newer) {
-			return nil
+		// Every event kept is something that happened to the email, and
+		// its record is kept from then, whether or not its state moves.
+		to, moves := state, store.Moves(state, e.Kind, newer)
+		if moves {
+			to = store.StateOf[e.Kind]
 		}
-		to := store.StateOf[e.Kind]
-		if to == store.StateFailed {
+		if moves && to == store.StateFailed {
 			// The email never went: its key is free for a retry, as after
 			// a refusal at send.
 			if _, err := tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE message_id = $1::uuid`, messageID); err != nil {

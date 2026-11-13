@@ -7,6 +7,7 @@ import (
 	"regexp"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/mettjs/cairnpost/internal/store"
 )
@@ -78,13 +79,26 @@ func (db *DB) Failed(ctx context.Context, id string) error {
 
 // Lost implements store.Mail.
 func (db *DB) Lost(ctx context.Context, id string) error {
-	_, err := db.pool.Exec(ctx, `
-		UPDATE messages SET state = 'unknown', updated_at = now()
-		WHERE id = $1::uuid AND state = 'sending'`, id)
-	if err != nil {
+	if err := markUnknown(ctx, db.pool, id); err != nil {
 		return fmt.Errorf("postgres: mark a message's answer lost: %w", err)
 	}
 	return nil
+}
+
+// execer is what a pool and a transaction both do.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// markUnknown records that what became of messages is not known: each was
+// handed to the upstream and its answer never came. It is the one place
+// that says so, whoever found out: the send itself, the next request under
+// its key, or the pruner forgetting the key.
+func markUnknown(ctx context.Context, q execer, ids ...string) error {
+	_, err := q.Exec(ctx, `
+		UPDATE messages SET state = 'unknown', updated_at = now()
+		WHERE id = ANY($1::uuid[]) AND state = 'sending'`, ids)
+	return err
 }
 
 // insertMessage records a message as sending and answers its id. It is the

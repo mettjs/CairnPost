@@ -56,8 +56,10 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 	}
 	s.events = append(s.events, e)
 	s.owe(e, store.DomainOf(m.Sender))
+	// Every event kept is something that happened to the email.
+	to := m.State
 	if store.Moves(m.State, e.Kind, newer) {
-		to := store.StateOf[e.Kind]
+		to = store.StateOf[e.Kind]
 		if to == store.StateFailed {
 			for at, row := range s.idems {
 				if row.messageID == m.ID {
@@ -65,8 +67,8 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 				}
 			}
 		}
-		s.setState(m.ID, to, "")
 	}
+	s.setState(m.ID, to, "")
 	return store.Kept, nil
 }
 
