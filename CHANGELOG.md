@@ -20,5 +20,6 @@ Every change a user of CairnPost can notice is written here. The format is
 - `GET /limits`: the provider's sending allowance and how much is used.
 - `cairnpost serve`, `migrate`, `send` and `version`; a Dockerfile and a
   Compose file with Postgres 18.
+- Released images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`.
 
 The first release will be v0.1.0.

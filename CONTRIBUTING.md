@@ -123,13 +123,21 @@ CLI and the database migrations.
 2. Commit that alone: `chore(release): vX.Y.Z`.
 3. Tag it: `git tag -a vX.Y.Z -m "CairnPost vX.Y.Z"`.
 4. Push both: `git push origin main vX.Y.Z`.
-5. The release workflow builds the image and pushes
-   `ghcr.io/mettjs/cairnpost` as `X.Y.Z`, `X.Y` and, unless it is a
-   pre-release, `latest`.
+5. The release workflow takes over. It refuses a tag that is not on `main`,
+   runs the tests itself, builds the image for amd64 and arm64, runs each
+   and checks it says `X.Y.Z`, and only then pushes
+   `ghcr.io/mettjs/cairnpost:X.Y.Z`. `X.Y` and `latest` follow the highest
+   release and never move back. A pre-release (`vX.Y.Z-rc.N`) gets its own
+   version tag and nothing else. A version already published is never
+   overwritten.
 6. Publish the GitHub release from the tag, its notes being that version's
    section of the changelog: `gh release create vX.Y.Z --title "vX.Y.Z" --notes-file <section>`,
    with `--prerelease` for a release candidate.
-7. Check the release: the image pulls, `cairnpost version` prints `X.Y.Z`.
+
+Before the tag, rehearse: run the Release workflow by hand on `main`
+(`gh workflow run release.yml`). It does everything a release does except
+push, so a broken release path is found while it can still be fixed. A tag,
+once pushed, cannot be.
 
 The binary's version comes from the tag at build time, never from a constant
 edited by hand.

@@ -31,6 +31,9 @@ about a bounce. The [changelog](CHANGELOG.md) says what exists.
 
 ## Try it
 
+Released images are at `ghcr.io/mettjs/cairnpost`, for amd64 and arm64. To
+run it from source with its database:
+
 ```sh
 docker compose up -d --build
 # Make a key. It is shown once.
