@@ -132,12 +132,16 @@ func TestConsoleSettings(t *testing.T) {
 	if err != nil || c.Console.Session != time.Minute || c.MaxKeys != 7 || !c.Webhook.AllowPrivate {
 		t.Fatalf("the shortest session, a key limit, on: %+v %d %v", c.Console, c.MaxKeys, err)
 	}
-	if c, err = Load(env(base...)); err != nil || c.MaxKeys != 200 {
-		t.Fatalf("the key limit's default: %d %v", c.MaxKeys, err)
+	if c, err = Load(env(base...)); err != nil || c.MaxKeys != 200 || c.DNSTimeout != 6*time.Second {
+		t.Fatalf("the defaults: %d %s %v", c.MaxKeys, c.DNSTimeout, err)
+	}
+	if c, err = Load(env(append(base, "CAIRNPOST_DNS_TIMEOUT", "20s")...)); err != nil || c.DNSTimeout != 20*time.Second {
+		t.Fatalf("a DNS timeout: %s %v", c.DNSTimeout, err)
 	}
 	for _, bad := range [][2]string{
 		{"CAIRNPOST_CONSOLE", "maybe"}, {"CAIRNPOST_CONSOLE_SESSION", "721h"}, {"CAIRNPOST_CONSOLE_SESSION", "500ms"},
 		{"CAIRNPOST_CONSOLE_PLAIN_HTTP", "yes please"}, {"CAIRNPOST_MAX_KEYS", "100001"}, {"CAIRNPOST_MAX_KEYS", "many"},
+		{"CAIRNPOST_DNS_TIMEOUT", "500ms"}, {"CAIRNPOST_DNS_TIMEOUT", "2m"}, {"CAIRNPOST_DNS_TIMEOUT", "soon"},
 	} {
 		if _, err := Load(env(append(base, bad[0], bad[1])...)); err == nil || !strings.Contains(err.Error(), bad[0]) {
 			t.Errorf("%s=%s: %v", bad[0], bad[1], err)

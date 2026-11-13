@@ -59,3 +59,13 @@ func MaxKeys(getenv func(string) string) (int, error) {
 	}
 	return int(n), err
 }
+
+// DNSTimeout reads CAIRNPOST_DNS_TIMEOUT on its own, for a command that
+// needs that one setting and not a whole configuration.
+func DNSTimeout(getenv func(string) string) (time.Duration, error) {
+	d, err := duration(getenv, "CAIRNPOST_DNS_TIMEOUT", 6*time.Second)
+	if err == nil && (d < time.Second || d > time.Minute) {
+		err = fmt.Errorf("config: CAIRNPOST_DNS_TIMEOUT must be between 1s and 1m (got %s)", d)
+	}
+	return d, err
+}

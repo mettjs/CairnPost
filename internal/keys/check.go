@@ -1,18 +1,15 @@
 package keys
 
 import (
-	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/mettjs/cairnpost/internal/address"
 )
 
 // longestName is the most characters a key's name may have.
 const longestName = 100
-
-// domainShape is a host name: labels of letters, digits and hyphens,
-// joined by dots, with no port, path or trailing dot.
-var domainShape = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
 // checked answers a key's name and sending domain as they are kept, or
 // an *Invalid saying what to fix. The name is shown in lists, in a
@@ -28,8 +25,8 @@ func checked(name, domain string) (string, string, error) {
 	case utf8.RuneCountInString(name) > longestName:
 		return "", "", &Invalid{"the name must be at most 100 characters"}
 	}
-	domain = strings.ToLower(strings.TrimSpace(domain))
-	if domain != "" && (len(domain) > 253 || !domainShape.MatchString(domain)) {
+	domain, isHost := address.Host(domain)
+	if domain != "" && !isHost {
 		return "", "", &Invalid{"the sending domain must be a name such as mail.example.com, with no address, port or path"}
 	}
 	return name, domain, nil

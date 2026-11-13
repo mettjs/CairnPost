@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mettjs/cairnpost/internal/domains"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
@@ -30,6 +31,7 @@ type Deps struct {
 	Mail     *mail.Service
 	Suppress *suppress.Service
 	Webhooks *webhook.Service
+	Domains  *domains.Service
 	Sessions *session.Service
 	// Events, Sending and Pruning report whether delivery events are read,
 	// webhooks sent and old records pruned; nil for one that is off.

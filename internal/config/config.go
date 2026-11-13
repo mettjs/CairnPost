@@ -61,6 +61,9 @@ type Config struct {
 	// whoever runs CairnPost to see what went out. 30d at most and never
 	// longer than Retention. Default "off", which is 0: nothing is kept.
 	ContentRetention time.Duration
+	// DNSTimeout is CAIRNPOST_DNS_TIMEOUT: the most one check of a
+	// domain's DNS records may take. Default 6s.
+	DNSTimeout time.Duration
 	// PruneEvery is CAIRNPOST_PRUNE_EVERY: how long the pruner rests
 	// between passes. Default 1h.
 	PruneEvery time.Duration
@@ -195,6 +198,9 @@ func Load(getenv func(string) string) (Config, error) {
 		return c, err
 	}
 	c.CaptureKeep = int(keep)
+	if c.DNSTimeout, err = DNSTimeout(getenv); err != nil {
+		return c, err
+	}
 	if c.PruneEvery, err = duration(getenv, "CAIRNPOST_PRUNE_EVERY", time.Hour); err != nil {
 		return c, err
 	}

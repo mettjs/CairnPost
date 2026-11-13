@@ -56,6 +56,10 @@ Every change a user of CairnPost can notice is written here. The format is
   is kept, what it said.
 - The console shows the suppression list, finds an address on it, adds
   one by hand and lifts one or a sending domain's, asking first.
+- `cairnpost domains check DOMAIN` and the console's Domains page look up
+  a sending domain's DNS: the records the mail provider asks for, and its
+  DMARC policy. The command needs neither the database nor the provider,
+  takes `-provider`, and fails when the domain is not ready.
 - The console manages webhook endpoints: make, change, turn off and on,
   send a test, remove, and see and retry what each was sent.
 - An admin key bound to a sending domain reads that domain's emails only,
