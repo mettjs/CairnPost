@@ -1,0 +1,139 @@
+// Package prune deletes, on a schedule, what CairnPost has kept long
+// enough: Idempotency-Keys past their life, emails' records past the time
+// the operator keeps them, and lifted suppressions nothing can undo any
+// more. A suppression in force is never pruned.
+package prune
+
+import (
+	"context"
+	"log/slog"
+	"sync/atomic"
+	"time"
+
+	"github.com/mettjs/cairnpost/internal/store"
+)
+
+const (
+	// batch is how many rows one delete takes: small enough that no
+	// delete holds its rows for long.
+	batch = 500
+	// batchTimeout bounds one delete. A delete waits for rows another
+	// session holds; without a bound, one that never lets go would stop
+	// the pruner for good and nothing would say so.
+	batchTimeout = time.Minute
+	// firstRetry is the rest after a pass that failed, doubled each time
+	// up to longestRetry or the rest between passes, whichever is less.
+	firstRetry   = 5 * time.Second
+	longestRetry = 5 * time.Minute
+)
+
+// Options are the pruner's settings.
+type Options struct {
+	// Every is how long the pruner rests between passes.
+	Every time.Duration
+	// KeyTTL is how long an Idempotency-Key is remembered.
+	KeyTTL time.Duration
+	// Keep is how long an email's record is kept; 0 keeps records for
+	// ever, and then only keys are pruned.
+	Keep time.Duration
+}
+
+// Pruner forgets what has been kept long enough.
+type Pruner struct {
+	store store.Pruning
+	opt   Options
+	log   *slog.Logger
+	// failing is set while a pass could not finish, for Healthy.
+	failing atomic.Bool
+}
+
+// New returns a pruner.
+func New(s store.Pruning, opt Options, log *slog.Logger) *Pruner {
+	return &Pruner{store: s, opt: opt, log: log}
+}
+
+// Healthy reports whether the last pass finished.
+func (p *Pruner) Healthy() bool { return !p.failing.Load() }
+
+// Run prunes now and then after every rest, until the context ends. A pass
+// that fails is tried again soon, not a whole rest later: most failures
+// pass by themselves, and what it left undone is still due.
+func (p *Pruner) Run(ctx context.Context) {
+	retry := firstRetry
+	for {
+		c, err := p.Pass(ctx)
+		rest := p.opt.Every
+		switch {
+		case ctx.Err() != nil:
+			return
+		case err != nil:
+			rest = min(retry, p.opt.Every)
+			retry = min(retry*2, longestRetry)
+			p.failing.Store(true)
+			p.log.Error("prune: a pass could not finish; trying again", "error", err, "in", rest.String())
+		default:
+			retry = firstRetry
+			if p.failing.Swap(false) {
+				p.log.Info("prune: pruning again")
+			}
+		}
+		if c != (Counts{}) {
+			// Counts only: no address and no id.
+			p.log.Info("prune: forgot what was kept long enough", "idempotency_keys", c.Keys,
+				"emails", c.Emails, "lifted_suppressions", c.Lifted)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(rest):
+		}
+	}
+}
+
+// Counts is how much a pass deleted.
+type Counts struct{ Keys, Emails, Lifted int }
+
+// Pass prunes everything due now. Keys go first: an email's record is not
+// deleted while a key still points at it; lifted suppressions go last,
+// once the emails sent before their lift are gone.
+func (p *Pruner) Pass(ctx context.Context) (Counts, error) {
+	var (
+		c   Counts
+		err error
+	)
+	c.Keys, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneKeys(ctx, p.opt.KeyTTL, batch) })
+	if err != nil || p.opt.Keep == 0 {
+		return c, err
+	}
+	horizon, cancel := context.WithTimeout(ctx, batchTimeout)
+	before, err := p.store.Horizon(horizon, p.opt.Keep)
+	cancel()
+	if err != nil {
+		return c, err
+	}
+	c.Emails, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneMessages(ctx, before, batch) })
+	if err != nil {
+		return c, err
+	}
+	c.Lifted, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneLifted(ctx, before, batch) })
+	return c, err
+}
+
+// all repeats a prune until it finds less than a batch, and answers the
+// total. Each batch has its own deadline, and it stops between batches
+// when the context ends.
+func all(ctx context.Context, prune func(context.Context) (int, error)) (int, error) {
+	total := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		bounded, cancel := context.WithTimeout(ctx, batchTimeout)
+		n, err := prune(bounded)
+		cancel()
+		total += n
+		if err != nil || n < batch {
+			return total, err
+		}
+	}
+}

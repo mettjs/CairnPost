@@ -17,6 +17,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/events"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
+	"github.com/mettjs/cairnpost/internal/prune"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
 	"github.com/mettjs/cairnpost/internal/suppress"
 	"github.com/mettjs/cairnpost/internal/webhook"
@@ -117,13 +118,21 @@ func serve(ctx context.Context) error {
 		log.Warn("webhook endpoints may be plain http and at private addresses (CAIRNPOST_WEBHOOK_ALLOW_PRIVATE)")
 	}
 
+	// What has been kept long enough is deleted beside the API as well.
+	pruner := prune.New(db, prune.Options{Every: cfg.PruneEvery, KeyTTL: cfg.IdempotencyTTL, Keep: cfg.Retention}, log)
+	pruning := make(chan struct{})
+	go func() { defer close(pruning); pruner.Run(ctx) }()
+	if cfg.Retention == 0 {
+		log.Warn("emails' records are kept for ever (CAIRNPOST_RETENTION=off): the database only grows")
+	}
+
 	handler := api.New(api.Deps{
 		Mail: mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 			IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow}, log),
 		Keys: keys.New(db), Suppress: suppress.New(db),
 		Webhooks: webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, time.Now), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
-		Events: eventsHealth(reader), Sending: hooks.Healthy,
+		Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy,
 	})
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler,
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
@@ -145,6 +154,7 @@ func serve(ctx context.Context) error {
 	err = srv.Shutdown(stopCtx)
 	<-reading // the reader finishes the batch it holds
 	<-sending // and the webhooks in flight are settled or handed back
+	<-pruning // and the pruner stops after the delete it is in
 	return err
 }
 

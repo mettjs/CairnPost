@@ -70,7 +70,7 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `POST /webhooks/{id}/deliveries/{delivery}/retry` | Try a webhook now: once more if it was given up, or without waiting for its next try if it is pending. Admin key. |
 | `POST /webhooks/{id}/test` | Send the endpoint a signed `webhook.test` now and say how it answered. Admin key. |
 | `GET /limits` | The provider's sending allowance and how much of it is used, so you know before it runs out. `quota` is `null` for a provider with none to tell. |
-| `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read and webhooks sent. |
+| `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent and old records pruned. |
 
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both;
 `reply_to` and `headers` are optional. Any other field is refused, never
@@ -172,7 +172,7 @@ then given up, after which `…/retry` tries it once more. Webhooks go out
 `CAIRNPOST_WEBHOOK_PER_ENDPOINT` at a time to one endpoint, so one that is
 slow does not hold up another's. A disabled
 endpoint is owed nothing new, and what it was owed waits until it is
-enabled again. An endpoint must be `https://` at a public address, unless
+enabled again, or until its email's record is pruned. An endpoint must be `https://` at a public address, unless
 the operator sets `CAIRNPOST_WEBHOOK_ALLOW_PRIVATE` for an application on
 the same private network. An admin key bound to a sending domain manages
 that domain's endpoints only. Webhooks need delivery events to be read (see
@@ -184,6 +184,20 @@ same news.
 with the same key and the same content is one email: the repeat answers the
 first one's id. A key is remembered for a day from the try that sent, and
 belongs to the API key that used it.
+
+**What is kept, and for how long.** An email's record (who sent it, to
+whom, what became of it, its events and the webhooks sent for them) is kept
+for `CAIRNPOST_RETENTION`, 30 days by default, counted from the last thing
+that happened to it (the send, or its latest event), and then deleted: after
+that `GET /emails/{id}` answers 404 and its webhooks are no longer listed or
+retried. An `Idempotency-Key` is deleted when its day is over. A suppression
+in force is never deleted: it outlives the email that caused it, and then
+names no email. A suppression that was lifted is forgotten once the lift is
+that old too and every email sent before it is gone, so until then a late
+bounce cannot undo the lift. The retention is 7 days at least, because a receiving server may go on
+trying an email for days before it bounces; `off` keeps records for ever.
+The pruner runs every `CAIRNPOST_PRUNE_EVERY`, and `GET /health` says
+`"pruning": "running"` or `"failing"`. Mail still goes while it is failing.
 
 **Errors** are JSON: `{"statusCode": 422, "name": "validation_error", "message": "..."}`.
 The status tells a program what to do:
@@ -287,6 +301,8 @@ sending domain with `--domain`.
 | `CAIRNPOST_EVENTS_LEASE` | `1m` | How long a batch taken stays this reader's, and so how long it has to record it. |
 | `CAIRNPOST_EVENTS_RETRY` | `30s` | How long an event handed back waits before it is given again. |
 | `CAIRNPOST_IDEMPOTENCY_TTL` | `24h` | How long an `Idempotency-Key` is remembered. |
+| `CAIRNPOST_RETENTION` | `30d` | How long an email's record is kept after the last thing that happened to it, in days (`30d`) or hours (`720h`). At least `7d`, and longer than `CAIRNPOST_IDEMPOTENCY_TTL` and than the waits of `CAIRNPOST_WEBHOOK_RETRIES` together. `off` keeps records for ever. |
+| `CAIRNPOST_PRUNE_EVERY` | `1h` | How long the pruner rests between passes. |
 | `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. |
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |

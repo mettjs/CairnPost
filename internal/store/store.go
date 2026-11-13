@@ -135,6 +135,7 @@ type Store interface {
 	Events
 	Suppressions
 	Webhooks
+	Pruning
 	// Ping reports whether the store can be reached.
 	Ping(ctx context.Context) error
 }
