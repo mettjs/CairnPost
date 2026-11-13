@@ -39,6 +39,12 @@ func New(accountID, token string) *Driver {
 	return &Driver{base: host + "/accounts/" + accountID, token: token, http: &http.Client{}}
 }
 
+// NewAt is New against another API root: a stand-in for Cloudflare in a
+// test, or a proxy in front of it.
+func NewAt(root, token string) *Driver {
+	return &Driver{base: root, token: token, http: &http.Client{}}
+}
+
 var (
 	_ driver.Driver  = (*Driver)(nil)
 	_ driver.Limited = (*Driver)(nil)
