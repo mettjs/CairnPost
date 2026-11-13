@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/store"
@@ -64,14 +63,9 @@ func (a *app) failSuppress(w http.ResponseWriter, err error) {
 // ?limit= sizes the page, and ?after= takes the "next" of the page before.
 func (a *app) listSuppressions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := 0
-	if raw := q.Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 {
-			fail(w, http.StatusUnprocessableEntity, "validation_error", `"limit" must be a whole number above zero.`)
-			return
-		}
-		limit = n
+	limit, ok := limitOf(w, r)
+	if !ok {
+		return
 	}
 	domain, err := domainFor(r, q.Get("domain"))
 	if err != nil {

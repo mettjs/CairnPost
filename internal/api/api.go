@@ -13,6 +13,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
 // Deps is what the API is built from.
@@ -20,6 +21,7 @@ type Deps struct {
 	Mail     *mail.Service
 	Keys     *keys.Service
 	Suppress *suppress.Service
+	Webhooks *webhook.Service
 	// Ping reports whether the store answers, for GET /health.
 	Ping func(context.Context) error
 	// Captured answers the emails a development driver kept instead of
@@ -32,6 +34,9 @@ type Deps struct {
 	// Events reports whether delivery events are being read; nil when the
 	// driver in use has none to read.
 	Events func() bool
+	// Sending reports whether what the webhook endpoints are owed can be
+	// read, and so sent; nil when no webhooks are sent from here.
+	Sending func() bool
 	// Driver and Version are said by GET /health.
 	Driver, Version string
 	// MaxBodyBytes bounds a request body.
@@ -50,6 +55,14 @@ func New(d Deps) http.Handler {
 	mux.Handle("GET /suppressions", a.auth(true, a.listSuppressions))
 	mux.Handle("POST /suppressions", a.auth(true, a.addSuppression))
 	mux.Handle("POST /suppressions/lift", a.auth(true, a.liftSuppressions))
+	mux.Handle("POST /webhooks", a.auth(true, a.createWebhook))
+	mux.Handle("GET /webhooks", a.auth(true, a.listWebhooks))
+	mux.Handle("GET /webhooks/{id}", a.auth(true, a.getWebhook))
+	mux.Handle("PATCH /webhooks/{id}", a.auth(true, a.updateWebhook))
+	mux.Handle("DELETE /webhooks/{id}", a.auth(true, a.deleteWebhook))
+	mux.Handle("GET /webhooks/{id}/deliveries", a.auth(true, a.listDeliveries))
+	mux.Handle("POST /webhooks/{id}/deliveries/{delivery}/retry", a.auth(true, a.retryDelivery))
+	mux.Handle("POST /webhooks/{id}/test", a.auth(true, a.testWebhook))
 	if d.Captured != nil {
 		mux.Handle("GET /capture/emails", a.auth(true, a.captured))
 	}
@@ -94,7 +107,13 @@ func (a *app) logged(next http.Handler) http.Handler {
 func (a *app) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version, "events": "off"}
+	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version, "events": "off", "webhooks": "off"}
+	if a.Sending != nil {
+		body["webhooks"] = "sending"
+		if !a.Sending() {
+			body["webhooks"] = "failing"
+		}
+	}
 	// Whether delivery events are being read is said and does not change
 	// the status: mail still goes while they are not.
 	if a.Events != nil {

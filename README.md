@@ -62,8 +62,15 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
 | `POST /suppressions` | Stop sending to an address from a domain: `{"domain", "address", "note"}`. The note is optional, one line of at most 500 bytes. Admin key. |
 | `POST /suppressions/lift` | Send to an address again: `{"domain", "address"}`. Or to every suppressed address of a domain: `{"domain", "all": true}`, which `"reason"` narrows to `bounce`, `complaint` or `manual`. Answers `{"lifted": n}`. Admin key. |
+| `POST /webhooks` | Have a URL told what becomes of emails: `{"url", "domain", "events", "description"}`; all but `url` optional. Answers the endpoint with its signing `secret`, which is said only here. Admin key. |
+| `GET /webhooks`, `GET /webhooks/{id}` | The endpoints. Admin key. |
+| `PATCH /webhooks/{id}` | Change any of `url`, `events`, `description`, `enabled`. Admin key. |
+| `DELETE /webhooks/{id}` | Remove an endpoint and all it was owed. Admin key. |
+| `GET /webhooks/{id}/deliveries` | What the endpoint was sent and how each went, newest first. `?state=` narrows to `pending`, `delivered` or `failed`. A page is 50 unless `?limit=` says otherwise (500 at most); when more follow, the answer has a `next` to pass as `?after=`. Admin key. |
+| `POST /webhooks/{id}/deliveries/{delivery}/retry` | Try a webhook now: once more if it was given up, or without waiting for its next try if it is pending. Admin key. |
+| `POST /webhooks/{id}/test` | Send the endpoint a signed `webhook.test` now and say how it answered. Admin key. |
 | `GET /limits` | The provider's sending allowance and how much of it is used, so you know before it runs out. `quota` is `null` for a provider with none to tell. |
-| `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read. |
+| `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read and webhooks sent. |
 
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both;
 `reply_to` and `headers` are optional. Any other field is refused, never
@@ -108,6 +115,70 @@ or `-all`. A lift is remembered: a late bounce of an email sent before it
 does not bring the suppression back, but an email sent after it that
 bounces for good does. An admin key bound to a sending domain manages that
 domain's list only. This needs delivery events to be read (see Drivers).
+
+**Webhooks.** An endpoint is a URL of yours that CairnPost posts to when
+something becomes of an email, so you need not ask. It hears about one
+sending domain or all of them, and the event types you name or all of them:
+
+| Type | When |
+|---|---|
+| `email.delivered` | The receiving server took the email. |
+| `email.delivery_delayed` | It said "not now"; the provider keeps trying. |
+| `email.bounced` | It refused the email. `data.bounce.type` says how. |
+| `email.complained` | The recipient marked the email as spam. |
+| `email.failed` | The provider took the email and then did not send it. |
+
+```json
+{
+  "type": "email.bounced",
+  "created_at": "2026-01-02T03:04:05Z",
+  "data": {
+    "email_id": "0199...",
+    "from": "app@mail.example.com",
+    "to": ["ana@example.org"],
+    "created_at": "2026-01-02T03:04:01Z",
+    "code": "5.1.1",
+    "reason": "permanent_failure",
+    "bounce": {"type": "Permanent"},
+    "suppressed": true
+  }
+}
+```
+
+A webhook never carries the email's subject or body. `bounce.type` is
+`Permanent` when the address itself will never take mail, `Transient` when
+it may yet, and `Policy` when the receiving server refused for good for a
+reason that is the sender's (a failed signature, a blocklist): nothing is
+wrong with that address, so do not ask its owner to change it.
+`suppressed` says that, with this event, the address is on the sending
+domain's suppression list. A `Permanent` bounce can come with `suppressed`
+false: when the suppression was lifted and the email that bounced was sent
+before the lift.
+
+Each webhook is signed as [Standard Webhooks](https://www.standardwebhooks.com/)
+describes, which is also how Svix signs, so a library for either verifies
+it with the endpoint's `secret`. The headers go out under both names:
+`webhook-id`, `webhook-timestamp`, `webhook-signature` and `svix-id`,
+`svix-timestamp`, `svix-signature`. The signature is the HMAC-SHA256 of
+`id.timestamp.body` under the key inside the secret. Verify it before
+believing a webhook, and refuse a timestamp far from now. The id is the
+same on every try of one webhook, so use it to tell a repeat: a webhook can
+arrive more than once, and webhooks can arrive out of order.
+
+Answer with any 2xx within `CAIRNPOST_WEBHOOK_TIMEOUT`. Anything else, a
+redirect included, is a failed try: the webhook is tried again after each
+wait in `CAIRNPOST_WEBHOOK_RETRIES` (about 28 hours in all by default) and
+then given up, after which `…/retry` tries it once more. Webhooks go out
+`CAIRNPOST_WEBHOOK_PER_ENDPOINT` at a time to one endpoint, so one that is
+slow does not hold up another's. A disabled
+endpoint is owed nothing new, and what it was owed waits until it is
+enabled again. An endpoint must be `https://` at a public address, unless
+the operator sets `CAIRNPOST_WEBHOOK_ALLOW_PRIVATE` for an application on
+the same private network. An admin key bound to a sending domain manages
+that domain's endpoints only. Webhooks need delivery events to be read (see
+Drivers); a bounce of an email CairnPost has no record of suppresses the
+address but sends no webhook, so treat a 422 `recipient_suppressed` as the
+same news.
 
 **Idempotency.** Send an `Idempotency-Key` header and a request repeated
 with the same key and the same content is one email: the repeat answers the
@@ -217,6 +288,13 @@ sending domain with `--domain`.
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
+| `CAIRNPOST_WEBHOOK_TIMEOUT` | `10s` | The most one try at delivering a webhook may take. |
+| `CAIRNPOST_WEBHOOK_RETRIES` | `5s,5m,30m,2h,5h,10h,10h` | The waits before each further try. A webhook is tried once, then once after each wait, then given up. |
+| `CAIRNPOST_WEBHOOK_WORKERS` | `8` | How many webhooks are being sent at once, to all endpoints together. |
+| `CAIRNPOST_WEBHOOK_PER_ENDPOINT` | `2` | How many are being sent at once to one endpoint. Under the number of workers, it keeps an endpoint that hangs from holding up the others. |
+| `CAIRNPOST_WEBHOOK_MAX_ENDPOINTS` | `20` | How many endpoints may hear about one sending domain, and how many about all. |
+| `CAIRNPOST_WEBHOOK_POLL` | `2s` | How long the sender rests when nothing is due. |
+| `CAIRNPOST_WEBHOOK_ALLOW_PRIVATE` | `false` | Let an endpoint be plain `http://` and at an address that is not on the public internet: for an application on the same private network. |
 
 `cairnpost send` reads `CAIRNPOST_URL` and `CAIRNPOST_API_KEY`.
 

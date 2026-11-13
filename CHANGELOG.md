@@ -22,6 +22,12 @@ Every change a user of CairnPost can notice is written here. The format is
   `POST /suppressions/lift` and `cairnpost suppressions list|add|remove`
   show the list, add to it by hand, and lift one entry or a whole domain's.
   A lift is remembered, so a late bounce of an older email does not undo it.
+- Webhooks: `POST /webhooks` has a URL told what becomes of emails
+  (`email.delivered`, `email.delivery_delayed`, `email.bounced`,
+  `email.complained`, `email.failed`), signed as Standard Webhooks and Svix
+  sign, retried on a schedule (`CAIRNPOST_WEBHOOK_*`). Endpoints are listed,
+  changed, disabled, removed and tried out; their deliveries are listed and
+  a webhook given up, or waiting, tried again by hand.
 - API keys with a scope (`send` or `admin`), optionally bound to one sending
   domain; stored hashed, shown once. `cairnpost keys create|list|revoke`.
 - The `cloudflare` driver: delivery through Cloudflare Email Sending.

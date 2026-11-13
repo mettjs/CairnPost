@@ -42,3 +42,26 @@ func TestWhatCannotRunIsRefusedAndSaysWhy(t *testing.T) {
 		}
 	}
 }
+
+func TestWebhookSettings(t *testing.T) {
+	base := []string{"CAIRNPOST_POSTGRES_DSN", "postgres://x", "CAIRNPOST_DRIVER", "capture"}
+	c, err := Load(env(base...))
+	if err != nil || c.Webhook.Timeout != 10*time.Second || c.Webhook.Workers != 8 || c.Webhook.PerEndpoint != 2 || c.Webhook.MaxEndpoints != 20 ||
+		c.Webhook.Poll != 2*time.Second || c.Webhook.AllowPrivate || len(c.Webhook.Retries) != 7 ||
+		c.Webhook.Retries[0] != 5*time.Second || c.Webhook.Retries[6] != 10*time.Hour {
+		t.Fatalf("defaults: %+v %v", c.Webhook, err)
+	}
+	c, err = Load(env(append(base, "CAIRNPOST_WEBHOOK_RETRIES", "1s, 2m", "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE", "TRUE")...))
+	if err != nil || len(c.Webhook.Retries) != 2 || c.Webhook.Retries[1] != 2*time.Minute || !c.Webhook.AllowPrivate {
+		t.Fatalf("set: %+v %v", c.Webhook, err)
+	}
+	for name, value := range map[string]string{
+		"CAIRNPOST_WEBHOOK_RETRIES": "5s,soon", "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE": "yes",
+		"CAIRNPOST_WEBHOOK_WORKERS": "65", "CAIRNPOST_WEBHOOK_TIMEOUT": "0s", "CAIRNPOST_WEBHOOK_PER_ENDPOINT": "9",
+		"CAIRNPOST_WEBHOOK_MAX_ENDPOINTS": "1001",
+	} {
+		if _, err := Load(env(append(base, name, value)...)); err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s=%s: %v", name, value, err)
+		}
+	}
+}

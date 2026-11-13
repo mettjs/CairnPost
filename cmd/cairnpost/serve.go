@@ -19,6 +19,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/webhook"
 	"github.com/mettjs/cairnpost/migrations"
 )
 
@@ -106,16 +107,29 @@ func serve(ctx context.Context) error {
 		close(reading)
 	}
 
+	// Webhooks are sent beside the API too, and stop with it.
+	poster := webhook.NewPoster(cfg.Webhook.Timeout, cfg.Webhook.AllowPrivate, cfg.Webhook.PerEndpoint, version, time.Now)
+	hooks := webhook.NewWorker(db, poster, webhook.Options{Poll: cfg.Webhook.Poll, Workers: cfg.Webhook.Workers,
+		PerEndpoint: cfg.Webhook.PerEndpoint, Retries: cfg.Webhook.Retries}, log)
+	sending := make(chan struct{})
+	go func() { defer close(sending); hooks.Run(ctx) }()
+	if cfg.Webhook.AllowPrivate {
+		log.Warn("webhook endpoints may be plain http and at private addresses (CAIRNPOST_WEBHOOK_ALLOW_PRIVATE)")
+	}
+
 	handler := api.New(api.Deps{
 		Mail: mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 			IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow}, log),
-		Keys: keys.New(db), Suppress: suppress.New(db), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
+		Keys: keys.New(db), Suppress: suppress.New(db),
+		Webhooks: webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, time.Now), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
-		Events: eventsHealth(reader),
+		Events: eventsHealth(reader), Sending: hooks.Healthy,
 	})
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler,
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
-		WriteTimeout: cfg.SendTimeout + 20*time.Second, IdleTimeout: 2 * time.Minute}
+		// The slowest answers are a send and the try-out of a webhook
+		// endpoint: each must be able to run to its own timeout.
+		WriteTimeout: max(cfg.SendTimeout, cfg.Webhook.Timeout) + 20*time.Second, IdleTimeout: 2 * time.Minute}
 
 	failed := make(chan error, 1)
 	go func() { failed <- srv.ListenAndServe() }()
@@ -130,6 +144,7 @@ func serve(ctx context.Context) error {
 	defer cancel()
 	err = srv.Shutdown(stopCtx)
 	<-reading // the reader finishes the batch it holds
+	<-sending // and the webhooks in flight are settled or handed back
 	return err
 }
 
