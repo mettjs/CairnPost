@@ -55,6 +55,24 @@ func TestAConsoleSessionLivesAndEnds(t *testing.T) {
 	if err := db.DeleteSession(ctx, hash("out")); err != nil {
 		t.Fatalf("deleting it twice: %v", err)
 	}
+	// What a session looks for is kept with it, and is its own.
+	if err := db.LookFor(ctx, hash("kept"), "ana@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.LookFor(ctx, hash("never"), "bo@example.org"); err != nil {
+		t.Fatalf("looking for something in no session: %v", err)
+	}
+	for token, want := range map[string]string{"kept": "ana@example.org", "old": "", "never": "", "out": ""} {
+		if got, err := db.LookingFor(ctx, hash(token)); err != nil || got != want {
+			t.Fatalf("session %s looks for %q: %v", token, got, err)
+		}
+	}
+	if err := db.LookFor(ctx, hash("kept"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := db.LookingFor(ctx, hash("kept")); err != nil || got != "" {
+		t.Fatalf("after looking for nothing: %q %v", got, err)
+	}
 	// A session begun under a longer setting ends when it is made shorter.
 	if _, _, err := db.SessionKey(ctx, hash("kept"), time.Nanosecond); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a session older than sessions now last is still found: %v", err)

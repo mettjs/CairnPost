@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/keys"
+	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
 )
 
@@ -24,6 +25,7 @@ const Root = "/console"
 // Deps is what the console is built from.
 type Deps struct {
 	Keys     *keys.Service
+	Mail     *mail.Service
 	Sessions *session.Service
 	// Events, Sending and Pruning report whether delivery events are read,
 	// webhooks sent and old records pruned; nil for one that is off.
@@ -58,6 +60,14 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST "+Root+"/signin", c.signin)
 	mux.Handle("POST "+Root+"/signout", c.signed(c.signout))
 	mux.Handle("GET "+Root+"/{$}", c.signed(c.overview))
+	mux.Handle("GET "+Root+"/emails", c.signed(c.emailsPage))
+	mux.Handle("POST "+Root+"/emails/find", c.signed(c.findEmails))
+	// A refused search leaves this address in the browser: asked for
+	// again, it is the list.
+	mux.Handle("GET "+Root+"/emails/find", c.signed(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, Root+"/emails", http.StatusSeeOther)
+	}))
+	mux.Handle("GET "+Root+"/emails/{id}", c.signed(c.emailPage))
 	mux.Handle("GET "+Root+"/keys", c.signed(c.keysPage))
 	mux.Handle("POST "+Root+"/keys", c.signed(c.createKey))
 	mux.Handle("GET "+Root+"/keys/{prefix}/revoke", c.signed(c.revokePage))

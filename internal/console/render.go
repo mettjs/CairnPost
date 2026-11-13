@@ -29,6 +29,12 @@ var helpers = template.FuncMap{
 	// as a machine reads it.
 	"day":   func(t time.Time) string { return t.UTC().Format("2 Jan 2006") },
 	"stamp": func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
+	// An email's state, as a person reads it.
+	"label":    func(state string) string { return wordsOf(state).Label },
+	"meaning":  func(state string) string { return wordsOf(state).Meaning },
+	"tone":     func(state string) string { return wordsOf(state).Tone },
+	"happened": happened,
+	"stateOf":  func(kind string) string { return store.StateOf[kind] },
 }
 
 // parse reads every page at start: a template that does not parse stops

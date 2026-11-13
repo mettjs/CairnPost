@@ -269,6 +269,34 @@ func TestAnEmailIsReadByItsSenderAndByAdmins(t *testing.T) {
 	}
 }
 
+// An admin key that manages one sending domain reads that domain's
+// emails, as it manages that domain's everything else, and no other's.
+func TestAKeyBoundToADomainReadsOnlyItsOwnEmails(t *testing.T) {
+	var ours, theirs string
+	r := newRigWith(t, func(d *api.Deps) {
+		var err error
+		if ours, _, err = d.Keys.Create(context.Background(), "tenant", store.ScopeAdmin, "example.com"); err != nil {
+			t.Fatal(err)
+		}
+		if theirs, _, err = d.Keys.Create(context.Background(), "neighbour", store.ScopeAdmin, "other.example"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	_, _, sent := r.do("POST", "/emails", r.send, "", good)
+	path := "/emails/" + sent["id"].(string)
+	if code, _, got := r.do("GET", path, ours, "", ""); code != 200 || got["to"] != "ana@example.org" {
+		t.Fatalf("its own domain's email: %d", code)
+	}
+	if code, name, got := r.do("GET", path, theirs, "", ""); code != 404 || name != "not_found" || got["to"] != nil {
+		t.Fatalf("another domain's email: %d %s", code, name)
+	}
+	// An email it sent itself is its own to read.
+	_, _, own := r.do("POST", "/emails", theirs, "", `{"from":"app@other.example","to":"bo@example.org","subject":"Hello","text":"Body"}`)
+	if code, _, _ := r.do("GET", "/emails/"+own["id"].(string), theirs, "", ""); code != 200 {
+		t.Fatalf("the email it sent: %d", code)
+	}
+}
+
 func TestCapturedMailNeedsAnAdminKey(t *testing.T) {
 	r := newRig(t)
 	r.do("POST", "/emails", r.send, "", good)

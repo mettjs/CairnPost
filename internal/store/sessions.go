@@ -15,6 +15,11 @@ type Sessions interface {
 	// started longer ago than ttl (so that making sessions shorter ends
 	// the ones already begun), and for one whose key was revoked since.
 	SessionKey(ctx context.Context, hash []byte, ttl time.Duration) (Key, time.Time, error)
+	// LookFor keeps, with a session, the address its owner is looking
+	// for, "" for none. No error if there is no such session.
+	LookFor(ctx context.Context, hash []byte, address string) error
+	// LookingFor answers that address, "" for none and for no session.
+	LookingFor(ctx context.Context, hash []byte) (string, error)
 	// DeleteSession ends a session; no error if there is none.
 	DeleteSession(ctx context.Context, hash []byte) error
 }

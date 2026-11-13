@@ -9,8 +9,8 @@ import (
 
 // session is a console session: whose it is and when it ends.
 type session struct {
-	keyID            string
-	started, expires time.Time
+	keyID, lookingFor string
+	started, expires  time.Time
 }
 
 // CreateSession implements store.Sessions.
@@ -38,6 +38,24 @@ func (s *Store) SessionKey(_ context.Context, hash []byte, ttl time.Duration) (s
 		}
 	}
 	return store.Key{}, time.Time{}, store.ErrNotFound
+}
+
+// LookFor implements store.Sessions.
+func (s *Store) LookFor(_ context.Context, hash []byte, address string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if held, ok := s.sessions[string(hash)]; ok {
+		held.lookingFor = address
+		s.sessions[string(hash)] = held
+	}
+	return nil
+}
+
+// LookingFor implements store.Sessions.
+func (s *Store) LookingFor(_ context.Context, hash []byte) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessions[string(hash)].lookingFor, nil
 }
 
 // DeleteSession implements store.Sessions.

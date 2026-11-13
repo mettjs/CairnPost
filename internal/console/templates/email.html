@@ -1,0 +1,58 @@
+{{define "title"}}Email{{end}}
+{{define "main"}}
+<p class="back"><a href="{{.Root}}/emails">Emails</a></p>
+<h1 class="long">Email to {{.Data.Email.Recipient}}</h1>
+<p class="lede"><span class="state state-{{tone .Data.Email.State}}">{{label .Data.Email.State}}</span> {{meaning .Data.Email.State}}</p>
+
+<dl class="facts">
+  <div><dt>To</dt><dd class="long">{{.Data.Email.Recipient}}</dd></div>
+  <div><dt>From</dt><dd class="long">{{.Data.Email.Sender}}</dd></div>
+  <div><dt>Sent</dt><dd><time datetime="{{stamp .Data.Email.CreatedAt}}">{{when .Data.Email.CreatedAt}}</time></dd></div>
+  <div><dt>Last heard of</dt><dd><time datetime="{{stamp .Data.Email.UpdatedAt}}">{{when .Data.Email.UpdatedAt}}</time></dd></div>
+  <div><dt>Id</dt><dd><code>{{.Data.Email.ID}}</code></dd></div>
+  <div><dt>Mail provider</dt><dd><code>{{.Data.Email.Driver}}</code>{{if .Data.Email.UpstreamID}} knows it as <code>{{.Data.Email.UpstreamID}}</code>{{end}}</dd></div>
+</dl>
+
+<section aria-labelledby="happened">
+  <h2 id="happened">What happened to it</h2>
+  {{if not .Data.Events}}
+  <p class="empty">Nothing has been reported about this email since it was sent.</p>
+  {{else}}
+  {{if .Data.SaidUnread}}<p class="problem" role="alert">What the receiving servers said could not be read. Reload the page to try again.</p>{{end}}
+  <ol class="events" tabindex="0" aria-labelledby="happened">
+    {{range .Data.Events}}
+    <li>
+      <time datetime="{{stamp .At}}">{{when .At}}</time>
+      <div>
+        <span class="state state-{{tone (stateOf .Kind)}}">{{happened .Kind}}</span>{{if .Permanent}} <span class="tag">for good</span>{{end}}
+        {{if or .Code .Reason}}<span class="why">{{if .Code}}<code>{{.Code}}</code>{{end}} {{.Reason}}</span>{{end}}
+        {{if .Said}}<pre class="said" tabindex="0">{{.Said}}</pre>{{end}}
+      </div>
+    </li>
+    {{end}}
+  </ol>
+  {{end}}
+</section>
+
+<section aria-labelledby="said">
+  <h2 id="said">What it said</h2>
+  {{if .Data.Unread}}
+  <p class="problem" role="alert">What this email said could not be read. Reload the page to try again.</p>
+  {{else if not .Data.Content}}
+  <p class="empty">Nothing this email said is kept. A server keeps what emails say only while <code>CAIRNPOST_CONTENT_RETENTION</code> is set, and only for that long.</p>
+  {{else}}
+  {{with .Data.Content}}
+  <p class="hint">Kept until <time datetime="{{stamp .KeptUntil}}">{{when .KeptUntil}}</time>, then deleted. Shown as it was written, not as a mail program would draw it.</p>
+  <dl class="facts">
+    <div><dt>Subject</dt><dd class="long">{{.Subject}}</dd></div>
+    {{if .FromName}}<div><dt>Sender's name</dt><dd class="long">{{.FromName}}</dd></div>{{end}}
+    {{if .ReplyTo}}<div><dt>Replies go to</dt><dd class="long">{{.ReplyTo}}</dd></div>{{end}}
+    {{if $.Data.Headers}}<div><dt>Headers</dt><dd><pre class="said" tabindex="0">{{range $.Data.Headers}}{{.}}
+{{end}}</pre></dd></div>{{end}}
+    {{if .Text}}<div><dt>Text</dt><dd><pre class="said" tabindex="0">{{.Text}}</pre></dd></div>{{end}}
+    {{if .HTML}}<div><dt>HTML, as source</dt><dd><pre class="said" tabindex="0">{{.HTML}}</pre></dd></div>{{end}}
+  </dl>
+  {{end}}
+  {{end}}
+</section>
+{{end}}

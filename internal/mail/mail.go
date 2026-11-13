@@ -163,12 +163,6 @@ func (s *Service) deliver(ctx context.Context, id string, m driver.Message) erro
 	}
 }
 
-// Message answers a message's record and what happened to it since, oldest
-// first, as they stood at one moment; store.ErrNotFound for none.
-func (s *Service) Message(ctx context.Context, id string) (store.Message, []store.Event, error) {
-	return s.events.Record(ctx, id)
-}
-
 // fingerprint is a digest of a request keyed by the caller's API key, which
 // is kept nowhere: whoever reads the digest cannot test a guessed body
 // against it.
