@@ -6,6 +6,12 @@ Every change a user of CairnPost can notice is written here. The format is
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-12
+
+The first release: CairnPost takes an email over HTTP with an API key and
+hands it to Cloudflare Email Sending, once. It does not yet read delivery
+events, so it does not know about a bounce.
+
 ### Added
 
 - `POST /emails`: send one email to one recipient with an API key. A request
@@ -22,4 +28,5 @@ Every change a user of CairnPost can notice is written here. The format is
   Compose file with Postgres 18.
 - Released images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`.
 
-The first release will be v0.1.0.
+[Unreleased]: https://github.com/mettjs/CairnPost/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/mettjs/CairnPost/releases/tag/v0.1.0

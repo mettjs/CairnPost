@@ -9,7 +9,7 @@ A small, self-hostable transactional email service: one HTTP API, API keys
 and idempotent sends, in front of the mail provider you choose. Written in
 Go, backed by Postgres.
 
-**Status: early.** Nothing is released yet. It sends through Cloudflare
+**Status: early.** It sends through Cloudflare
 Email Sending and records that the provider took each email; delivery
 events, webhooks and a suppression list come next, so it does not yet know
 about a bounce. The [changelog](CHANGELOG.md) says what exists.
