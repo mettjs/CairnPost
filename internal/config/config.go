@@ -56,6 +56,11 @@ type Config struct {
 	// or as a duration, 7d at least; "off" keeps records for ever, and is
 	// 0 here. Default 30d.
 	Retention time.Duration
+	// ContentRetention is CAIRNPOST_CONTENT_RETENTION: how long what an
+	// email said (subject, bodies, headers) is kept after it is sent, for
+	// whoever runs CairnPost to see what went out. 30d at most and never
+	// longer than Retention. Default "off", which is 0: nothing is kept.
+	ContentRetention time.Duration
 	// PruneEvery is CAIRNPOST_PRUNE_EVERY: how long the pruner rests
 	// between passes. Default 1h.
 	PruneEvery time.Duration
@@ -195,7 +200,10 @@ func Load(getenv func(string) string) (Config, error) {
 	for _, wait := range c.Webhook.Retries {
 		retries += wait
 	}
-	c.Retention, err = retention(getenv, c.IdempotencyTTL, retries)
+	if c.Retention, err = retention(getenv, c.IdempotencyTTL, retries); err != nil {
+		return c, err
+	}
+	c.ContentRetention, err = contentRetention(getenv, c.Retention)
 	return c, err
 }
 

@@ -43,6 +43,10 @@ Every change a user of CairnPost can notice is written here. The format is
   `Idempotency-Key` when its life is over. A suppression in force is never
   deleted; a lifted one is forgotten once no email sent before the lift is
   on record.
+- Content retention, off by default: with `CAIRNPOST_CONTENT_RETENTION` set
+  (30 days at most), what each email said, and what the receiving server
+  said about a bounce or a delay, is kept for that long and shown by
+  `GET /emails/{id}` to an admin key. Never logged, never in a webhook.
 - `cairnpost serve`, `migrate`, `send` and `version`; a Dockerfile and a
   Compose file with Postgres 18.
 - Images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`, published with

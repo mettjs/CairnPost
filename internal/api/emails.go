@@ -66,6 +66,10 @@ type emailView struct {
 	CreatedAt time.Time   `json:"created_at"`
 	UpdatedAt time.Time   `json:"updated_at"`
 	Events    []eventView `json:"events"`
+	// Content is what the email said: there only where the operator keeps
+	// it, while it is kept, and for an admin key that may see the sending
+	// domain.
+	Content *mail.Content `json:"content,omitempty"`
 }
 
 // eventView is one thing that happened to an email after it was sent.
@@ -78,6 +82,9 @@ type eventView struct {
 	// provider's short name for what happened ("permanent_failure").
 	Code   string `json:"code,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// Detail is the receiving server's own sentence: there under the rule
+	// for an email's content, since it can quote the email.
+	Detail string `json:"detail,omitempty"`
 }
 
 // getEmail is GET /emails/{id}: what became of an email, and each thing
@@ -93,9 +100,24 @@ func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "unavailable", "The email could not be read. Try again shortly.")
 	default:
 		// Times are answered in UTC, whatever zone the server runs in.
-		view := emailView{m.ID, m.Sender, m.Recipient, m.State, m.CreatedAt.UTC(), m.UpdatedAt.UTC(), []eventView{}}
+		view := emailView{m.ID, m.Sender, m.Recipient, m.State, m.CreatedAt.UTC(), m.UpdatedAt.UTC(), []eventView{}, nil}
+		// What it said is for whoever runs CairnPost: an admin key, and
+		// one bound to a sending domain for that domain's only. A send
+		// key is never shown it, not even for its own emails. If it
+		// cannot be read, the record is answered without it.
+		var said map[string]string
+		if c.key.Scope == store.ScopeAdmin && (c.key.Domain == "" || c.key.Domain == store.DomainOf(m.Sender)) {
+			if view.Content, err = a.Mail.Content(r.Context(), m.ID); err != nil {
+				a.Log.Error("api: an email's kept content could not be read", "error", err)
+			}
+			if len(events) > 0 {
+				if said, err = a.Mail.Details(r.Context(), m.ID); err != nil {
+					a.Log.Error("api: what was said of an email could not be read", "error", err)
+				}
+			}
+		}
 		for _, e := range events {
-			view.Events = append(view.Events, eventView{e.Kind, e.At.UTC(), e.Permanent, e.Code, e.Reason})
+			view.Events = append(view.Events, eventView{e.Kind, e.At.UTC(), e.Permanent, e.Code, e.Reason, said[e.ID]})
 		}
 		write(w, http.StatusOK, view)
 	}

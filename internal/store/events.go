@@ -30,7 +30,8 @@ var StateOf = map[string]string{
 }
 
 // Event is one thing that happened to an email after the upstream took it.
-// It never holds the email's subject or body, nor any server's free text.
+// It never holds the email's subject or body. A server's free text is in
+// Detail alone, on its way to being kept apart.
 type Event struct {
 	ID        string
 	MessageID string
@@ -46,6 +47,13 @@ type Event struct {
 	// name for what happened; either may be "".
 	Code, Reason string
 	At           time.Time
+	// Detail is the receiving server's own sentence, "" for none. It can
+	// quote the email, so RecordEvent keeps it apart from the event, under
+	// the rule for what emails say, and nothing but Details answers it.
+	// KeepDetail is how long after its email was sent it is kept: a
+	// sentence that comes later than that is not kept at all.
+	Detail     string
+	KeepDetail time.Duration
 	// Suppressed says that, with this event, the address was on its
 	// sending domain's suppression list. It is set by RecordEvent and
 	// answered with a delivery to be tried (Webhooks.TakeDeliveries).
@@ -106,4 +114,8 @@ type Events interface {
 	// Record is a message and its events as they stood at one moment;
 	// ErrNotFound for an id no message has.
 	Record(ctx context.Context, messageID string) (Message, []Event, error)
+	// Details answers the receiving servers' sentences kept for a
+	// message's events, by event id, while they are kept and the message
+	// was sent less than keep ago.
+	Details(ctx context.Context, messageID string, keep time.Duration) (map[string]string, error)
 }

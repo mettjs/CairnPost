@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mettjs/cairnpost/internal/driver"
 )
@@ -201,5 +202,50 @@ func TestAnEventsAddressesAreReadBare(t *testing.T) {
 	odd := strings.Replace(delivered, `"recipient":"ana@example.org"`, `"recipient":["ana@example.org"]`, 1)
 	if e, ok := read(odd); !ok || e.Recipient != "" {
 		t.Fatalf("a recipient that is no address: %+v %v", e, ok)
+	}
+}
+
+// The receiving server's sentence is read only by a reader built to keep
+// it, and comes out as text a database takes: whole, bounded, no NUL.
+func TestTheServersSentenceIsReadOnlyWhenAsked(t *testing.T) {
+	if e, ok := read(bounced); !ok || e.Detail != "" {
+		t.Fatalf("read unasked: %q", e.Detail)
+	}
+	if got := sentence(bounced); got != "permanent error (550): 5.1.1 no such user" {
+		t.Fatalf("%q", got)
+	}
+	const head = `{"type":"cf.email.sending.message.deferred","payload":{"eventId":"e","messageId":"<m@example.com>",`
+	for name, c := range map[string][2]string{
+		"the delivery's, when the bounce has none": {`"delivery":{"smtpResponse":"451 try later"}}}`, "451 try later"},
+		"none at all":      {`"delivery":{}}}`, ""},
+		"not a string":     {`"bounce":{"reason":{"a":1}}}}`, ""},
+		"a NUL and spaces": {`"bounce":{"reason":"  gone\u0000 away  "}}}`, "gone away"},
+	} {
+		if got := sentence(head + c[0]); got != c[1] {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+	long := sentence(head + `"bounce":{"reason":"` + strings.Repeat("é", 2000) + `"}}}`)
+	if len(long) > longestSentence || len(long) < longestSentence-1 || !utf8.ValidString(long) {
+		t.Errorf("a long sentence is kept as %d bytes, valid %v", len(long), utf8.ValidString(long))
+	}
+	if got := sentence("not json"); got != "" {
+		t.Errorf("%q", got)
+	}
+}
+
+// A reader built to keep details reads a server's sentence for a bounce
+// or a delay, and for nothing else; one not built to reads none.
+func TestOnlyABounceOrADelayHasADetail(t *testing.T) {
+	spoke := strings.Replace(delivered, `"status":"delivered"`, `"status":"delivered","smtpResponse":"250 OK queued"`, 1)
+	body := `{"success":true,"result":{"messages":[{"body":` + strconv.Quote(bounced) + `,"lease_id":"a"},{"body":` +
+		strconv.Quote(spoke) + `,"lease_id":"b"}]}}`
+	plain, err := (&stand{status: 200, body: body}).serve(t).Events("q").Take(context.Background(), 2, time.Minute)
+	if err != nil || len(plain) != 2 || plain[0].Event.Detail != "" {
+		t.Fatalf("unasked: %+v %v", plain, err)
+	}
+	asked, err := (&stand{status: 200, body: body}).serve(t).Events("q").WithDetails().Take(context.Background(), 2, time.Minute)
+	if err != nil || len(asked) != 2 || asked[0].Event.Detail != "permanent error (550): 5.1.1 no such user" || asked[1].Event.Detail != "" {
+		t.Fatalf("asked: %+v %v", asked, err)
 	}
 }

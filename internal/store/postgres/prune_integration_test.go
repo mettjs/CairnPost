@@ -5,8 +5,11 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/mettjs/cairnpost/internal/store"
 )
@@ -238,4 +241,117 @@ func TestAnEmailWithAKeyOrALateEventIsKept(t *testing.T) {
 	kept("an email with an event today", late, true)
 	exec(t, `DELETE FROM idempotency_keys WHERE message_id = $1::uuid`, keyed)
 	kept("the same email, its key gone", keyed, false)
+}
+
+// What an email said is kept with its message in the one step, as it
+// came, whatever bytes it holds; it is answered only within its time, and
+// pruned by its own age.
+func TestWhatAnEmailSaidIsKeptWithItAndForgottenOnTime(t *testing.T) {
+	ctx, db := context.Background(), open(t)
+	k := key(t, db)
+	words := []byte("{\"subject\":\"a NUL \x00 and \xff are kept as they came\"}")
+	s := start(k, "worded", "one")
+	asked := 0
+	s.Content, s.KeepContent = func() []byte { asked++; return words }, time.Hour
+	c, err := db.Start(ctx, s)
+	if err != nil || c.Outcome != store.Started {
+		t.Fatalf("%v %v", c.Outcome, err)
+	}
+	plain, err := db.Start(ctx, start(k, "plain", "one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, until, err := db.Content(ctx, c.ID, time.Hour)
+	if err != nil || string(got) != string(words) || time.Until(until) < 59*time.Minute || time.Until(until) > time.Hour {
+		t.Fatalf("%q until %s: %v", got, until, err)
+	}
+	if got, _, err := db.Content(ctx, plain.ID, time.Hour); err != nil || got != nil {
+		t.Fatalf("an email sent without keeping its words has %q: %v", got, err)
+	}
+	// A request that loses the race for its key is rolled back whole: no
+	// words are left behind without a message.
+	// And a request that does not start a send is never asked for its
+	// words.
+	if again, err := db.Start(ctx, s); err != nil || again.Outcome != store.InFlight || asked != 1 {
+		t.Fatalf("%v %v, asked for its words %d times", again.Outcome, err, asked)
+	}
+	// One who keeps for less is not answered what a longer setting kept.
+	if got, _, err := db.Content(ctx, c.ID, time.Nanosecond); err != nil || got != nil {
+		t.Fatalf("kept an hour, answered to one who keeps none: %q %v", got, err)
+	}
+	// What a receiving server said is kept until its email's words are,
+	// as it came, and handed to no webhook; one that comes later is not.
+	end := endpoint(t, db, store.Endpoint{Enabled: true})
+	up := "<said-" + k.ID + ">"
+	if err := db.Sent(ctx, c.ID, up); err != nil {
+		t.Fatal(err)
+	}
+	e := bounced(up, "5.1.1")
+	e.Detail, e.KeepDetail = "550 a NUL \x00 and \xff too", time.Hour
+	if got, err := db.RecordEvent(ctx, e); err != nil || got != store.Kept {
+		t.Fatalf("an event with a sentence a text column would refuse: %v %v", got, err)
+	}
+	said, err := db.Details(ctx, c.ID, time.Hour)
+	if err != nil || len(said) != 1 {
+		t.Fatalf("%v %v", said, err)
+	}
+	for _, sentence := range said {
+		if sentence != e.Detail {
+			t.Fatalf("kept as %q", sentence)
+		}
+	}
+	for _, d := range take(t, db, 10, end) {
+		if d.Event.Detail != "" {
+			t.Fatalf("a webhook was handed %q", d.Event.Detail)
+		}
+	}
+	// Two hours on, neither is answered, even before it is pruned; then
+	// both are pruned, and the record stays. A sentence that comes now is
+	// not kept at all.
+	exec(t, `UPDATE messages SET created_at = created_at - interval '2 hours' WHERE id = $1::uuid`, c.ID)
+	exec(t, `UPDATE message_contents SET created_at = created_at - interval '2 hours', expires_at = expires_at - interval '2 hours'
+		WHERE message_id = $1::uuid`, c.ID)
+	exec(t, `UPDATE event_details SET expires_at = expires_at - interval '2 hours'
+		WHERE event_id IN (SELECT id FROM events WHERE message_id = $1::uuid)`, c.ID)
+	if got, _, err := db.Content(ctx, c.ID, 1000*time.Hour); err != nil || got != nil {
+		t.Fatalf("past its time, still answered: %q %v", got, err)
+	}
+	if said, err := db.Details(ctx, c.ID, 1000*time.Hour); err != nil || len(said) != 0 {
+		t.Fatalf("past its time, still answered: %v %v", said, err)
+	}
+	left := func() (n int) {
+		t.Helper()
+		conn, err := pgx.Connect(ctx, os.Getenv("CAIRNPOST_TEST_DSN"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close(ctx)
+		if err := conn.QueryRow(ctx, `
+			SELECT (SELECT count(*) FROM message_contents WHERE message_id = $1::uuid) +
+			       (SELECT count(*) FROM event_details d JOIN events e ON e.id = d.event_id WHERE e.message_id = $1::uuid)`,
+			c.ID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if left() != 2 {
+		t.Fatalf("%d rows to prune, want 2", left())
+	}
+	if _, err := db.PruneContents(ctx, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.PruneDetails(ctx, 1000); err != nil {
+		t.Fatal(err)
+	}
+	late := bounced(up, "5.1.1")
+	late.UpstreamEventID, late.Detail, late.KeepDetail = late.UpstreamEventID+"-late", "said too late", time.Hour
+	if _, err := db.RecordEvent(ctx, late); err != nil {
+		t.Fatal(err)
+	}
+	if left() != 0 {
+		t.Fatalf("%d rows left after the prune", left())
+	}
+	if _, err := db.Message(ctx, c.ID); err != nil {
+		t.Fatalf("the record went with its words: %v", err)
+	}
 }

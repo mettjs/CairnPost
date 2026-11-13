@@ -1,5 +1,5 @@
 -- The first schema: who may call, what was sent, and which sends were
--- already taken. No table holds a subject or a body.
+-- already taken. No table here holds a subject or a body.
 
 CREATE TABLE api_keys (
     id         uuid PRIMARY KEY DEFAULT uuidv7(),

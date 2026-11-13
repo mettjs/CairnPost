@@ -17,6 +17,15 @@ import (
 type Events struct {
 	d    *Driver
 	path string
+	// details says to read the receiving server's sentence too.
+	details bool
+}
+
+// WithDetails returns the same reader, reading also the sentence a
+// receiving server gave for a bounce or a delay. That sentence can quote
+// the email, so it is read only where the operator keeps what emails say.
+func (e *Events) WithDetails() *Events {
+	return &Events{d: e.d, path: e.path, details: true}
 }
 
 // Events returns the reader of a queue's events.
@@ -55,6 +64,9 @@ func (e *Events) Take(ctx context.Context, max int, lease time.Duration) ([]driv
 	out := make([]driver.Received, 0, len(res.Messages))
 	for _, m := range res.Messages {
 		event, ok := read(m.Body)
+		if ok && e.details && (event.Kind == driver.Bounced || event.Kind == driver.Deferred) {
+			event.Detail = sentence(m.Body)
+		}
 		if event.At.IsZero() && m.Stamp > 0 {
 			// The event did not say when: the queue's own stamp is close.
 			event.At = time.UnixMilli(m.Stamp).UTC()

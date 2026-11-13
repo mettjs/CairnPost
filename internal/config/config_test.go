@@ -85,6 +85,23 @@ func TestRetention(t *testing.T) {
 			t.Errorf("%q: %v", value, err)
 		}
 	}
+	// What emails say is kept only when asked, for a short time, and never
+	// longer than the record.
+	for value, want := range map[string]time.Duration{"": 0, "off": 0, "36h": 36 * time.Hour, "30d": 30 * 24 * time.Hour} {
+		c, err := Load(env(append(base, "CAIRNPOST_CONTENT_RETENTION", value)...))
+		if err != nil || c.ContentRetention != want {
+			t.Errorf("content %q: %s %v", value, c.ContentRetention, err)
+		}
+	}
+	for says, pairs := range map[string][]string{
+		"such as 24h":         {"CAIRNPOST_CONTENT_RETENTION", "a while"},
+		"at most 30d":         {"CAIRNPOST_CONTENT_RETENTION", "31d", "CAIRNPOST_RETENTION", "off"},
+		"CAIRNPOST_RETENTION": {"CAIRNPOST_CONTENT_RETENTION", "10d", "CAIRNPOST_RETENTION", "7d"},
+	} {
+		if _, err := Load(env(append(base, pairs...)...)); err == nil || !strings.Contains(err.Error(), says) {
+			t.Errorf("content %v: %v", pairs, err)
+		}
+	}
 	// A key is never remembered longer than its email's record is kept.
 	if _, err := Load(env(append(base, "CAIRNPOST_RETENTION", "7d", "CAIRNPOST_IDEMPOTENCY_TTL", "200h")...)); err == nil ||
 		!strings.Contains(err.Error(), "CAIRNPOST_IDEMPOTENCY_TTL") {

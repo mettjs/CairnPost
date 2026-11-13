@@ -52,7 +52,8 @@ const (
 )
 
 // Message is one email to one recipient, as it is kept: who, to whom, by
-// which upstream and what became of it. Never its subject or its body.
+// which upstream and what became of it. Never its subject or its body:
+// those are kept apart, and only when the operator chose to.
 type Message struct {
 	ID         string
 	KeyID      string
@@ -109,6 +110,12 @@ type Start struct {
 	// TTL is how long a key is remembered; InDoubt how long a try with no
 	// answer blocks the next one.
 	TTL, InDoubt time.Duration
+	// Content answers what the email said, to be kept with its message
+	// for KeepContent; nil when it is not kept, which is the rule unless
+	// the operator chose otherwise. It is asked only when a message is
+	// recorded, and the store keeps the answer as it comes, unread.
+	Content     func() []byte
+	KeepContent time.Duration
 }
 
 // Mail keeps messages and the idempotency keys they were sent under.
@@ -126,6 +133,11 @@ type Mail interface {
 	Failed(ctx context.Context, id string) error
 	// Message answers ErrNotFound for an id no message has.
 	Message(ctx context.Context, id string) (Message, error)
+	// Content answers what a message said and until when it is shown: if
+	// it was kept, its own time is not up, and it has been kept for less
+	// than keep. Nil otherwise: what is past its time is not answered
+	// even before it is pruned, nor what a longer setting once kept.
+	Content(ctx context.Context, id string, keep time.Duration) ([]byte, time.Time, error)
 }
 
 // Store is everything, as the composition root holds it.

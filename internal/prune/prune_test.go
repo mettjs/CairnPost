@@ -184,6 +184,57 @@ func TestKeepingForEverPrunesOnlyKeys(t *testing.T) {
 	}
 }
 
+// worded records an email whose words are kept for a time.
+func (r *rig) worded(to string, keep time.Duration) string {
+	r.t.Helper()
+	c, err := r.s.Start(context.Background(), store.Start{KeyID: "k", Sender: "app@example.com", Recipient: to,
+		Driver: "test", Content: func() []byte { return []byte(`{"subject":"hello"}`) }, KeepContent: keep})
+	if err != nil || c.Outcome != store.Started {
+		r.t.Fatalf("did not start: %v %v", c.Outcome, err)
+	}
+	return c.ID
+}
+
+func (r *rig) kept(id string) bool {
+	r.t.Helper()
+	raw, _, err := r.s.Content(context.Background(), id, 1000*24*time.Hour)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return raw != nil
+}
+
+// What emails said goes when the time it was kept for is up, long before
+// the record, and also when records are kept for ever. Each goes by the
+// time it was given, whatever the pruner's own settings.
+func TestWhatEmailsSaidIsForgottenOnItsOwnTime(t *testing.T) {
+	r := newRig(t)
+	short, long := r.worded("ana@example.org", 36*time.Hour), r.worded("ben@example.org", 72*time.Hour)
+	r.days(2)
+	if c := r.pass(0); c != (Counts{Contents: 1}) || r.kept(short) || !r.kept(long) {
+		t.Fatalf("%+v, short kept %v, long kept %v", c, r.kept(short), r.kept(long))
+	}
+	if _, err := r.s.Message(context.Background(), short); err != nil {
+		t.Fatalf("the record went with its words: %v", err)
+	}
+	r.days(1)
+	if c := r.pass(month); c != (Counts{Contents: 1}) || r.kept(long) {
+		t.Fatalf("a day later: %+v, kept %v", c, r.kept(long))
+	}
+}
+
+// The words go even when the rest of the pass cannot be done.
+func TestAFailureElsewhereDoesNotKeepTheWords(t *testing.T) {
+	r := newRig(t)
+	id := r.worded("ana@example.org", time.Hour)
+	r.days(2)
+	f := &failing{Pruning: r.s, err: errors.New("the database is away")}
+	c, err := New(f, Options{Every: time.Hour, KeyTTL: time.Hour, Keep: month}, quiet).Pass(context.Background())
+	if err == nil || c.Contents != 1 || r.kept(id) {
+		t.Fatalf("%+v %v, kept %v", c, err, r.kept(id))
+	}
+}
+
 // failing is a store whose prunes fail until told otherwise.
 type failing struct {
 	store.Pruning

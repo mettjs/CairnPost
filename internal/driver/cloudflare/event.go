@@ -36,9 +36,9 @@ var (
 // Only what names the event is required: its type, its id and its email's
 // id. Everything else is read if it has the shape expected and left out if
 // not, because four of the six kinds were never seen live and an event must
-// not be thrown away over a field nobody needs. The email's subject, and
-// the receiving server's own sentences, which can quote the email, are
-// never read at all.
+// not be thrown away over a field nobody needs. The email's subject is
+// never read at all, and the receiving server's own sentences, which can
+// quote the email, not here: see sentence.
 func read(body string) (driver.Event, bool) {
 	var envelope struct {
 		Type     string                     `json:"type"`
@@ -80,6 +80,36 @@ func read(body string) (driver.Event, bool) {
 	}
 	e.Sender, e.Recipient = bareAddress(envelope.Payload["sender"]), bareAddress(envelope.Payload["recipient"])
 	return e, true
+}
+
+// longestSentence bounds what is kept of a server's sentence.
+const longestSentence = 1000
+
+// sentence is what the receiving server said about a bounce or a delay,
+// "" when the event has none. It is read apart from the event, and only
+// by a reader built to keep it.
+func sentence(body string) string {
+	var envelope struct {
+		Payload map[string]json.RawMessage `json:"payload"`
+	}
+	if json.Unmarshal([]byte(body), &envelope) != nil {
+		raw, err := base64.StdEncoding.DecodeString(body)
+		if err != nil || json.Unmarshal(raw, &envelope) != nil {
+			return ""
+		}
+	}
+	for _, said := range []string{text(object(envelope.Payload["bounce"])["reason"]),
+		text(object(envelope.Payload["delivery"])["smtpResponse"])} {
+		// Text a database takes: no NUL, whole characters, not long.
+		said = strings.TrimSpace(strings.ReplaceAll(strings.ToValidUTF8(said, ""), "\x00", ""))
+		if len(said) > longestSentence {
+			said = strings.ToValidUTF8(said[:longestSentence], "")
+		}
+		if said != "" {
+			return said
+		}
+	}
+	return ""
 }
 
 // bareAddress is a JSON value as a bare email address, "" for anything else.

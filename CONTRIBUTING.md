@@ -7,7 +7,8 @@ when it keeps it small and sharp.
 
 ## What it is not
 
-- It keeps nothing of an email's subject or body, and never logs them.
+- It never logs an email's subject or body, and keeps neither unless the
+  operator turns content retention on, and then only for a short time.
 - It does not track opens or clicks.
 - It is for transactional email: no newsletters, no audiences.
 

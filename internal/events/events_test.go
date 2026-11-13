@@ -420,3 +420,29 @@ func TestABounceOfAnEmailWithNoRecordStillSuppresses(t *testing.T) {
 		t.Fatalf("a suppression with no message was not given the one that bounced next: %+v", list)
 	}
 }
+
+// A receiving server's sentence is kept only by a reader told how long to
+// keep it, whatever the source hands over; and it is never logged.
+func TestAServersSentenceIsKeptOnlyWhenContentIs(t *testing.T) {
+	for keep, want := range map[time.Duration]int{0: 0, time.Hour: 1} {
+		r := newRig(t)
+		id := r.sent("up-1")
+		bounce := r.event("l1", "e1", "up-1", driver.Bounced)
+		bounce.Event.Detail = "550 SENTENCEMARK no such user"
+		r.queue.items = []driver.Received{bounce}
+		opt := options
+		opt.KeepDetails = keep
+		reader := events.New(r.store, func(context.Context) error { return nil }, r.queue, "fake", opt,
+			func() time.Time { return r.now }, slog.New(slog.NewTextHandler(&r.logged, nil)))
+		if n, err := reader.Pass(context.Background()); n != 1 || err != nil {
+			t.Fatalf("%d %v", n, err)
+		}
+		said, err := r.store.Details(context.Background(), id, 1000*time.Hour)
+		if err != nil || len(said) != want {
+			t.Errorf("keeping for %s: %d sentences kept, want %d (%v)", keep, len(said), want, err)
+		}
+		if strings.Contains(r.logged.String(), "SENTENCEMARK") {
+			t.Errorf("the log holds the sentence: %s", r.logged.String())
+		}
+	}
+}

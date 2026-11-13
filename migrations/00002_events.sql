@@ -27,7 +27,7 @@ CREATE TABLE events (
     permanent         boolean NOT NULL DEFAULT false,
     -- The receiving server's status ("5.1.1") and the upstream's short name
     -- for what happened ("permanent_failure"). Never a sentence: a server's
-    -- own words can quote the email, which is never kept.
+    -- own words can quote the email, and are never kept here.
     code              text,
     reason            text,
     occurred_at       timestamptz NOT NULL,

@@ -56,6 +56,17 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		if err != nil {
 			return err
 		}
+		if e.Detail != "" {
+			// Kept until its email's content is, counted from the send;
+			// a sentence that comes after that is not kept.
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO event_details (event_id, detail, expires_at)
+				SELECT $1::uuid, $2, $3::timestamptz + make_interval(secs => $4)
+				WHERE $3::timestamptz + make_interval(secs => $4) > now()`,
+				eventID, []byte(e.Detail), sentAt, e.KeepDetail.Seconds()); err != nil {
+				return err
+			}
+		}
 		// A new event is owed to the endpoints that hear about it, whether
 		// or not it moves the message's state.
 		if err := oweWebhooks(ctx, tx, eventID, store.DomainOf(sender), e.Kind); err != nil {
@@ -137,6 +148,30 @@ func (db *DB) Record(ctx context.Context, messageID string) (store.Message, []st
 		return store.Message{}, nil, fmt.Errorf("postgres: read a message's record: %w", err)
 	}
 	return m, events, nil
+}
+
+// Details implements store.Events. Age is read on the database's clock.
+func (db *DB) Details(ctx context.Context, messageID string, keep time.Duration) (map[string]string, error) {
+	out := map[string]string{}
+	if !uuidShape.MatchString(messageID) {
+		return out, nil
+	}
+	rows, err := db.pool.Query(ctx, `
+		SELECT d.event_id::text, d.detail FROM event_details d
+		JOIN events e ON e.id = d.event_id JOIN messages m ON m.id = e.message_id
+		WHERE e.message_id = $1::uuid AND d.expires_at > now()
+		  AND m.created_at > now() - make_interval(secs => $2)`, messageID, keep.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("postgres: read a message's event details: %w", err)
+	}
+	var (
+		id     string
+		detail []byte
+	)
+	if _, err := pgx.ForEachRow(rows, []any{&id, &detail}, func() error { out[id] = string(detail); return nil }); err != nil {
+		return nil, fmt.Errorf("postgres: read a message's event details: %w", err)
+	}
+	return out, nil
 }
 
 // querier is what a pool and a transaction both do.
