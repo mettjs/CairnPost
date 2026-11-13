@@ -32,6 +32,8 @@ type Store struct {
 	idems      map[string]*idem // by key id + "\x00" + idempotency key
 	events     []store.Event
 	suppressed map[string]*suppression
+	endpoints  []*store.Endpoint
+	deliveries []*delivery
 }
 
 // New returns an empty store on the wall clock.

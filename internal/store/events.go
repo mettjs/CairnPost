@@ -46,6 +46,10 @@ type Event struct {
 	// name for what happened; either may be "".
 	Code, Reason string
 	At           time.Time
+	// Suppressed says that, with this event, the address was on its
+	// sending domain's suppression list. It is set by RecordEvent and
+	// answered with a delivery to be tried (Webhooks.TakeDeliveries).
+	Suppressed bool
 	// Sender and Recipient are the email's addresses as the event gives
 	// them, "" when it does not. They are used only when no message has the
 	// event's upstream id, to suppress an address that bounced for good

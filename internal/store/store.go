@@ -12,6 +12,9 @@ import (
 // ErrNotFound is a row that is not there.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrLimit is one more than there may be.
+var ErrLimit = errors.New("store: no more may be made")
+
 // Scopes of an API key.
 const (
 	ScopeSend  = "send"
@@ -131,6 +134,7 @@ type Store interface {
 	Mail
 	Events
 	Suppressions
+	Webhooks
 	// Ping reports whether the store can be reached.
 	Ping(ctx context.Context) error
 }
