@@ -37,6 +37,9 @@ type Deps struct {
 	// Sending reports whether what the webhook endpoints are owed can be
 	// read, and so sent; nil when no webhooks are sent from here.
 	Sending func() bool
+	// Pruning reports whether the last pass of the pruner finished; nil
+	// when nothing is pruned.
+	Pruning func() bool
 	// Driver and Version are said by GET /health.
 	Driver, Version string
 	// MaxBodyBytes bounds a request body.
@@ -107,11 +110,17 @@ func (a *app) logged(next http.Handler) http.Handler {
 func (a *app) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version, "events": "off", "webhooks": "off"}
+	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version, "events": "off", "webhooks": "off", "pruning": "off"}
 	if a.Sending != nil {
 		body["webhooks"] = "sending"
 		if !a.Sending() {
 			body["webhooks"] = "failing"
+		}
+	}
+	if a.Pruning != nil {
+		body["pruning"] = "running"
+		if !a.Pruning() {
+			body["pruning"] = "failing"
 		}
 	}
 	// Whether delivery events are being read is said and does not change

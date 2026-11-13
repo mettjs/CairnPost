@@ -35,7 +35,14 @@ Every change a user of CairnPost can notice is written here. The format is
   nothing, and shows them at `GET /capture/emails` to an admin key.
 - `GET /limits`: the provider's sending allowance and how much is used.
 - `GET /health`: the service, its database, the driver, the version, and
-  whether delivery events are being read.
+  whether delivery events are being read, webhooks sent and old records
+  pruned.
+- Pruning: an email's record, with its events and webhooks, is deleted
+  `CAIRNPOST_RETENTION` after the last thing that happened to it (30 days
+  by default, 7 at least, `off` to keep for ever), and an
+  `Idempotency-Key` when its life is over. A suppression in force is never
+  deleted; a lifted one is forgotten once no email sent before the lift is
+  on record.
 - `cairnpost serve`, `migrate`, `send` and `version`; a Dockerfile and a
   Compose file with Postgres 18.
 - Images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`, published with

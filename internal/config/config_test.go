@@ -65,3 +65,37 @@ func TestWebhookSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestRetention(t *testing.T) {
+	base := []string{"CAIRNPOST_POSTGRES_DSN", "postgres://x", "CAIRNPOST_DRIVER", "capture"}
+	for value, want := range map[string]time.Duration{
+		"": 30 * 24 * time.Hour, "90d": 90 * 24 * time.Hour, "168h": 7 * 24 * time.Hour, " OFF ": 0,
+	} {
+		c, err := Load(env(append(base, "CAIRNPOST_RETENTION", value)...))
+		if err != nil || c.Retention != want || c.PruneEvery != time.Hour {
+			t.Errorf("%q: %s every %s, %v", value, c.Retention, c.PruneEvery, err)
+		}
+	}
+	for value, says := range map[string]string{
+		"soon": "such as 30d", "0d": "such as 30d", "-3d": "such as 30d", "99999d": "such as 30d", "-213490d": "such as 30d",
+		"36501d": "such as 30d", "2000000h": "such as 30d", "1.5d": "such as 30d", "d": "such as 30d",
+		"6d": "at least 7d", "24h": "at least 7d",
+	} {
+		if _, err := Load(env(append(base, "CAIRNPOST_RETENTION", value)...)); err == nil || !strings.Contains(err.Error(), says) {
+			t.Errorf("%q: %v", value, err)
+		}
+	}
+	// A key is never remembered longer than its email's record is kept.
+	if _, err := Load(env(append(base, "CAIRNPOST_RETENTION", "7d", "CAIRNPOST_IDEMPOTENCY_TTL", "200h")...)); err == nil ||
+		!strings.Contains(err.Error(), "CAIRNPOST_IDEMPOTENCY_TTL") {
+		t.Errorf("a key outliving its record: %v", err)
+	}
+	// Nor is a webhook deleted with tries still left.
+	if _, err := Load(env(append(base, "CAIRNPOST_RETENTION", "7d", "CAIRNPOST_WEBHOOK_RETRIES", "100h,100h")...)); err == nil ||
+		!strings.Contains(err.Error(), "CAIRNPOST_WEBHOOK_RETRIES") {
+		t.Errorf("a webhook outliving its record: %v", err)
+	}
+	if _, err := Load(env(append(base, "CAIRNPOST_PRUNE_EVERY", "never")...)); err == nil || !strings.Contains(err.Error(), "CAIRNPOST_PRUNE_EVERY") {
+		t.Errorf("CAIRNPOST_PRUNE_EVERY: %v", err)
+	}
+}

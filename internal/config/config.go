@@ -50,6 +50,15 @@ type Config struct {
 	// EventsRetry is CAIRNPOST_EVENTS_RETRY: how long an event handed back
 	// waits before it is given again. Default 30s.
 	EventsRetry time.Duration
+	// Retention is CAIRNPOST_RETENTION: how long an email's record is kept
+	// (who, to whom, what became of it, its events and the webhooks sent
+	// for them) after the last thing that happened to it. In days ("30d")
+	// or as a duration, 7d at least; "off" keeps records for ever, and is
+	// 0 here. Default 30d.
+	Retention time.Duration
+	// PruneEvery is CAIRNPOST_PRUNE_EVERY: how long the pruner rests
+	// between passes. Default 1h.
+	PruneEvery time.Duration
 	// Cloudflare is the cloudflare driver's settings.
 	Cloudflare Cloudflare
 	// Webhook is how events are delivered to endpoints.
@@ -176,7 +185,17 @@ func Load(getenv func(string) string) (Config, error) {
 		return c, err
 	}
 	c.CaptureKeep = int(keep)
-	c.Webhook, err = webhook(getenv)
+	if c.PruneEvery, err = duration(getenv, "CAIRNPOST_PRUNE_EVERY", time.Hour); err != nil {
+		return c, err
+	}
+	if c.Webhook, err = webhook(getenv); err != nil {
+		return c, err
+	}
+	var retries time.Duration
+	for _, wait := range c.Webhook.Retries {
+		retries += wait
+	}
+	c.Retention, err = retention(getenv, c.IdempotencyTTL, retries)
 	return c, err
 }
 

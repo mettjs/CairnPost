@@ -423,16 +423,16 @@ func TestHealthNeedsNoKey(t *testing.T) {
 	if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["status"] != "ok" || got["driver"] != "fake" {
 		t.Fatalf("%d %v", code, got)
 	}
-	if _, _, got := r.do("GET", "/health", "", "", ""); got["events"] != "off" || got["webhooks"] != "off" {
+	if _, _, got := r.do("GET", "/health", "", "", ""); got["events"] != "off" || got["webhooks"] != "off" || got["pruning"] != "off" {
 		t.Fatalf("with no events to read and no webhooks sent: %v", got)
 	}
-	for healthy, want := range map[bool][2]string{true: {"reading", "sending"}, false: {"failing", "failing"}} {
+	for healthy, want := range map[bool][3]string{true: {"reading", "sending", "running"}, false: {"failing", "failing", "failing"}} {
 		r := newRigWith(t, func(d *api.Deps) {
-			d.Events, d.Sending = func() bool { return healthy }, func() bool { return healthy }
+			d.Events, d.Sending, d.Pruning = func() bool { return healthy }, func() bool { return healthy }, func() bool { return healthy }
 		})
 		// Events not read, or webhooks not sent, do not make the service
 		// unavailable: mail still goes.
-		if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["events"] != want[0] || got["webhooks"] != want[1] {
+		if code, _, got := r.do("GET", "/health", "", "", ""); code != 200 || got["events"] != want[0] || got["webhooks"] != want[1] || got["pruning"] != want[2] {
 			t.Fatalf("healthy=%v: %d %v", healthy, code, got)
 		}
 	}
