@@ -25,7 +25,9 @@ func (db *DB) Start(ctx context.Context, s store.Start) (store.Claim, error) {
 		err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) (err error) {
 			if s.IdemKey == "" {
 				c = store.Claim{Outcome: store.Started}
-				c.ID, err = insertMessage(ctx, tx, s)
+				if c.ID, err = insertMessage(ctx, tx, s); c.ID == "" {
+					c.Outcome = store.Suppressed
+				}
 				return err
 			}
 			c, err = claim(ctx, tx, s)
@@ -69,7 +71,7 @@ func claim(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
 		// Remembered long enough, or its last try's answer never came:
 		// this request sends, whatever it is, and the key's life starts
 		// again from now.
-		return takeOver(ctx, tx, s, messageID)
+		return takeOver(ctx, tx, s, messageID, state == "in_flight")
 	case state == "done" && !bytes.Equal(fingerprint, s.Fingerprint):
 		return store.Claim{Outcome: store.Mismatch}, nil
 	case state == "done":
@@ -80,7 +82,12 @@ func claim(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
 
 // takeOver gives a key to a new send. The message it pointed at, if its
 // answer never came, is recorded as unknown.
-func takeOver(ctx context.Context, tx pgx.Tx, s store.Start, old string) (store.Claim, error) {
+//
+// If the recipient has been suppressed since, nothing is sent and the key
+// is let go. When the earlier try was left in doubt, its message's id is
+// answered with the refusal: its email may have gone, and its caller
+// should be able to ask.
+func takeOver(ctx context.Context, tx pgx.Tx, s store.Start, old string, inDoubt bool) (store.Claim, error) {
 	if _, err := tx.Exec(ctx, `
 		UPDATE messages SET state = 'unknown', updated_at = now()
 		WHERE id = $1::uuid AND state = 'sending'`, old); err != nil {
@@ -89,6 +96,14 @@ func takeOver(ctx context.Context, tx pgx.Tx, s store.Start, old string) (store.
 	id, err := insertMessage(ctx, tx, s)
 	if err != nil {
 		return store.Claim{}, err
+	}
+	if id == "" {
+		_, err := tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE api_key_id = $1::uuid AND key = $2`, s.KeyID, s.IdemKey)
+		c := store.Claim{Outcome: store.Suppressed}
+		if inDoubt {
+			c.ID = old
+		}
+		return c, err
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE idempotency_keys
@@ -103,6 +118,9 @@ func claimNew(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error
 	id, err := insertMessage(ctx, tx, s)
 	if err != nil {
 		return store.Claim{}, err
+	}
+	if id == "" {
+		return store.Claim{Outcome: store.Suppressed}, nil
 	}
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO idempotency_keys (api_key_id, key, fingerprint, message_id, state)

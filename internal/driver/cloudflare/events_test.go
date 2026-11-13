@@ -190,3 +190,16 @@ func TestALargeBatchIsRead(t *testing.T) {
 		t.Fatalf("%d items, %v", len(got), err)
 	}
 }
+
+// The addresses an event names are read bare, for suppressing an address
+// whose email has no record; anything that is no address is left out.
+func TestAnEventsAddressesAreReadBare(t *testing.T) {
+	e, ok := read(delivered)
+	if !ok || e.Sender != "app@mail.example.com" || e.Recipient != "ana@example.org" {
+		t.Fatalf("%+v %v", e, ok)
+	}
+	odd := strings.Replace(delivered, `"recipient":"ana@example.org"`, `"recipient":["ana@example.org"]`, 1)
+	if e, ok := read(odd); !ok || e.Recipient != "" {
+		t.Fatalf("a recipient that is no address: %+v %v", e, ok)
+	}
+}

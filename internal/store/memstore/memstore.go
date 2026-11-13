@@ -25,18 +25,20 @@ type idem struct {
 type Store struct {
 	Now func() time.Time
 
-	mu       sync.Mutex
-	seq      int
-	keys     map[string]store.Key // by prefix
-	messages map[string]store.Message
-	idems    map[string]*idem // by key id + "\x00" + idempotency key
-	events   []store.Event
+	mu         sync.Mutex
+	seq        int
+	keys       map[string]store.Key // by prefix
+	messages   map[string]store.Message
+	idems      map[string]*idem // by key id + "\x00" + idempotency key
+	events     []store.Event
+	suppressed map[string]*suppression
 }
 
 // New returns an empty store on the wall clock.
 func New() *Store {
 	return &Store{Now: time.Now, keys: map[string]store.Key{},
-		messages: map[string]store.Message{}, idems: map[string]*idem{}}
+		messages: map[string]store.Message{}, idems: map[string]*idem{},
+		suppressed: map[string]*suppression{}}
 }
 
 var _ store.Store = (*Store)(nil)
@@ -129,31 +131,50 @@ func (s *Store) setState(id, state, upstreamID string) {
 func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Only a send that would start is refused: a request already sent is
+	// still replayed.
+	suppressed := s.inForce(store.SuppressionKey(st.Sender, st.Recipient))
 	if st.IdemKey == "" {
-		return store.Claim{Outcome: store.Started, ID: s.newMessage(st)}, nil
+		return s.start(st, suppressed), nil
 	}
-	at, now := st.KeyID+"\x00"+st.IdemKey, s.Now()
-	row, ok := s.idems[at]
+	slot, now := st.KeyID+"\x00"+st.IdemKey, s.Now()
+	row, held := s.idems[slot]
+	expired := held && now.Sub(row.created) >= st.TTL
+	inDoubt := held && !row.done && now.Sub(row.tried) >= st.InDoubt
 	switch {
-	case !ok:
-		id := s.newMessage(st)
-		s.idems[at] = &idem{fingerprint: st.Fingerprint, messageID: id, created: now, tried: now}
-		return store.Claim{Outcome: store.Started, ID: id}, nil
-	case now.Sub(row.created) >= st.TTL, !row.done && now.Sub(row.tried) >= st.InDoubt:
-		// Remembered long enough, or its last try's answer never came:
-		// this request sends, and the key's life starts again from now.
-		if s.messages[row.messageID].State == store.StateSending {
+	case !held, expired, inDoubt:
+		// Nobody holds the key, it was remembered long enough, or its last
+		// try's answer never came: this request sends, and the key's life
+		// starts again from now.
+		old := ""
+		if held && s.messages[row.messageID].State == store.StateSending {
 			s.setState(row.messageID, store.StateUnknown, "")
 		}
-		id := s.newMessage(st)
-		*row = idem{fingerprint: st.Fingerprint, messageID: id, created: now, tried: now}
-		return store.Claim{Outcome: store.Started, ID: id}, nil
+		if held && !row.done {
+			old = row.messageID
+		}
+		c := s.start(st, suppressed)
+		if c.Outcome == store.Suppressed {
+			delete(s.idems, slot)
+			c.ID = old
+			return c, nil
+		}
+		s.idems[slot] = &idem{fingerprint: st.Fingerprint, messageID: c.ID, created: now, tried: now}
+		return c, nil
 	case row.done && !bytes.Equal(row.fingerprint, st.Fingerprint):
 		return store.Claim{Outcome: store.Mismatch}, nil
 	case row.done:
 		return store.Claim{Outcome: store.Replay, ID: row.messageID}, nil
 	}
 	return store.Claim{Outcome: store.InFlight, RetryAfter: row.tried.Add(st.InDoubt).Sub(now)}, nil
+}
+
+// start records a message as sending, unless its recipient is suppressed.
+func (s *Store) start(st store.Start, suppressed bool) store.Claim {
+	if suppressed {
+		return store.Claim{Outcome: store.Suppressed}
+	}
+	return store.Claim{Outcome: store.Started, ID: s.newMessage(st)}
 }
 
 // Lost implements store.Mail.

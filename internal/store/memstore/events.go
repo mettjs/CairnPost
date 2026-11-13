@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/mettjs/cairnpost/internal/store"
 )
@@ -17,7 +18,17 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 			m = candidate
 		}
 	}
+	reason, suppresses := store.SuppressionFor(e.Kind, e.Permanent, e.Code)
+	// A lifted suppression comes back only for an email sent after the lift.
+	since := func(sent time.Time) func(time.Time) bool {
+		return func(lifted time.Time) bool { return lifted.Before(sent) }
+	}
 	if m.ID == "" {
+		if suppresses && e.Sender != "" && e.Recipient != "" {
+			domain, address := store.SuppressionKey(e.Sender, e.Recipient)
+			// When the email was sent is not known: a lift is never undone.
+			s.suppress(store.Suppression{Domain: domain, Address: address, Reason: reason}, func(time.Time) bool { return false })
+		}
 		return store.NoMessage, nil
 	}
 	for _, had := range s.events {
@@ -32,7 +43,16 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 		}
 	}
 	e.ID, e.MessageID = s.next("evt"), m.ID
+	e.Sender, e.Recipient = "", "" // never kept with the event
 	s.events = append(s.events, e)
+	if suppresses {
+		domain, address := store.SuppressionKey(m.Sender, m.Recipient)
+		s.suppress(store.Suppression{Domain: domain, Address: address, Reason: reason, MessageID: m.ID}, since(m.CreatedAt))
+		// One in force by an event that could name no message is given this one.
+		if row := s.suppressed[slot(domain, address)]; row.lifted == nil && row.Reason == reason && row.MessageID == "" {
+			row.MessageID = m.ID
+		}
+	}
 	if store.Moves(m.State, e.Kind, newer) {
 		to := store.StateOf[e.Kind]
 		if to == store.StateFailed {

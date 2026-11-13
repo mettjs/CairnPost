@@ -18,6 +18,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
+	"github.com/mettjs/cairnpost/internal/suppress"
 )
 
 // fake is a driver that keeps what it is handed, or answers an error.
@@ -83,7 +84,7 @@ func newRigBuilt(t *testing.T, s store.Store, adjust func(*api.Deps)) *rig {
 	deps := api.Deps{
 		Mail: mail.New(s, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 			InDoubtWindow: time.Minute}, log),
-		Keys: ks, Ping: s.Ping, Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
+		Keys: ks, Suppress: suppress.New(s), Ping: s.Ping, Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
 		Captured: func() []api.CapturedEmail {
 			var out []api.CapturedEmail
 			for _, m := range drv.held {
@@ -266,6 +267,101 @@ func TestCapturedMailNeedsAnAdminKey(t *testing.T) {
 	list, _ := got["data"].([]any)
 	if code != 200 || len(list) != 1 || list[0].(map[string]any)["subject"] != "Hello" {
 		t.Fatalf("an admin key: %d %v", code, got)
+	}
+}
+
+func TestSuppressionsAreAnAdminsToManage(t *testing.T) {
+	r := newRig(t)
+	const body = `{"domain":"example.com","address":"ana@example.org","note":"asked us to stop"}`
+	const one = `{"domain":"example.com","address":"ana@example.org"}`
+	for _, call := range [][2]string{{"GET", "/suppressions"}, {"POST", "/suppressions"}, {"POST", "/suppressions/lift"}} {
+		if code, name, _ := r.do(call[0], call[1], r.send, "", body); code != 403 || name != "admin_key_required" {
+			t.Fatalf("%s %s with a send key: %d %s", call[0], call[1], code, name)
+		}
+	}
+	if code, _, got := r.do("POST", "/suppressions", r.admin, "", body); code != 201 || got["added"] != true {
+		t.Fatalf("add: %d %v", code, got)
+	}
+	if code, _, got := r.do("POST", "/suppressions", r.admin, "", body); code != 200 || got["added"] != false {
+		t.Fatalf("add again: %d %v", code, got)
+	}
+	// The address is now refused, as the request's own fault, and says how
+	// to undo it.
+	code, name, got := r.do("POST", "/emails", r.send, "", good)
+	if code != 422 || name != "recipient_suppressed" || !strings.Contains(got["message"].(string), "POST /suppressions/lift") || got["id"] != nil {
+		t.Fatalf("a send to it: %d %s %v", code, name, got)
+	}
+	code, _, got = r.do("GET", "/suppressions?domain=example.com", r.admin, "", "")
+	list, _ := got["data"].([]any)
+	if code != 200 || len(list) != 1 || list[0].(map[string]any)["reason"] != "manual" || got["next"] != nil {
+		t.Fatalf("list: %d %v", code, got)
+	}
+	for what, c := range map[string]struct {
+		method, path, body string
+		code               int
+		name               string
+	}{
+		"a bad address":       {"POST", "/suppressions", `{"domain":"example.com","address":"nobody"}`, 422, "validation_error"},
+		"a bad limit":         {"GET", "/suppressions?limit=0", "", 422, "validation_error"},
+		"a made-up cursor":    {"GET", "/suppressions?after=AGEAYg", "", 422, "validation_error"},
+		"a domain that hides": {"GET", "/suppressions?domain=a%00b", "", 422, "validation_error"},
+		"a body too large":    {"POST", "/suppressions", `{"domain":"example.com","note":"` + strings.Repeat("n", 5000) + `"}`, 413, "request_too_large"},
+		"lift of nothing":     {"POST", "/suppressions/lift", `{"domain":"example.com"}`, 422, "validation_error"},
+		"lift of both":        {"POST", "/suppressions/lift", `{"domain":"example.com","address":"a@example.org","all":true}`, 422, "validation_error"},
+		"a reason for one":    {"POST", "/suppressions/lift", `{"domain":"example.com","address":"a@example.org","reason":"bounce"}`, 422, "validation_error"},
+		"the old way to lift": {"DELETE", "/suppressions?domain=example.com&address=ana@example.org", "", 404, "not_found"},
+	} {
+		if code, name, _ := r.do(c.method, c.path, r.admin, "", c.body); code != c.code || name != c.name {
+			t.Errorf("%s: %d %s", what, code, name)
+		}
+	}
+	if code, _, got := r.do("POST", "/suppressions/lift", r.admin, "", one); code != 200 || got["lifted"] != float64(1) {
+		t.Fatalf("lift: %d %v", code, got)
+	}
+	if code, name, _ := r.do("POST", "/suppressions/lift", r.admin, "", one); code != 404 || name != "not_found" {
+		t.Fatalf("lift again: %d %s", code, name)
+	}
+	if code, _, _ := r.do("POST", "/emails", r.send, "", good); code != 200 {
+		t.Fatalf("a send once lifted: %d", code)
+	}
+	for _, address := range []string{"a@example.org", "b@example.org"} {
+		r.do("POST", "/suppressions", r.admin, "", `{"domain":"example.com","address":"`+address+`"}`)
+	}
+	if code, _, got := r.do("POST", "/suppressions/lift", r.admin, "", `{"domain":"example.com","all":true,"reason":"manual"}`); code != 200 || got["lifted"] != float64(2) {
+		t.Fatalf("lift all: %d %v", code, got)
+	}
+}
+
+// An admin key bound to a sending domain manages that domain's list and no
+// other's.
+func TestAKeyBoundToADomainManagesOnlyItsOwnSuppressions(t *testing.T) {
+	var bound string
+	r := newRigWith(t, func(d *api.Deps) {
+		var err error
+		if bound, _, err = d.Keys.Create(context.Background(), "tenant", store.ScopeAdmin, "example.com"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	r.do("POST", "/suppressions", r.admin, "", `{"domain":"other.example","address":"ana@example.org"}`)
+	r.do("POST", "/suppressions", r.admin, "", `{"domain":"example.com","address":"bo@example.org"}`)
+	for what, c := range map[string][3]string{
+		"list":     {"GET", "/suppressions?domain=other.example", ""},
+		"add":      {"POST", "/suppressions", `{"domain":"other.example","address":"cy@example.org"}`},
+		"lift":     {"POST", "/suppressions/lift", `{"domain":"other.example","address":"ana@example.org"}`},
+		"lift all": {"POST", "/suppressions/lift", `{"domain":"other.example","all":true}`},
+	} {
+		if code, name, _ := r.do(c[0], c[1], bound, "", c[2]); code != 403 || name != "domain_not_allowed" {
+			t.Errorf("%s of another domain's: %d %s", what, code, name)
+		}
+	}
+	// Asked for all of them, it is shown its own.
+	code, _, got := r.do("GET", "/suppressions", bound, "", "")
+	list, _ := got["data"].([]any)
+	if code != 200 || len(list) != 1 || list[0].(map[string]any)["domain"] != "example.com" {
+		t.Fatalf("its own list: %d %v", code, got)
+	}
+	if code, _, _ := r.do("POST", "/suppressions/lift", bound, "", `{"domain":"Example.com","address":"bo@example.org"}`); code != 200 {
+		t.Fatalf("lifting its own: %d", code)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -17,16 +18,26 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		// The message's row is locked while its state is decided, so two
 		// events about one email are applied one after the other.
 		var (
-			messageID, state string
-			newer            bool
+			messageID, state  string
+			sender, recipient string
+			sentAt            time.Time
+			newer             bool
 		)
+		reason, suppresses := store.SuppressionFor(e.Kind, e.Permanent, e.Code)
 		err := tx.QueryRow(ctx, `
-			SELECT m.id::text, m.state,
+			SELECT m.id::text, m.state, m.sender, m.recipient, m.created_at,
 			       NOT EXISTS (SELECT 1 FROM events e WHERE e.message_id = m.id AND e.kind = m.state AND e.occurred_at >= $3)
 			FROM messages m WHERE m.driver = $1 AND m.upstream_id = $2 FOR UPDATE OF m`,
-			e.Driver, e.UpstreamID, e.At).Scan(&messageID, &state, &newer)
+			e.Driver, e.UpstreamID, e.At).Scan(&messageID, &state, &sender, &recipient, &sentAt, &newer)
 		if errors.Is(err, pgx.ErrNoRows) {
 			outcome = store.NoMessage
+			// The email has no record here: its send's answer was lost, or
+			// another sender on the domain made it. An address that is dead
+			// for the domain is dead all the same, if the event names it.
+			if suppresses && e.Sender != "" && e.Recipient != "" {
+				domain, address := store.SuppressionKey(e.Sender, e.Recipient)
+				return suppressUnrecorded(ctx, tx, domain, address, reason)
+			}
 			return nil
 		}
 		if err != nil {
@@ -43,6 +54,14 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		if tag.RowsAffected() == 0 {
 			outcome = store.Duplicate
 			return nil
+		}
+		// A bounce for good, or a complaint, suppresses the address for the
+		// domain that sent, in the same step as the event that says so.
+		if suppresses {
+			domain, address := store.SuppressionKey(sender, recipient)
+			if err := suppressByEvent(ctx, tx, domain, address, reason, messageID, sentAt); err != nil {
+				return err
+			}
 		}
 		if !store.Moves(state, e.Kind, newer) {
 			return nil

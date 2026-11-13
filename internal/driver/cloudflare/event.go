@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mettjs/cairnpost/internal/address"
 	"github.com/mettjs/cairnpost/internal/driver"
 )
 
@@ -77,7 +78,14 @@ func read(body string) (driver.Event, bool) {
 	if at, err := time.Parse(time.RFC3339, text(envelope.Metadata["eventTimestamp"])); err == nil {
 		e.At = at.UTC()
 	}
+	e.Sender, e.Recipient = bareAddress(envelope.Payload["sender"]), bareAddress(envelope.Payload["recipient"])
 	return e, true
+}
+
+// bareAddress is a JSON value as a bare email address, "" for anything else.
+func bareAddress(raw json.RawMessage) string {
+	bare, _ := address.Bare(text(raw))
+	return bare
 }
 
 // text is a JSON value as a string: a string as it is, a number as its

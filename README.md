@@ -9,9 +9,10 @@ A small, self-hostable transactional email service: one HTTP API, API keys
 and idempotent sends, in front of the mail provider you choose. Written in
 Go, backed by Postgres.
 
-**Status: early.** It sends through Cloudflare Email Sending and reads what
-became of each email: delivered, bounced, complained about. Webhooks and a
-suppression list come next. The [changelog](CHANGELOG.md) says what exists.
+**Status: early.** It sends through Cloudflare Email Sending, reads what
+became of each email, and stops sending to addresses that bounce for good
+or complain. Webhooks come next. The [changelog](CHANGELOG.md) says what
+exists.
 
 ## What it is, and is not
 
@@ -58,6 +59,9 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `POST /emails` | Send one email to one recipient. Answers `{"id": "..."}` once the provider has taken it. |
 | `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
+| `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
+| `POST /suppressions` | Stop sending to an address from a domain: `{"domain", "address", "note"}`. The note is optional, one line of at most 500 bytes. Admin key. |
+| `POST /suppressions/lift` | Send to an address again: `{"domain", "address"}`. Or to every suppressed address of a domain: `{"domain", "all": true}`, which `"reason"` narrows to `bounce`, `complaint` or `manual`. Answers `{"lifted": n}`. Admin key. |
 | `GET /limits` | The provider's sending allowance and how much of it is used, so you know before it runs out. `quota` is `null` for a provider with none to tell. |
 | `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read. |
 
@@ -85,6 +89,26 @@ status `code` ("5.1.1") and the provider's short `reason`
 ("permanent_failure"). The receiving server's own sentence is not kept: it
 can quote the email.
 
+**Suppression.** When a receiving server refuses an address for good (a hard
+bounce), or its owner marks an email as spam, CairnPost stops sending to
+that address from that sending domain: writing there again only harms the
+domain's standing with mail providers. A send to it answers 422
+`recipient_suppressed` and nothing is sent. Nothing else suppresses: not a
+full mailbox, not a delay, and not a refusal that is about the sender (a
+status of class 5.7: a failed signature, a policy, a blocklist), or one
+fault in the domain's setup would shut out everyone written to while it
+lasted. Each sending domain has its own list. The list is read when a send
+starts: an email already on its way when the bounce arrives still goes.
+
+A suppression is not always right. A mailbox can be made again, or a person
+can mark a wanted email as spam by mistake, and they are then shut out of
+their own sign-in codes. An admin lifts one with `POST /suppressions/lift`
+or `cairnpost suppressions remove`, and a whole domain's with `"all": true`
+or `-all`. A lift is remembered: a late bounce of an email sent before it
+does not bring the suppression back, but an email sent after it that
+bounces for good does. An admin key bound to a sending domain manages that
+domain's list only. This needs delivery events to be read (see Drivers).
+
 **Idempotency.** Send an `Idempotency-Key` header and a request repeated
 with the same key and the same content is one email: the repeat answers the
 first one's id. A key is remembered for a day from the try that sent, and
@@ -96,6 +120,7 @@ The status tells a program what to do:
 | Status | Name | Meaning |
 |---|---|---|
 | 422 | `validation_error`, `rejected_by_upstream` | The request is at fault and will never succeed. Do not retry. |
+| 422 | `recipient_suppressed` | The address is on the sending domain's suppression list. Nothing was sent now. Do not retry; lift the suppression if it is wrong. If the answer has an `id`, an earlier try under the same `Idempotency-Key` got no answer from the provider and may have gone: the id is that try's. |
 | 409 | `invalid_idempotent_request` | The key was already used with a different request, which was sent. Do not retry. |
 | 409 | `concurrent_idempotent_requests` | A send under this key is in flight, or its answer has not come yet. Retry after `Retry-After`. |
 | 401, 403 | `missing_api_key`, `invalid_api_key`, `domain_not_allowed`, `admin_key_required` | The key is missing, wrong, or not allowed to do this. |
@@ -161,11 +186,14 @@ cairnpost migrate               apply migrations and stop
 cairnpost keys create           make an API key (shown once)
 cairnpost keys list             list API keys
 cairnpost keys revoke PREFIX    end an API key
+cairnpost suppressions list     list the addresses not sent to
+cairnpost suppressions add      stop sending to an address
+cairnpost suppressions remove   send to an address again
 cairnpost send                  send an email through a running server
 cairnpost version               print the version
 ```
 
-`keys` and `migrate` work on the database directly, so they run where the
+`keys`, `suppressions` and `migrate` work on the database directly, so they run where the
 server runs. A key has a scope, `send` or `admin`, and may be bound to one
 sending domain with `--domain`.
 

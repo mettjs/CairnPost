@@ -26,6 +26,10 @@ var (
 	// ErrMismatch: the Idempotency-Key was used with a different request,
 	// which was sent. This one never will be.
 	ErrMismatch = errors.New("mail: this Idempotency-Key was used with a different request")
+	// ErrSuppressed: the recipient is on the sending domain's suppression
+	// list: it bounced for good, complained, or was put there by hand.
+	// Nothing is sent, and nothing will be until the suppression is lifted.
+	ErrSuppressed = errors.New("mail: the recipient is suppressed for this sending domain")
 	// ErrInDoubt: the upstream's answer was lost, so the email may have
 	// gone. It is the only error after which that is so: every other one
 	// means nothing was sent.
@@ -74,10 +78,12 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 // Send sends one email and answers its id. presented is the caller's API
 // key as it arrived: the request's fingerprint is keyed by it.
 //
-// An error is an *Invalid, ErrDomain, a *Busy (ErrInFlight), ErrMismatch,
+// An error is an *Invalid, ErrDomain, ErrSuppressed, a *Busy (ErrInFlight), ErrMismatch,
 // a driver's ErrRejected or ErrUnavailable, ErrInDoubt, or a failure of
 // our own before anything was sent. The id comes back beside an error
-// whenever the send got far enough to have one.
+// whenever the send got far enough to have one; beside ErrSuppressed it is
+// an earlier try under the same key that was left in doubt, if there was
+// one.
 func (s *Service) Send(ctx context.Context, key store.Key, presented string, r Request) (string, error) {
 	c, err := check(r)
 	if err != nil {
@@ -104,6 +110,14 @@ func (s *Service) Send(ctx context.Context, key store.Key, presented string, r R
 		return "", &Busy{After: claim.RetryAfter}
 	case store.Mismatch:
 		return "", ErrMismatch
+	case store.Suppressed:
+		// Said to the operator, without the address: a person who stops
+		// getting mail should be findable from the log's side too.
+		s.log.Info("mail: a send was refused; the recipient is suppressed for the sending domain",
+			"domain", c.domain, "earlier_try", claim.ID)
+		// The id, if any, is an earlier try under the key whose answer
+		// never came: that email may have gone.
+		return claim.ID, ErrSuppressed
 	}
 	return claim.ID, s.deliver(ctx, claim.ID, c.msg)
 }
