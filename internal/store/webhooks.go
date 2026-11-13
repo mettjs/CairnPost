@@ -36,6 +36,9 @@ const (
 	DeliveryFailed    = "failed"
 )
 
+// DeliveryStates is every state a delivery can be in.
+var DeliveryStates = []string{DeliveryPending, DeliveryDelivered, DeliveryFailed}
+
 // Delivery is one event owed to one endpoint, and how telling it went.
 type Delivery struct {
 	ID         string

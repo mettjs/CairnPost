@@ -115,7 +115,7 @@ func (c *console) findSuppressions(w http.ResponseWriter, r *http.Request) {
 			asked = ""
 		}
 		c.suppressionsShown(w, r, http.StatusUnprocessableEntity, suppressionsView{Problem: notADomain,
-			Typed: strings.ToValidUTF8(strings.TrimSpace(r.PostFormValue("to")), ""), TypedDomain: asked})
+			Typed: typed(r, "to"), TypedDomain: asked})
 		return
 	}
 	typed, err := c.look(r)
@@ -153,8 +153,7 @@ func (c *console) addSuppression(w http.ResponseWriter, r *http.Request) {
 	}
 	var list string
 	v.Domain, list = c.narrowed(r)
-	clean := func(field string) string { return strings.ToValidUTF8(strings.TrimSpace(r.PostFormValue(field)), "") }
-	v.Add.Domain, v.Add.Address, v.Add.Note = clean("domain"), clean("address"), clean("note")
+	v.Add.Domain, v.Add.Address, v.Add.Note = typed(r, "domain"), typed(r, "address"), typed(r, "note")
 	s, added, err := c.suppressed(r).Add(r.Context(), r.PostFormValue("domain"), r.PostFormValue("address"), r.PostFormValue("note"))
 	var invalid *suppress.Invalid
 	switch {

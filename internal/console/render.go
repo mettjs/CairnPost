@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/store"
+	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
 //go:embed templates/*.html
@@ -37,7 +38,12 @@ var helpers = template.FuncMap{
 	// A reason an address is suppressed for, as a label and in a sentence.
 	"why":     why,
 	"because": because,
-	"stateOf": func(kind string) string { return store.StateOf[kind] },
+	// A webhook: what a try met, and a delivery's state.
+	"met":           met,
+	"deliveryLabel": func(state string) string { label, _ := deliveryWords(state); return label },
+	"deliveryTone":  func(state string) string { _, tone := deliveryWords(state); return tone },
+	"typeOf":        webhook.TypeOf,
+	"stateOf":       func(kind string) string { return store.StateOf[kind] },
 }
 
 // parse reads every page at start: a template that does not parse stops
@@ -49,11 +55,11 @@ func parse() pages {
 		panic(err)
 	}
 	for _, name := range names {
-		if name == "templates/layout.html" {
-			continue
+		if name == "templates/layout.html" || name == "templates/hookform.html" {
+			continue // parts of pages, not pages
 		}
 		page := name[len("templates/") : len(name)-len(".html")]
-		out[page] = template.Must(template.New("layout.html").Funcs(helpers).ParseFS(templateFiles, "templates/layout.html", name))
+		out[page] = template.Must(template.New("layout.html").Funcs(helpers).ParseFS(templateFiles, "templates/layout.html", "templates/hookform.html", name))
 	}
 	return out
 }

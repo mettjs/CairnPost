@@ -19,6 +19,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
 // rig is a console over a store on a clock the test moves.
@@ -37,6 +38,16 @@ type rig struct {
 
 func newRig(t *testing.T, adjust func(*console.Deps)) *rig {
 	t.Helper()
+	return newRigOn(t, func(_ *rig, d *console.Deps) {
+		if adjust != nil {
+			adjust(d)
+		}
+	})
+}
+
+// newRigOn is newRig for a console whose parts need the rig's own store.
+func newRigOn(t *testing.T, adjust func(*rig, *console.Deps)) *rig {
+	t.Helper()
 	r := &rig{t: t, s: memstore.New(), now: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)}
 	r.s.Now = func() time.Time { return r.now }
 	r.ks = keys.New(r.s)
@@ -50,11 +61,10 @@ func newRig(t *testing.T, adjust func(*console.Deps)) *rig {
 	r.mail = mail.New(r.s, capture.New(10, func() time.Time { return r.now }),
 		mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour, InDoubtWindow: time.Minute, KeepContent: 24 * time.Hour},
 		slog.New(slog.NewTextHandler(&r.logged, nil)))
-	d := console.Deps{Keys: r.ks, Mail: r.mail, Suppress: suppress.New(r.s), Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
+	d := console.Deps{Keys: r.ks, Mail: r.mail, Suppress: suppress.New(r.s),
+		Webhooks: webhook.NewService(r.s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, time.Now), Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
 		EventsOff: "Not read.", Log: slog.New(slog.NewTextHandler(&r.logged, nil))}
-	if adjust != nil {
-		adjust(&d)
-	}
+	adjust(r, &d)
 	r.h = console.New(d)
 	return r
 }

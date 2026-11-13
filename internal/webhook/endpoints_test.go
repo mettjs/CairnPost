@@ -173,3 +173,24 @@ func TestDeliveriesAreReadPageByPageAndByState(t *testing.T) {
 		t.Fatalf("a cursor that is none: %v", err)
 	}
 }
+
+// A URL is kept without the space pasted around it, and refused with one
+// inside; a refusal says what the part must be, apart from its name.
+func TestAURLIsKeptAsItIsWritten(t *testing.T) {
+	r, ctx := newRig(t, false), context.Background()
+	e, err := r.svc.Create(ctx, "", webhook.New{URL: "  https://app.example.com/hook?token=abc \n"})
+	if err != nil || e.URL != "https://app.example.com/hook?token=abc" {
+		t.Fatalf("%q %v", e.URL, err)
+	}
+	spaced := " https://app.example.com/other\t"
+	if e, err = r.svc.Update(ctx, "", e.ID, webhook.Change{URL: &spaced}); err != nil || e.URL != "https://app.example.com/other" {
+		t.Fatalf("%q %v", e.URL, err)
+	}
+	var invalid *webhook.Invalid
+	for _, bad := range []string{"https://app.example.com/a b", "https://app.exa mple.com/", "https://app.example.com/a\tb"} {
+		if _, err := r.svc.Create(ctx, "", webhook.New{URL: bad}); !errors.As(err, &invalid) || invalid.Field != "url" ||
+			invalid.Reason != `"url" `+invalid.Must || invalid.Must == "" {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}
