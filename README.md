@@ -260,11 +260,14 @@ cairnpost keys revoke PREFIX    end an API key
 cairnpost suppressions list     list the addresses not sent to
 cairnpost suppressions add      stop sending to an address
 cairnpost suppressions remove   send to an address again
+cairnpost webhooks create       have a URL told what becomes of emails
+cairnpost webhooks list         list the webhook endpoints
+cairnpost webhooks remove ID    remove a webhook endpoint
 cairnpost send                  send an email through a running server
 cairnpost version               print the version
 ```
 
-`keys`, `suppressions` and `migrate` work on the database directly, so they run where the
+`keys`, `suppressions`, `webhooks` and `migrate` work on the database directly, so they run where the
 server runs. A key has a scope, `send` or `admin`, and may be bound to one
 sending domain with `--domain`.
 

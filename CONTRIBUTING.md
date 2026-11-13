@@ -37,7 +37,7 @@ The integration tests run against a real Postgres and are behind a build tag:
 ```sh
 docker compose up -d --wait postgres
 export CAIRNPOST_TEST_DSN='postgres://cairnpost:cairnpost@localhost:5425/cairnpost?sslmode=disable'
-go test -tags=integration ./...
+go test -tags=integration -p 1 ./...
 ```
 
 With the tag and no `CAIRNPOST_TEST_DSN` they fail rather than skip, so a run

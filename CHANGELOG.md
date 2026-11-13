@@ -27,7 +27,7 @@ Every change a user of CairnPost can notice is written here. The format is
   `email.complained`, `email.failed`), signed as Standard Webhooks and Svix
   sign, retried on a schedule (`CAIRNPOST_WEBHOOK_*`). Endpoints are listed,
   changed, disabled, removed and tried out; their deliveries are listed and
-  a webhook given up, or waiting, tried again by hand.
+  a webhook given up, or waiting, tried again by hand. `cairnpost webhooks create|list|remove`.
 - API keys with a scope (`send` or `admin`), optionally bound to one sending
   domain; stored hashed, shown once. `cairnpost keys create|list|revoke`.
 - The `cloudflare` driver: delivery through Cloudflare Email Sending.
