@@ -29,7 +29,9 @@ type Store struct {
 	seq        int
 	keys       map[string]store.Key // by prefix
 	messages   map[string]store.Message
-	idems      map[string]*idem // by key id + "\x00" + idempotency key
+	idems      map[string]*idem   // by key id + "\x00" + idempotency key
+	contents   map[string]content // by message id
+	details    map[string]content // by event id
 	events     []store.Event
 	suppressed map[string]*suppression
 	endpoints  []*store.Endpoint
@@ -40,7 +42,7 @@ type Store struct {
 func New() *Store {
 	return &Store{Now: time.Now, keys: map[string]store.Key{},
 		messages: map[string]store.Message{}, idems: map[string]*idem{},
-		suppressed: map[string]*suppression{}}
+		suppressed: map[string]*suppression{}, contents: map[string]content{}, details: map[string]content{}}
 }
 
 var _ store.Store = (*Store)(nil)
@@ -117,7 +119,39 @@ func (s *Store) newMessage(st store.Start) string {
 	m := store.Message{ID: s.next("msg"), KeyID: st.KeyID, Sender: st.Sender, Recipient: st.Recipient,
 		Driver: st.Driver, State: store.StateSending, CreatedAt: now, UpdatedAt: now}
 	s.messages[m.ID] = m
+	if st.Content != nil {
+		s.contents[m.ID] = content{raw: bytes.Clone(st.Content()), sent: now, expires: now.Add(st.KeepContent)}
+	}
 	return m.ID
+}
+
+// content is words kept: an email's, or a receiving server's about it.
+// sent is when the email was, and expires when the words are to go.
+type content struct {
+	raw           []byte
+	sent, expires time.Time
+}
+
+// shown says whether words are answered to one who keeps for keep, and
+// until when.
+func (c content) shown(now time.Time, keep time.Duration) (time.Time, bool) {
+	until := c.sent.Add(keep)
+	if c.expires.Before(until) {
+		until = c.expires
+	}
+	return until, now.Before(until)
+}
+
+// Content implements store.Mail.
+func (s *Store) Content(_ context.Context, id string, keep time.Duration) ([]byte, time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, kept := s.contents[id]
+	until, shown := c.shown(s.Now(), keep)
+	if !kept || !shown {
+		return nil, time.Time{}, nil
+	}
+	return bytes.Clone(c.raw), until, nil
 }
 
 func (s *Store) setState(id, state, upstreamID string) {

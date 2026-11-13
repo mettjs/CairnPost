@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,10 +33,10 @@ import (
 	"github.com/mettjs/cairnpost/migrations"
 )
 
-// dump is every row of every table as text. It reads the database with a
+// dump is every row of every table as text, but for the tables named. It reads the database with a
 // connection of its own: a test looking at what the store wrote, not the
 // store.
-func dump(t *testing.T, dsn string) string {
+func dump(t *testing.T, dsn string, but ...string) string {
 	t.Helper()
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -43,6 +44,12 @@ func dump(t *testing.T, dsn string) string {
 		t.Fatal(err)
 	}
 	defer conn.Close(ctx)
+	// Bytes are printed as the text they are, not as hex: the tables that
+	// may hold an email's words keep them as bytes, and a mark must be
+	// findable there.
+	if _, err := conn.Exec(ctx, `SET bytea_output = 'escape'`); err != nil {
+		t.Fatal(err)
+	}
 	rows, err := conn.Query(ctx, `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`)
 	if err != nil {
 		t.Fatal(err)
@@ -53,6 +60,9 @@ func dump(t *testing.T, dsn string) string {
 	}
 	var out strings.Builder
 	for _, name := range names {
+		if slices.Contains(but, name) {
+			continue
+		}
 		rows, err := conn.Query(ctx, `SELECT to_jsonb(t)::text FROM `+pgx.Identifier{name}.Sanitize()+` t`)
 		if err != nil {
 			t.Fatal(err)
@@ -204,6 +214,18 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 	if !strings.Contains(held, to) || !strings.Contains(logged.String(), "POST /emails") {
 		t.Fatal("the dump or the log is empty of this test's send; the check proves nothing")
 	}
+	// Nothing asked for the email's words to be kept, and none were.
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	var sentRows, keptRows int
+	if err := conn.QueryRow(ctx, `
+		SELECT count(*), count(c.message_id) FROM messages m LEFT JOIN message_contents c ON c.message_id = m.id
+		WHERE m.api_key_id = $1::uuid`, k.ID).Scan(&sentRows, &keptRows); err != nil || sentRows == 0 || keptRows != 0 {
+		t.Errorf("%d emails on record, the words of %d kept: %v", sentRows, keptRows, err)
+	}
 	secret := full[len(k.Prefix)+1:]
 	for _, mark := range []string{"SUBJECTMARKQ", "TEXTMARKQ", "HTMLMARKQ", "HEADERMARKQ", "NAMEMARKQ", "DETAILMARKQ", secret} {
 		if strings.Contains(held, mark) {
@@ -212,5 +234,126 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 		if strings.Contains(logged.String(), mark) {
 			t.Errorf("the log holds %q", mark)
 		}
+	}
+}
+
+// With content retention on, an email's words are in one table and in the
+// answer to an admin key, and nowhere else: no other table, no log line,
+// not the answer to the key that sent it. Past their time they are not
+// shown, and with the setting off again they are hidden at once.
+func TestWhenWordsAreKeptTheyAreKeptInOnePlace(t *testing.T) {
+	dsn := os.Getenv("CAIRNPOST_TEST_DSN")
+	if dsn == "" {
+		t.Fatal("set CAIRNPOST_TEST_DSN to a scratch database to run the integration tests")
+	}
+	ctx := context.Background()
+	db, err := postgres.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Migrate(ctx, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ks := keys.New(db)
+	admin, _, err := ks.Create(ctx, t.Name()+" admin", store.ScopeAdmin, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, _, err := ks.Create(ctx, t.Name()+" sender", store.ScopeSend, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serving := func(keep time.Duration) http.Handler {
+		return api.New(api.Deps{
+			Mail: mail.New(db, capture.New(5, time.Now), mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
+				InDoubtWindow: time.Minute, KeepContent: keep}, log),
+			Keys: ks, Ping: db.Ping, Driver: capture.Name, MaxBodyBytes: 1 << 20, Log: log,
+		})
+	}
+	call := func(h http.Handler, method, path, key, body string) (int, string) {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+	on := serving(time.Hour)
+	marks := []string{"KEPTSUBJECTQ", "KEPTTEXTQ", "KEPTHTMLQ", "KEPTHEADERQ", "KEPTNAMEQ"}
+	code, sent := call(on, "POST", "/emails", sender, `{"from":"KEPTNAMEQ <app@example.com>","to":"kept@example.org",
+		"subject":"KEPTSUBJECTQ","text":"KEPTTEXTQ","html":"<p>KEPTHTMLQ</p>","headers":{"X-Trace":"KEPTHEADERQ"}}`)
+	var made struct{ ID string }
+	if json.Unmarshal([]byte(sent), &made); code != 200 || made.ID == "" {
+		t.Fatalf("the send: %d %s", code, sent)
+	}
+	_, shown := call(on, "GET", "/emails/"+made.ID, admin, "")
+	_, own := call(on, "GET", "/emails/"+made.ID, sender, "")
+	kept, _, err := db.Content(ctx, made.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Its bounce comes with the receiving server's sentence, which is kept
+	// under the same rule, by a reader built to read it.
+	if err := db.Sent(ctx, made.ID, "<kept-"+made.ID+">"); err != nil {
+		t.Fatal(err)
+	}
+	queue := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/ack") {
+			io.WriteString(w, `{"success":true,"result":{}}`)
+			return
+		}
+		event := `{"type":"cf.email.sending.message.bounced","payload":{"eventId":"kept-` + made.ID + `","messageId":"<kept-` + made.ID + `>",` +
+			`"subject":"EVENTSUBJECTQ","bounce":{"type":"soft","reason":"KEPTDETAILQ"}}}`
+		body, _ := json.Marshal(map[string]any{"success": true, "result": map[string]any{
+			"messages": []map[string]any{{"body": event, "lease_id": "l1"}}}})
+		w.Write(body)
+	}))
+	defer queue.Close()
+	reader := events.New(db, db.Ping, cloudflare.NewAt(queue.URL, "token").Events("q").WithDetails(), capture.Name,
+		events.Options{Poll: time.Second, Batch: 10, Lease: time.Minute, Retry: time.Second, Grace: time.Minute,
+			KeepDetails: time.Hour}, time.Now, log)
+	if n, err := reader.Pass(ctx); n != 1 || err != nil {
+		t.Fatalf("the event: %d %v", n, err)
+	}
+	_, shown = call(on, "GET", "/emails/"+made.ID, admin, "")
+	_, own = call(on, "GET", "/emails/"+made.ID, sender, "")
+	if !strings.Contains(shown, `"detail":"KEPTDETAILQ"`) || strings.Contains(own, "KEPTDETAILQ") {
+		t.Errorf("the server's sentence: an admin key sees %s, the sending key %s", shown, own)
+	}
+	marks = append(marks, "KEPTDETAILQ")
+	elsewhere, everywhere := dump(t, dsn, "message_contents", "event_details"), dump(t, dsn)
+	if strings.Contains(everywhere, "EVENTSUBJECTQ") || strings.Contains(logged.String(), "EVENTSUBJECTQ") {
+		t.Error("the subject an event carried was kept or logged")
+	}
+	// The dump reads inside the two tables: without that, finding no mark
+	// in them would prove nothing, here or where nothing is to be kept.
+	if !strings.Contains(everywhere, "KEPTSUBJECTQ") || !strings.Contains(everywhere, "KEPTDETAILQ") {
+		t.Fatal("the dump cannot read the kept words; its checks prove nothing")
+	}
+	if !strings.Contains(elsewhere, made.ID) {
+		t.Fatal("the dump is empty of this test's send; the check proves nothing")
+	}
+	for _, mark := range marks {
+		if !strings.Contains(shown, mark) {
+			t.Errorf("%q was not kept, or not shown to an admin key", mark)
+		}
+		if mark != "KEPTDETAILQ" && !strings.Contains(string(kept), mark) {
+			t.Errorf("%q is not in the kept content", mark)
+		}
+		if strings.Contains(own, mark) {
+			t.Errorf("the key that sent it was shown %q", mark)
+		}
+		if strings.Contains(elsewhere, mark) {
+			t.Errorf("another table holds %q", mark)
+		}
+		if strings.Contains(logged.String(), mark) {
+			t.Errorf("the log holds %q", mark)
+		}
+	}
+	// With the setting off again, what was kept is hidden at once.
+	if _, hidden := call(serving(0), "GET", "/emails/"+made.ID, admin, ""); strings.Contains(hidden, "KEPT") {
+		t.Errorf("with the setting off: %s", hidden)
 	}
 }

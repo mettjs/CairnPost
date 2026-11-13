@@ -86,7 +86,12 @@ func serve(ctx context.Context) error {
 		cf := cloudflare.New(cfg.Cloudflare.AccountID, cfg.Cloudflare.APIToken)
 		drv = cf
 		if cfg.Cloudflare.QueueID != "" {
-			source = cf.Events(cfg.Cloudflare.QueueID)
+			events := cf.Events(cfg.Cloudflare.QueueID)
+			if cfg.ContentRetention != 0 {
+				// Kept under the same rule as what emails say.
+				events = events.WithDetails()
+			}
+			source = events
 		}
 	default:
 		return fmt.Errorf("no driver is built for %q", cfg.Driver)
@@ -98,7 +103,8 @@ func serve(ctx context.Context) error {
 	switch {
 	case source != nil:
 		reader = events.New(db, db.Ping, source, drv.Name(), events.Options{Poll: cfg.EventsPoll,
-			Batch: cfg.EventsBatch, Lease: cfg.EventsLease, Retry: cfg.EventsRetry, Grace: cfg.EventsGrace}, time.Now, log)
+			Batch: cfg.EventsBatch, Lease: cfg.EventsLease, Retry: cfg.EventsRetry, Grace: cfg.EventsGrace,
+			KeepDetails: cfg.ContentRetention}, time.Now, log)
 		go func() { defer close(reading); reader.Run(ctx) }()
 	case captured == nil:
 		close(reading)
@@ -126,9 +132,14 @@ func serve(ctx context.Context) error {
 		log.Warn("emails' records are kept for ever (CAIRNPOST_RETENTION=off): the database only grows")
 	}
 
+	if cfg.ContentRetention != 0 {
+		log.Warn("what emails say is kept (CAIRNPOST_CONTENT_RETENTION): subjects and bodies are in the database "+
+			"and shown to admin keys", "for", cfg.ContentRetention.String())
+	}
+
 	handler := api.New(api.Deps{
 		Mail: mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
-			IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow}, log),
+			IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention}, log),
 		Keys: keys.New(db), Suppress: suppress.New(db),
 		Webhooks: webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, time.Now), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,

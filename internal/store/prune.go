@@ -9,6 +9,13 @@ import (
 // limit rows, oldest first, skipping any row another transaction holds, and
 // answers how many went: a caller repeats it until fewer than limit do.
 type Pruning interface {
+	// PruneContents deletes what emails said, once the time each was kept
+	// for is up. That time was fixed when it was kept, so a pruner needs
+	// no setting of its own, and one process never deletes what another
+	// was told to keep.
+	PruneContents(ctx context.Context, limit int) (int, error)
+	// PruneDetails does the same for what receiving servers said.
+	PruneDetails(ctx context.Context, limit int) (int, error)
 	// PruneKeys forgets Idempotency-Keys remembered for ttl or longer: the
 	// ones a new request would take over anyway. A message one of them
 	// left with no answer is recorded as unknown, as a takeover would.

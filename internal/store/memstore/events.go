@@ -44,6 +44,13 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 	}
 	e.ID, e.MessageID = s.next("evt"), m.ID
 	e.Sender, e.Recipient = "", "" // never kept with the event
+	if e.Detail != "" {
+		// Kept apart, so nothing that reads the event reads it.
+		if d := (content{raw: []byte(e.Detail), sent: m.CreatedAt, expires: m.CreatedAt.Add(e.KeepDetail)}); d.expires.After(s.Now()) {
+			s.details[e.ID] = d
+		}
+		e.Detail, e.KeepDetail = "", 0
+	}
 	if suppresses {
 		domain, address := store.SuppressionKey(m.Sender, m.Recipient)
 		s.suppress(store.Suppression{Domain: domain, Address: address, Reason: reason, MessageID: m.ID}, since(m.CreatedAt))
@@ -80,6 +87,20 @@ func (s *Store) Record(ctx context.Context, messageID string) (store.Message, []
 	}
 	events, err := s.EventsOf(ctx, messageID)
 	return m, events, err
+}
+
+// Details implements store.Events.
+func (s *Store) Details(_ context.Context, messageID string, keep time.Duration) (map[string]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]string{}
+	for _, e := range s.events {
+		d, kept := s.details[e.ID]
+		if _, shown := d.shown(s.Now(), keep); kept && shown && e.MessageID == messageID {
+			out[e.ID] = string(d.raw)
+		}
+	}
+	return out, nil
 }
 
 // EventsOf implements store.Events.

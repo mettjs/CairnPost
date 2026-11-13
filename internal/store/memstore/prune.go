@@ -8,6 +8,32 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
+// PruneContents implements store.Pruning.
+func (s *Store) PruneContents(_ context.Context, limit int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return expire(s.contents, s.Now(), limit), nil
+}
+
+// PruneDetails implements store.Pruning.
+func (s *Store) PruneDetails(_ context.Context, limit int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return expire(s.details, s.Now(), limit), nil
+}
+
+// expire deletes up to limit of the words whose time is up.
+func expire(kept map[string]content, now time.Time, limit int) int {
+	n := 0
+	for id, c := range kept {
+		if n < limit && !c.expires.After(now) {
+			delete(kept, id)
+			n++
+		}
+	}
+	return n
+}
+
 // PruneKeys implements store.Pruning.
 func (s *Store) PruneKeys(_ context.Context, ttl time.Duration, limit int) (int, error) {
 	s.mu.Lock()
@@ -51,6 +77,14 @@ func (s *Store) PruneMessages(_ context.Context, before time.Time, limit int) (i
 		}
 	}
 	// What hangs on a message goes with it; a suppression only lets go.
+	for id := range gone {
+		delete(s.contents, id)
+	}
+	for _, e := range s.events {
+		if gone[e.MessageID] {
+			delete(s.details, e.ID)
+		}
+	}
 	s.events = slices.DeleteFunc(s.events, func(e store.Event) bool { return gone[e.MessageID] })
 	s.deliveries = slices.DeleteFunc(s.deliveries, func(d *delivery) bool { return gone[d.MessageID] })
 	for _, row := range s.suppressed {

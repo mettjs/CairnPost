@@ -30,6 +30,10 @@ type Options struct {
 	// back before it is let go: an event can outrun the record of the send
 	// it is about.
 	Grace time.Duration
+	// KeepDetails is how long after an email was sent a receiving
+	// server's sentence about it is kept; 0 keeps none. It is the time
+	// the operator keeps what emails say.
+	KeepDetails time.Duration
 }
 
 // kindOf maps each kind a driver reports to the kind the store keeps. It
@@ -143,9 +147,14 @@ func (r *Reader) Pass(ctx context.Context) (int, error) {
 		if e.At.IsZero() {
 			e.At = r.now()
 		}
-		outcome, err := r.store.RecordEvent(ctx, store.Event{Driver: r.driver, UpstreamEventID: e.ID,
+		record := store.Event{Driver: r.driver, UpstreamEventID: e.ID,
 			UpstreamID: e.UpstreamID, Kind: kind, Permanent: e.Permanent, Code: e.Code, Reason: e.Reason, At: e.At,
-			Sender: e.Sender, Recipient: e.Recipient})
+			Sender: e.Sender, Recipient: e.Recipient}
+		if r.opt.KeepDetails != 0 {
+			// Only where what emails say is kept, whatever the source read.
+			record.Detail, record.KeepDetail = e.Detail, r.opt.KeepDetails
+		}
+		outcome, err := r.store.RecordEvent(ctx, record)
 		_, suppresses := store.SuppressionFor(kind, e.Permanent, e.Code)
 		switch {
 		case err != nil:

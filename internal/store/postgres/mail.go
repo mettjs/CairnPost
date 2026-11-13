@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -119,5 +120,35 @@ func insertMessage(ctx context.Context, tx pgx.Tx, s store.Start) (string, error
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
+	if err != nil || s.Content == nil {
+		return id, err
+	}
+	// With its message, in the one step: a message is never without the
+	// content it was to be kept with, and a send that is rolled back
+	// leaves none behind.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO message_contents (message_id, content, expires_at)
+		VALUES ($1::uuid, $2, now() + make_interval(secs => $3))`, id, s.Content(), s.KeepContent.Seconds())
 	return id, err
+}
+
+// Content implements store.Mail. Its age is read on the database's clock.
+func (db *DB) Content(ctx context.Context, id string, keep time.Duration) ([]byte, time.Time, error) {
+	if !uuidShape.MatchString(id) {
+		return nil, time.Time{}, nil
+	}
+	var (
+		content []byte
+		until   time.Time
+	)
+	err := db.pool.QueryRow(ctx, `
+		SELECT content, least(expires_at, created_at + make_interval(secs => $2)) FROM message_contents
+		WHERE message_id = $1::uuid AND expires_at > now() AND created_at > now() - make_interval(secs => $2)`, id, keep.Seconds()).Scan(&content, &until)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, time.Time{}, nil
+	}
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("postgres: read a message's content: %w", err)
+	}
+	return content, until, nil
 }

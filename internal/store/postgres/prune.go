@@ -8,6 +8,30 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// PruneContents implements store.Pruning.
+func (db *DB) PruneContents(ctx context.Context, limit int) (int, error) {
+	tag, err := db.pool.Exec(ctx, `
+		DELETE FROM message_contents WHERE message_id IN (
+			SELECT message_id FROM message_contents WHERE expires_at <= now()
+			ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED)`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("postgres: prune messages' content: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// PruneDetails implements store.Pruning.
+func (db *DB) PruneDetails(ctx context.Context, limit int) (int, error) {
+	tag, err := db.pool.Exec(ctx, `
+		DELETE FROM event_details WHERE event_id IN (
+			SELECT event_id FROM event_details WHERE expires_at <= now()
+			ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED)`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("postgres: prune events' details: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 // PruneKeys implements store.Pruning. The key's row is taken before its
 // message's, the order a takeover uses.
 func (db *DB) PruneKeys(ctx context.Context, ttl time.Duration, limit int) (int, error) {

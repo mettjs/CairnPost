@@ -1,11 +1,13 @@
 // Package prune deletes, on a schedule, what CairnPost has kept long
-// enough: Idempotency-Keys past their life, emails' records past the time
-// the operator keeps them, and lifted suppressions nothing can undo any
-// more. A suppression in force is never pruned.
+// enough: what emails said, where the operator keeps that at all,
+// Idempotency-Keys past their life, emails' records past the time the
+// operator keeps them, and lifted suppressions nothing can undo any more.
+// A suppression in force is never pruned.
 package prune
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -34,7 +36,7 @@ type Options struct {
 	// KeyTTL is how long an Idempotency-Key is remembered.
 	KeyTTL time.Duration
 	// Keep is how long an email's record is kept; 0 keeps records for
-	// ever, and then only keys are pruned.
+	// ever, and then only keys and kept words are pruned.
 	Keep time.Duration
 }
 
@@ -79,7 +81,7 @@ func (p *Pruner) Run(ctx context.Context) {
 		}
 		if c != (Counts{}) {
 			// Counts only: no address and no id.
-			p.log.Info("prune: forgot what was kept long enough", "idempotency_keys", c.Keys,
+			p.log.Info("prune: forgot what was kept long enough", "contents", c.Contents, "details", c.Details, "idempotency_keys", c.Keys,
 				"emails", c.Emails, "lifted_suppressions", c.Lifted)
 		}
 		select {
@@ -91,32 +93,46 @@ func (p *Pruner) Run(ctx context.Context) {
 }
 
 // Counts is how much a pass deleted.
-type Counts struct{ Keys, Emails, Lifted int }
+type Counts struct{ Contents, Details, Keys, Emails, Lifted int }
 
-// Pass prunes everything due now. Keys go first: an email's record is not
-// deleted while a key still points at it; lifted suppressions go last,
-// once the emails sent before their lift are gone.
+// Pass prunes everything due now. What emails said, and what was said of
+// them, goes first and each on its own: it is the most private thing
+// kept, so nothing else failing holds it back, and its failing holds
+// nothing else back. Each was given its time when it was kept, so this
+// runs whatever the setting is now.
 func (p *Pruner) Pass(ctx context.Context) (Counts, error) {
 	var (
-		c   Counts
-		err error
+		c    Counts
+		errs [3]error
 	)
+	c.Contents, errs[0] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneContents(ctx, batch) })
+	c.Details, errs[1] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneDetails(ctx, batch) })
+	errs[2] = p.records(ctx, &c)
+	return c, errors.Join(errs[:]...)
+}
+
+// records prunes keys, then emails' records, then lifted suppressions.
+// Keys go first: an email's record is not deleted while a key still points
+// at it; lifted suppressions go last, once the emails sent before their
+// lift are gone.
+func (p *Pruner) records(ctx context.Context, c *Counts) error {
+	var err error
 	c.Keys, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneKeys(ctx, p.opt.KeyTTL, batch) })
 	if err != nil || p.opt.Keep == 0 {
-		return c, err
+		return err
 	}
 	horizon, cancel := context.WithTimeout(ctx, batchTimeout)
 	before, err := p.store.Horizon(horizon, p.opt.Keep)
 	cancel()
 	if err != nil {
-		return c, err
+		return err
 	}
 	c.Emails, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneMessages(ctx, before, batch) })
 	if err != nil {
-		return c, err
+		return err
 	}
 	c.Lifted, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneLifted(ctx, before, batch) })
-	return c, err
+	return err
 }
 
 // all repeats a prune until it finds less than a batch, and answers the

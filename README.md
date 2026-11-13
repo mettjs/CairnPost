@@ -11,15 +11,19 @@ Go, backed by Postgres.
 
 **Status: early.** It sends through Cloudflare Email Sending, reads what
 became of each email, and stops sending to addresses that bounce for good
-or complain. Webhooks come next. The [changelog](CHANGELOG.md) says what
+or complain, tells your application by signed webhooks, and deletes old
+records on a schedule. A console comes next. The [changelog](CHANGELOG.md) says what
 exists.
 
 ## What it is, and is not
 
 - It is a gateway. It owns the API, the keys, the records and the tools; an
   upstream provider delivers the mail.
-- **It keeps nothing of an email's subject or body, and never writes them to
-  a log.** The database holds who sent what to whom and what became of it.
+- **By default it keeps nothing of an email's subject or body, and it never
+  writes them to a log.** The database holds who sent what to whom and what
+  became of it. Whoever runs it may turn on `CAIRNPOST_CONTENT_RETENTION` to
+  keep what emails said for a short time, to see what went out when
+  something goes wrong (see "What is kept").
   The `capture` driver, a development tool whose purpose is to show you the
   email, holds the last few in memory only, readable with an admin key.
 - It does not track opens or clicks.
@@ -57,7 +61,7 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | Call | Does |
 |---|---|
 | `POST /emails` | Send one email to one recipient. Answers `{"id": "..."}` once the provider has taken it. |
-| `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any. |
+| `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any. Where content is kept, an admin key also sees what the email said, as `content`. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
 | `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
 | `POST /suppressions` | Stop sending to an address from a domain: `{"domain", "address", "note"}`. The note is optional, one line of at most 500 bytes. Admin key. |
@@ -93,8 +97,8 @@ States past `sent` come from the provider's delivery events, which need the
 driver's event settings (see Drivers). Each event is listed under `events`
 with its `type`, its time and, when there is one, the receiving server's
 status `code` ("5.1.1") and the provider's short `reason`
-("permanent_failure"). The receiving server's own sentence is not kept: it
-can quote the email.
+("permanent_failure"). The receiving server's own sentence can quote the
+email, so it is kept only where content is (see "What an email said").
 
 **Suppression.** When a receiving server refuses an address for good (a hard
 bounce), or its owner marks an email as spam, CairnPost stops sending to
@@ -199,6 +203,22 @@ trying an email for days before it bounces; `off` keeps records for ever.
 The pruner runs every `CAIRNPOST_PRUNE_EVERY`, and `GET /health` says
 `"pruning": "running"` or `"failing"`. Mail still goes while it is failing.
 
+**What an email said** is not kept unless `CAIRNPOST_CONTENT_RETENTION` is
+set, to a time of 30 days at most. While it is, the subject, bodies, reply
+address, sender's name and headers of each email are stored when it is sent,
+and `GET /emails/{id}` shows them as `content`, with `kept_until`, to an
+admin key: one bound to a sending domain sees that domain's emails' only,
+and a key that may only send never does, even for its own emails. So is
+what the receiving server said about a bounce or a delay, as an event's
+`detail`: it says why, and it can quote the email, so it is kept until the
+email's content is and not at all if it comes later. Neither is ever logged
+or sent in a webhook. Both stop being shown when their time is up and are
+deleted at the pruner's next pass. Each is deleted on the time it was kept
+under: turning the setting off, or making it shorter, hides at once what
+is past the new time, and deletes it when its original time is up. Anyone
+who can read the database can read them, so leave it off unless you need
+it.
+
 **Errors** are JSON: `{"statusCode": 422, "name": "validation_error", "message": "..."}`.
 The status tells a program what to do:
 
@@ -302,6 +322,7 @@ sending domain with `--domain`.
 | `CAIRNPOST_EVENTS_RETRY` | `30s` | How long an event handed back waits before it is given again. |
 | `CAIRNPOST_IDEMPOTENCY_TTL` | `24h` | How long an `Idempotency-Key` is remembered. |
 | `CAIRNPOST_RETENTION` | `30d` | How long an email's record is kept after the last thing that happened to it, in days (`30d`) or hours (`720h`). At least `7d`, and longer than `CAIRNPOST_IDEMPOTENCY_TTL` and than the waits of `CAIRNPOST_WEBHOOK_RETRIES` together. `off` keeps records for ever. |
+| `CAIRNPOST_CONTENT_RETENTION` | `off` | How long what an email said, and what the receiving server said of it, is kept and shown to admin keys: a time such as `24h` or `7d`, `30d` at most and no longer than `CAIRNPOST_RETENTION`. `off` keeps none. |
 | `CAIRNPOST_PRUNE_EVERY` | `1h` | How long the pruner rests between passes. |
 | `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. |
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |

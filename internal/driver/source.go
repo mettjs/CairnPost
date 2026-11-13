@@ -21,8 +21,9 @@ const (
 var Kinds = []string{Delivered, Deferred, Bounced, Complained, Failed}
 
 // Event is one thing an upstream says happened to an email it took. It
-// holds nothing of the email's subject or body, and no server's free text,
-// which can quote either.
+// holds nothing of the email's subject or body. A server's free text,
+// which can quote either, is in Detail alone, and only when the source was
+// asked for it.
 type Event struct {
 	// ID is the upstream's own id for the event; the same event handed
 	// over twice has the same id.
@@ -36,6 +37,11 @@ type Event struct {
 	// upstream's own short name for what happened ("permanent_failure"):
 	// both from closed vocabularies, never a sentence.
 	Code, Reason string
+	// Detail is the receiving server's own sentence about a bounce or a
+	// delay. It is "" unless the source was built to read it, which it is
+	// only where the operator keeps what emails say. Never logged, and
+	// never sent on to an application.
+	Detail string
 	// At is when it happened; zero when the upstream did not say.
 	At time.Time
 	// Sender and Recipient are the email's addresses when the upstream

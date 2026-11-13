@@ -53,6 +53,9 @@ type Options struct {
 	SendTimeout time.Duration
 	// IdempotencyTTL and InDoubtWindow are store.Start's.
 	IdempotencyTTL, InDoubtWindow time.Duration
+	// KeepContent is how long what an email said is kept, for whoever
+	// runs CairnPost to see what was sent; 0, the rule, keeps none.
+	KeepContent time.Duration
 }
 
 // Store is what the service keeps its records in.
@@ -95,6 +98,7 @@ func (s *Service) Send(ctx context.Context, key store.Key, presented string, r R
 	start := store.Start{
 		KeyID: key.ID, Sender: c.msg.From, Recipient: c.msg.To, Driver: s.driver.Name(),
 		IdemKey: r.IdemKey, TTL: s.opt.IdempotencyTTL, InDoubt: s.opt.InDoubtWindow,
+		Content: s.contentOf(c.msg), KeepContent: s.opt.KeepContent,
 	}
 	if r.IdemKey != "" {
 		start.Fingerprint = fingerprint(presented, c.msg)
