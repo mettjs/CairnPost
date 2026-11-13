@@ -27,13 +27,14 @@ func TestDefaults(t *testing.T) {
 
 func TestWhatCannotRunIsRefusedAndSaysWhy(t *testing.T) {
 	cases := map[string][]string{
-		"CAIRNPOST_POSTGRES_DSN":    {"CAIRNPOST_DRIVER", "capture"},
-		"CAIRNPOST_DRIVER":          {"CAIRNPOST_POSTGRES_DSN", "x"},
-		"CAIRNPOST_SEND_TIMEOUT":    {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_SEND_TIMEOUT", "soon"},
-		"CAIRNPOST_MAX_BODY_BYTES":  {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_MAX_BODY_BYTES", "-1"},
-		"CAIRNPOST_IN_DOUBT_WINDOW": {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_IN_DOUBT_WINDOW", "5s"},
-		"would be forgotten":        {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_IDEMPOTENCY_TTL", "1m"},
-		"CAIRNPOST_IDEMPOTENCY_TTL": {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_IDEMPOTENCY_TTL", "0s"},
+		"CAIRNPOST_POSTGRES_DSN":         {"CAIRNPOST_DRIVER", "capture"},
+		"CAIRNPOST_DRIVER":               {"CAIRNPOST_POSTGRES_DSN", "x"},
+		"CAIRNPOST_SEND_TIMEOUT":         {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_SEND_TIMEOUT", "soon"},
+		"CAIRNPOST_MAX_BODY_BYTES":       {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_MAX_BODY_BYTES", "-1"},
+		"CAIRNPOST_IN_DOUBT_WINDOW":      {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_IN_DOUBT_WINDOW", "5s"},
+		"CAIRNPOST_CLOUDFLARE_API_TOKEN": {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "cloudflare", "CAIRNPOST_CLOUDFLARE_ACCOUNT_ID", "abc"},
+		"would be forgotten":             {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_IDEMPOTENCY_TTL", "1m"},
+		"CAIRNPOST_IDEMPOTENCY_TTL":      {"CAIRNPOST_POSTGRES_DSN", "x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_IDEMPOTENCY_TTL", "0s"},
 	}
 	for name, pairs := range cases {
 		if _, err := Load(env(pairs...)); err == nil || !strings.Contains(err.Error(), name) {

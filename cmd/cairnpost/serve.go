@@ -13,6 +13,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/config"
 	"github.com/mettjs/cairnpost/internal/driver"
 	"github.com/mettjs/cairnpost/internal/driver/capture"
+	"github.com/mettjs/cairnpost/internal/driver/cloudflare"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
@@ -76,6 +77,8 @@ func serve(ctx context.Context) error {
 		kept := capture.New(cfg.CaptureKeep, time.Now)
 		drv, captured = kept, func() []api.CapturedEmail { return capturedEmails(kept) }
 		log.Warn("the capture driver is in use: emails are kept in memory and sent to nobody")
+	case cloudflare.Name:
+		drv = cloudflare.New(cfg.Cloudflare.AccountID, cfg.Cloudflare.APIToken)
 	default:
 		return fmt.Errorf("no driver is built for %q", cfg.Driver)
 	}
@@ -83,7 +86,7 @@ func serve(ctx context.Context) error {
 	handler := api.New(api.Deps{
 		Mail: mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 			IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow}, log),
-		Keys: keys.New(db), Ping: db.Ping, Captured: captured,
+		Keys: keys.New(db), Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
 	})
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler,
@@ -112,4 +115,24 @@ func capturedEmails(d *capture.Driver) []api.CapturedEmail {
 			ReplyTo: c.ReplyTo, Subject: c.Subject, HTML: c.HTML, Text: c.Text, Headers: c.Headers})
 	}
 	return out
+}
+
+// quotaOf is how the API asks the driver for its sending allowance; nil for
+// a driver whose upstream has none to tell.
+func quotaOf(d driver.Driver) func(context.Context) (api.Quota, error) {
+	limited, ok := d.(driver.Limited)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context) (api.Quota, error) {
+		q, err := limited.Quota(ctx)
+		if err != nil {
+			return api.Quota{}, err
+		}
+		out := api.Quota{Limit: q.Limit, Per: q.Per, Used: q.Used, Over: q.Over}
+		if !q.ResetsAt.IsZero() {
+			out.ResetsAt = &q.ResetsAt
+		}
+		return out, nil
+	}
 }

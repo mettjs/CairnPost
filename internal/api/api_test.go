@@ -59,7 +59,15 @@ func newRig(t *testing.T) *rig {
 	return newRigOn(t, s)
 }
 
-func newRigOn(t *testing.T, s store.Store) *rig {
+// newRigWith is newRig with the API's dependencies adjusted.
+func newRigWith(t *testing.T, adjust func(*api.Deps)) *rig {
+	s := memstore.New()
+	return newRigBuilt(t, s, adjust)
+}
+
+func newRigOn(t *testing.T, s store.Store) *rig { return newRigBuilt(t, s, func(*api.Deps) {}) }
+
+func newRigBuilt(t *testing.T, s store.Store, adjust func(*api.Deps)) *rig {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	drv := &fake{}
@@ -72,7 +80,7 @@ func newRigOn(t *testing.T, s store.Store) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := api.New(api.Deps{
+	deps := api.Deps{
 		Mail: mail.New(s, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 			InDoubtWindow: time.Minute}, log),
 		Keys: ks, Ping: s.Ping, Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
@@ -83,8 +91,9 @@ func newRigOn(t *testing.T, s store.Store) *rig {
 			}
 			return out
 		},
-	})
-	return &rig{t: t, h: h, drv: drv, send: send, admin: admin}
+	}
+	adjust(&deps)
+	return &rig{t: t, h: api.New(deps), drv: drv, send: send, admin: admin}
 }
 
 const good = `{"from":"App <app@example.com>","to":"ana@example.org","subject":"Hello","text":"Body text"}`
@@ -254,6 +263,47 @@ func TestCapturedMailNeedsAnAdminKey(t *testing.T) {
 	list, _ := got["data"].([]any)
 	if code != 200 || len(list) != 1 || list[0].(map[string]any)["subject"] != "Hello" {
 		t.Fatalf("an admin key: %d %v", code, got)
+	}
+}
+
+func TestLimitsSayWhatTheProviderAllows(t *testing.T) {
+	r := newRig(t)
+	if code, _, got := r.do("GET", "/limits", r.send, "", ""); code != 200 || got["quota"] != nil || got["driver"] != "fake" {
+		t.Fatalf("a provider with no allowance to tell: %d %v", code, got)
+	}
+	if code, _, _ := r.do("GET", "/limits", "", "", ""); code != 401 {
+		t.Fatalf("without a key: %d", code)
+	}
+	resets := time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)
+	r = newRigWith(t, func(d *api.Deps) {
+		d.Quota = func(context.Context) (api.Quota, error) {
+			return api.Quota{Limit: 200, Per: "day", Used: 7, ResetsAt: &resets}, nil
+		}
+	})
+	code, _, got := r.do("GET", "/limits", r.send, "", "")
+	quota, _ := got["quota"].(map[string]any)
+	if code != 200 || quota["limit"] != 200.0 || quota["used"] != 7.0 || quota["per"] != "day" || quota["over"] != false {
+		t.Fatalf("%d %v", code, got)
+	}
+	r = newRigWith(t, func(d *api.Deps) {
+		d.Quota = func(context.Context) (api.Quota, error) { return api.Quota{}, errors.New("down") }
+	})
+	if code, name, _ := r.do("GET", "/limits", r.send, "", ""); code != 502 || name != "upstream_unknown" {
+		t.Fatalf("a provider that does not answer: %d %s", code, name)
+	}
+	r = newRigWith(t, func(d *api.Deps) {
+		d.Quota = func(context.Context) (api.Quota, error) { return api.Quota{}, driver.ErrUnavailable }
+	})
+	if code, name, _ := r.do("GET", "/limits", r.send, "", ""); code != 503 || name != "upstream_unavailable" {
+		t.Fatalf("a provider that refuses: %d %s", code, name)
+	}
+	r = newRigWith(t, func(d *api.Deps) {
+		d.Quota = func(context.Context) (api.Quota, error) {
+			return api.Quota{}, &driver.Throttled{After: 30 * time.Second}
+		}
+	})
+	if code, name, _ := r.do("GET", "/limits", r.send, "", ""); code != 429 || name != "rate_limit_exceeded" {
+		t.Fatalf("a provider asked too often: %d %s", code, name)
 	}
 }
 
