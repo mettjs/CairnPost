@@ -92,6 +92,10 @@ Every change a user of CairnPost can notice is written here. The format is
   and its sending domain a host name; a sending domain holds
   `CAIRNPOST_MAX_KEYS` live keys (200). A key made in the console records
   which key made it.
+- Send counts: how many emails were sent each hour from each sending
+  domain, and what became of them, counted apart from the emails' records
+  and kept for `CAIRNPOST_COUNTS_RETENTION` (62 days) whatever
+  `CAIRNPOST_RETENTION` is.
 - `cairnpost serve`, `migrate`, `send` and `version`; a Dockerfile and a
   Compose file with Postgres 18.
 - Images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`, published with

@@ -38,6 +38,10 @@ type Pruning interface {
 	// recorded with it as usual. Marking it is nothing that happened to
 	// the email: its record stays kept from when it was sent.
 	MarkUnanswered(ctx context.Context, older time.Duration, limit int) (int, error)
+	// PruneCounts deletes the send counts (Counts) of hours that began
+	// older ago. They have a life of their own, not the records': a
+	// count outlives the emails it counts.
+	PruneCounts(ctx context.Context, older time.Duration, limit int) (int, error)
 	// Horizon is the store's own time, keep ago: the instant the other
 	// prunes of one pass are measured against, so they agree.
 	Horizon(ctx context.Context, keep time.Duration) (time.Time, error)

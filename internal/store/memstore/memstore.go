@@ -40,13 +40,15 @@ type Store struct {
 	suppressed map[string]*suppression
 	endpoints  []*store.Endpoint
 	deliveries []*delivery
+	counts     map[bucket]map[string]int
 }
 
 // New returns an empty store on the wall clock.
 func New() *Store {
 	return &Store{Now: time.Now, keys: map[string]store.Key{},
 		messages: map[string]store.Message{}, idems: map[string]*idem{},
-		suppressed: map[string]*suppression{}, contents: map[string]content{}, details: map[string]content{}, sessions: map[string]session{}}
+		suppressed: map[string]*suppression{}, contents: map[string]content{}, details: map[string]content{}, sessions: map[string]session{},
+		counts: map[bucket]map[string]int{}}
 }
 
 var _ store.Store = (*Store)(nil)
@@ -144,6 +146,7 @@ func (s *Store) newMessage(st store.Start) string {
 	m := store.Message{ID: s.next("msg"), KeyID: st.KeyID, Sender: st.Sender, Recipient: st.Recipient,
 		Driver: st.Driver, State: store.StateSending, CreatedAt: now, UpdatedAt: now}
 	s.messages[m.ID] = m
+	s.count(m, "", m.State)
 	if st.Content != nil {
 		s.contents[m.ID] = content{raw: bytes.Clone(st.Content()), sent: now, expires: now.Add(st.KeepContent)}
 	}
@@ -180,7 +183,11 @@ func (s *Store) Content(_ context.Context, id string, keep time.Duration) ([]byt
 }
 
 func (s *Store) setState(id, state, upstreamID string) {
-	m := s.messages[id]
+	m, kept := s.messages[id]
+	if !kept {
+		return // as an UPDATE that finds no row: nothing is made of it
+	}
+	s.count(m, m.State, state)
 	m.State, m.UpdatedAt = state, s.Now()
 	if upstreamID != "" {
 		m.UpstreamID = upstreamID

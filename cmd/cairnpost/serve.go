@@ -131,7 +131,7 @@ func serve(ctx context.Context) error {
 
 	// What has been kept long enough is deleted beside the API as well.
 	pruner := prune.New(db, prune.Options{Every: cfg.PruneEvery, KeyTTL: cfg.IdempotencyTTL, Keep: cfg.Retention,
-		Unanswered: cfg.AbandonedAfter()}, log)
+		KeepCounts: cfg.CountsRetention, Unanswered: cfg.AbandonedAfter()}, log)
 	pruning := make(chan struct{})
 	go func() { defer close(pruning); pruner.Run(ctx) }()
 	if cfg.Retention == 0 {

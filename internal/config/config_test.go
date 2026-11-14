@@ -81,6 +81,25 @@ func TestWebhookSettings(t *testing.T) {
 	}
 }
 
+// The counts of what was sent have a time of their own: 62 days unless
+// set, never less, and for ever when off.
+func TestCountsRetention(t *testing.T) {
+	base := []string{"CAIRNPOST_POSTGRES_DSN", "postgres://x", "CAIRNPOST_DRIVER", "capture"}
+	for value, want := range map[string]time.Duration{
+		"": 62 * 24 * time.Hour, "365d": 365 * 24 * time.Hour, "1488h": 62 * 24 * time.Hour, " Off ": 0,
+	} {
+		c, err := Load(env(append(base, "CAIRNPOST_COUNTS_RETENTION", value)...))
+		if err != nil || c.CountsRetention != want {
+			t.Errorf("%q: %s, %v", value, c.CountsRetention, err)
+		}
+	}
+	for _, value := range []string{"61d", "0", "-1d", "soon", "99999d"} {
+		if _, err := Load(env(append(base, "CAIRNPOST_COUNTS_RETENTION", value)...)); err == nil {
+			t.Errorf("%q was taken", value)
+		}
+	}
+}
+
 func TestRetention(t *testing.T) {
 	base := []string{"CAIRNPOST_POSTGRES_DSN", "postgres://x", "CAIRNPOST_DRIVER", "capture"}
 	for value, want := range map[string]time.Duration{

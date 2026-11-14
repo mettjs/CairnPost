@@ -68,6 +68,11 @@ type Config struct {
 	// DNSServer is CAIRNPOST_DNS_SERVER: the one DNS server those checks
 	// ask, as "address:port"; "" for the system's resolver, the default.
 	DNSServer string
+	// CountsRetention is CAIRNPOST_COUNTS_RETENTION: how long the counts
+	// of what was sent each hour are kept, whatever Retention is. In days
+	// ("62d") or as a duration, 62d at least; "off" keeps them for ever,
+	// and is 0. Default 62d.
+	CountsRetention time.Duration
 	// PruneEvery is CAIRNPOST_PRUNE_EVERY: how long the pruner rests
 	// between passes. Default 1h.
 	PruneEvery time.Duration
@@ -236,6 +241,9 @@ func Load(getenv func(string) string) (Config, error) {
 		retries += wait
 	}
 	if c.Retention, err = retention(getenv, c.IdempotencyTTL, retries); err != nil {
+		return c, err
+	}
+	if c.CountsRetention, err = countsRetention(getenv); err != nil {
 		return c, err
 	}
 	if c.ContentRetention, err = contentRetention(getenv, c.Retention); err != nil {

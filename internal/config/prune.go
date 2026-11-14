@@ -85,3 +85,33 @@ func retention(getenv func(string) string, ttl, retries time.Duration) (time.Dur
 	}
 	return keep, nil
 }
+
+// MinCountsRetention is the shortest time the send counts may be kept:
+// the longest period shown (thirty days) beside the one before it, with
+// room for the day under way.
+const MinCountsRetention = 62 * 24 * time.Hour
+
+// countsRetention reads CAIRNPOST_COUNTS_RETENTION: how long the counts
+// of what was sent are kept, in days ("62d") or as a duration, or "off"
+// to keep them for ever, which is 0. It is a time of its own, not the
+// records': a count outlives the emails it counts.
+func countsRetention(getenv func(string) string) (time.Duration, error) {
+	const name = "CAIRNPOST_COUNTS_RETENTION"
+	v := strings.ToLower(strings.TrimSpace(getenv(name)))
+	if v == "off" {
+		return 0, nil
+	}
+	keep, ok := MinCountsRetention, true
+	if v != "" {
+		keep, ok = span(v)
+	}
+	switch {
+	case !ok || keep <= 0 || keep > maxRetention:
+		return 0, fmt.Errorf("config: %s must be a time such as 62d or 2160h, 100 years at most, "+
+			"or off to keep the counts for ever (got %q)", name, v)
+	case keep < MinCountsRetention:
+		return 0, fmt.Errorf("config: %s must be at least 62d (got %q): the last thirty days are shown "+
+			"beside the thirty before them", name, v)
+	}
+	return keep, nil
+}
