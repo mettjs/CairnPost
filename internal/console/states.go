@@ -33,6 +33,7 @@ var waitingStates = map[string]stateWords{
 var cancelledFor = map[string]string{
 	store.HeldSuppressed: "When its time came, every address it named in the open was on the suppression list.",
 	store.HeldKeyRevoked: "The API key that asked for it was revoked before its time came.",
+	store.HeldFailed:     "This server could not send it, each time it tried. The server's log says why.",
 }
 
 // wordsOf answers a state's words; a state this console does not know is

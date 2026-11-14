@@ -187,6 +187,15 @@ func TestTheProvidersLimitPausesEverythingAndSpendsNoTry(t *testing.T) {
 	if n, _ := r.pass(); n != 0 {
 		t.Fatal("tried again before the wait was over")
 	}
+	// Nothing was begun but what was handed to the provider.
+	list, _ := r.store.ListHeld(context.Background(), "", time.Time{}, 10)
+	tried := 0
+	for _, h := range list {
+		tried += h.Tries
+	}
+	if tried != len(r.drv.held) {
+		t.Fatalf("%d tries are counted for %d handed to the provider", tried, len(r.drv.held))
+	}
 	r.now = r.now.Add(10 * time.Minute)
 	if n, _ := r.pass(); n != 4 {
 		t.Fatalf("%d taken after the wait", n)
@@ -211,13 +220,12 @@ func TestWhatCannotBeSentAnyMoreIsCancelledWithItsReason(t *testing.T) {
 	if err != nil || m.State != store.StateCancelled || m.Reason != store.HeldSuppressed || len(r.drv.held) != 0 {
 		t.Fatalf("%+v %v, %d sent", m, err, len(r.drv.held))
 	}
-	// And one whose key was revoked while it waited.
+	// And one whose key was revoked while it waited: at once, not when
+	// its time comes.
 	revoked = r.later("ok@example.net")
 	if err := r.store.RevokeKey(context.Background(), "cp_app"); err != nil {
 		t.Fatal(err)
 	}
-	r.now = r.now.Add(time.Hour)
-	r.pass()
 	h, err := r.store.Held(context.Background(), revoked)
 	if err != nil || h.State != store.StateCancelled || h.Reason != store.HeldKeyRevoked || len(r.drv.held) != 0 {
 		t.Fatalf("%+v %v, %d sent", h, err, len(r.drv.held))
@@ -238,7 +246,7 @@ func TestWhatAStoppedServerHadTakenIsRecovered(t *testing.T) {
 	// One had been begun when the server stopped; the other had not.
 	for _, h := range taken {
 		if h.ID == handed {
-			if _, err := r.store.Start(context.Background(), store.Start{ID: h.ID, KeyID: h.KeyID, Sender: h.Sender, Recipients: h.Recipients, Driver: "fake"}); err != nil {
+			if _, err := r.store.Start(context.Background(), store.Start{ID: h.ID, Claim: h.Claim, KeyID: h.KeyID, Sender: h.Sender, Recipients: h.Recipients, Driver: "fake"}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -268,5 +276,165 @@ func TestWithContentKeptTheWordsMoveToTheMessage(t *testing.T) {
 	after, err := r.mail.Content(context.Background(), id)
 	if err != nil || after == nil || after.Subject != "Later" || after.FromName != "App" {
 		t.Fatalf("after the send: %+v %v", after, err)
+	}
+}
+
+// An email is one taker's: whoever took it before, and was held to have
+// stopped, neither sends it nor changes what the next taker does.
+func TestAnEmailTakenAgainIsNotSentByWhoTookItFirst(t *testing.T) {
+	r := newRig(t, 0)
+	id := r.later("ana@example.org")
+	r.now = r.now.Add(time.Hour)
+	first, err := r.store.TakeDue(context.Background(), 10)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("%d taken: %v", len(first), err)
+	}
+	// The first taker is slow; its email is recovered and taken again.
+	r.now = r.now.Add(5 * time.Minute)
+	if n, _ := r.store.Recover(context.Background(), 5*time.Minute, 10); n != 1 {
+		t.Fatalf("%d recovered", n)
+	}
+	second, _ := r.store.TakeDue(context.Background(), 10)
+	if len(second) != 1 || second[0].Claim == first[0].Claim {
+		t.Fatalf("taken again: %+v", second)
+	}
+	if err := r.mail.SendHeld(context.Background(), second[0], true); err != nil {
+		t.Fatal(err)
+	}
+	// Now the first one wakes up.
+	if err := r.mail.SendHeld(context.Background(), first[0], true); !errors.Is(err, mail.ErrGone) {
+		t.Fatalf("the first taker's send: %v", err)
+	}
+	if err := r.store.Postpone(context.Background(), id, first[0].Claim, 0); err == nil {
+		t.Fatal("the first taker put it back to wait")
+	}
+	if len(r.drv.held) != 1 || r.state(id) != store.StateSent {
+		t.Fatalf("%d sent, %s", len(r.drv.held), r.state(id))
+	}
+	if n, _ := r.pass(); n != 0 {
+		t.Fatal("it waits again")
+	}
+}
+
+// An email the provider refused for good, or took, waits no more from
+// that moment: a server that stops right then leaves nothing to send.
+func TestASettledEmailIsNotRecoveredAndSentAgain(t *testing.T) {
+	for name, answer := range map[string]error{"refused": driver.ErrRejected, "taken": nil, "lost": errors.New("dropped")} {
+		r := newRig(t, 0)
+		id := r.later("ana@example.org")
+		r.now = r.now.Add(time.Hour)
+		taken, _ := r.store.TakeDue(context.Background(), 10)
+		r.drv.err = answer
+		_ = r.mail.SendHeld(context.Background(), taken[0], true)
+		// The server stops here, before it lets the email go.
+		r.drv.err = nil
+		r.now = r.now.Add(10 * time.Minute)
+		if n, _ := r.store.Recover(context.Background(), 5*time.Minute, 10); n != 0 {
+			t.Errorf("%s: %d recovered", name, n)
+		}
+		if n, _ := r.pass(); n != 0 || len(r.drv.held) != 1 {
+			t.Errorf("%s: taken again (%d), %d handed to the provider", name, n, len(r.drv.held))
+		}
+		if _, err := r.store.Held(context.Background(), id); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("%s: it still waits: %v", name, err)
+		}
+	}
+}
+
+// Between two tries the email goes to whom the first try was to go to:
+// an address taken off the suppression list since has no record, and is
+// not sent to without one.
+func TestAnAddressLiftedBetweenTriesIsNotSentToWithoutARecord(t *testing.T) {
+	r := newRig(t, 0)
+	ctx := context.Background()
+	if _, err := r.store.Suppress(ctx, store.Suppression{Domain: "example.com", Address: "cc@example.org", Reason: store.ReasonManual}); err != nil {
+		t.Fatal(err)
+	}
+	id := r.later("ana@example.org")
+	r.now = r.now.Add(time.Hour)
+	r.drv.err = driver.ErrUnavailable
+	r.pass()
+	if err := r.store.Unsuppress(ctx, "example.com", "cc@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	r.drv.err = nil
+	r.now = r.now.Add(time.Minute)
+	r.pass()
+	last := r.drv.held[len(r.drv.held)-1]
+	m, _ := r.store.Message(ctx, id)
+	if len(last.Cc) != 0 || len(last.To) != 1 || len(m.Recipients) != 1 || len(m.LeftOut) != 1 || m.State != store.StateSent {
+		t.Fatalf("sent to %v and %v; on record %+v", last.To, last.Cc, m)
+	}
+}
+
+// A send that breaks in our own code ends neither the server nor the
+// other emails, and is not handed to the provider a second time.
+type breaks struct{ *mail.Service }
+
+func (b breaks) SendHeld(ctx context.Context, h store.Held, again bool) error {
+	if h.Recipients[0].Address == "bad@example.org" {
+		panic("broken")
+	}
+	return b.Service.SendHeld(ctx, h, again)
+}
+
+func TestASendThatPanicsEndsNothingElse(t *testing.T) {
+	r := newRig(t, 0)
+	r.run = schedule.New(r.store, breaks{r.mail}, schedule.Options{Poll: time.Second, Batch: 10, Parallel: 1,
+		GiveUp: 3 * time.Hour, Abandoned: 5 * time.Minute}, r.store.Now, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	bad, good := r.later("bad@example.org"), r.later("ok@example.org")
+	r.now = r.now.Add(time.Hour)
+	r.pass()
+	if r.state(good) != store.StateSent || r.state(bad) != store.StateScheduled || len(r.drv.held) != 1 {
+		t.Fatalf("%s, %s, %d sent", r.state(good), r.state(bad), len(r.drv.held))
+	}
+	// Long past its time, it is given up on and said to be.
+	r.now = r.now.Add(4 * time.Hour)
+	r.store.Recover(context.Background(), 5*time.Minute, 10)
+	r.pass()
+	if h, err := r.store.Held(context.Background(), bad); err != nil || h.State != store.StateCancelled || h.Reason != store.HeldFailed {
+		t.Fatalf("%+v %v", h, err)
+	}
+}
+
+// When the server stops, what it took and did not begin waits again.
+func TestStoppingHandsBackWhatWasNotBegun(t *testing.T) {
+	r := newRig(t, 0)
+	r.later("a@example.org")
+	r.later("b@example.org")
+	r.now = r.now.Add(time.Hour)
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := r.run.Pass(stopped); err == nil {
+		// Taking them may fail on a context that is done; if it did
+		// not, none was begun and all wait again.
+		if n, _ := r.pass(); n != 2 || len(r.drv.held) != 2 {
+			t.Fatalf("%d taken afterwards, %d sent", n, len(r.drv.held))
+		}
+	}
+}
+
+// Cancelled between two tries, nothing it said is left: not what waited,
+// and not what the failed try kept of its words.
+func TestCancelledBetweenTriesItsWordsAreGone(t *testing.T) {
+	r := newRig(t, 24*time.Hour)
+	id := r.later("ana@example.org")
+	r.now = r.now.Add(time.Hour)
+	r.drv.err = driver.ErrUnavailable
+	r.pass()
+	if c, err := r.mail.Content(context.Background(), id); c == nil || err != nil {
+		t.Fatalf("between tries: %+v %v", c, err)
+	}
+	if err := r.mail.Cancel(context.Background(), r.key, id); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := r.mail.Content(context.Background(), id); c != nil || err != nil {
+		t.Fatalf("once cancelled: %+v %v", c, err)
+	}
+	if raw, _, _ := r.store.Content(context.Background(), id, 24*time.Hour); raw != nil {
+		t.Fatal("the failed try's copy of its words is still kept")
+	}
+	if r.state(id) != store.StateCancelled {
+		t.Fatalf("it reads %s", r.state(id))
 	}
 }

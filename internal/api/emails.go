@@ -84,7 +84,7 @@ func when(typed string) (time.Time, error) {
 		return time.Time{}, nil
 	}
 	at, err := time.Parse(time.RFC3339, typed)
-	if err != nil {
+	if err != nil || at.IsZero() {
 		return time.Time{}, &mail.Invalid{Field: "scheduled_at",
 			Reason: `"scheduled_at" must be a time with its zone, such as "2030-01-31T09:00:00Z".`}
 	}
@@ -159,7 +159,8 @@ type emailView struct {
 	Suppressed []string `json:"suppressed,omitempty"`
 	// ScheduledAt is when an email that waits will be sent, or would
 	// have been, had it not been cancelled. Reason says why it was
-	// cancelled when nobody asked: "suppressed" or "key_revoked".
+	// cancelled when nobody asked: "suppressed", "key_revoked" or
+	// "failed".
 	ScheduledAt *time.Time  `json:"scheduled_at,omitempty"`
 	Reason      string      `json:"reason,omitempty"`
 	CreatedAt   time.Time   `json:"created_at"`

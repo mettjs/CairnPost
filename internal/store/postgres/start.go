@@ -52,15 +52,28 @@ func place(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
 		}
 		return store.Claim{Outcome: store.Started, ID: id}, err
 	}
-	begin := insertMessage
-	if s.ID != "" {
-		begin = resume
+	if s.ID == "" {
+		id, kept, dropped, err := insertMessage(ctx, tx, s)
+		if id == "" {
+			return store.Claim{Outcome: store.Suppressed}, err
+		}
+		return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}, err
 	}
-	id, kept, dropped, err := begin(ctx, tx, s)
-	if id == "" {
-		return store.Claim{Outcome: store.Suppressed}, err
+	// An email that waited: begun only by the one who took it, and only
+	// while nothing of it was handed to the upstream.
+	if mine, err := begun(ctx, tx, s.ID, s.Claim); err != nil || !mine {
+		return store.Claim{Outcome: store.Gone}, err
 	}
-	return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}, err
+	id, kept, dropped, gone, err := resume(ctx, tx, s)
+	switch {
+	case err != nil:
+		return store.Claim{}, err
+	case gone:
+		return store.Claim{Outcome: store.Gone}, nil
+	case id == "":
+		return store.Claim{Outcome: store.Suppressed}, nil
+	}
+	return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}, nil
 }
 
 // keyState is what a key is once its request is placed: an email that
@@ -92,10 +105,15 @@ func claim(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
 		s.KeyID, s.IdemKey, s.TTL.Seconds(), s.InDoubt.Seconds()).Scan(
 		&fingerprint, &messageID, &state, &expired, &stale, &wait)
 	switch {
+	case errors.Is(err, pgx.ErrNoRows) && s.ReplayOnly:
+		return store.Claim{Outcome: store.Absent}, nil
 	case errors.Is(err, pgx.ErrNoRows):
 		return claimNew(ctx, tx, s)
 	case err != nil:
 		return store.Claim{}, err
+	case s.ReplayOnly && (expired || state != "done" || !bytes.Equal(fingerprint, s.Fingerprint)):
+		// Not this request, done and remembered: nothing is replayed.
+		return store.Claim{Outcome: store.Absent}, nil
 	case expired, state == "in_flight" && stale:
 		// Remembered long enough, or its last try's answer never came:
 		// this request sends, whatever it is, and the key's life starts

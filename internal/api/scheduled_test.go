@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/mettjs/cairnpost/internal/api"
 	"github.com/mettjs/cairnpost/internal/mail"
+	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
 )
 
@@ -135,5 +137,53 @@ func TestABatchMaySendSomeNowAndSomeLater(t *testing.T) {
 	got := items(t, body)
 	if code != 200 || got[0]["scheduled_at"] != nil || got[1]["scheduled_at"] != "2030-01-03T08:00:00Z" || len(r.drv.held) != 1 {
 		t.Fatalf("%d %v, %d sent", code, body, len(r.drv.held))
+	}
+}
+
+// The same request made again after its time is still that email: a
+// caller whose answer was lost learns what it asked for. One that was
+// never made is refused as any time not to come is.
+func TestARequestRepeatedAfterItsTimeIsItsEmail(t *testing.T) {
+	r := laterRig(t, 0, 0)
+	defer func(was time.Time) { at = was }(at)
+	body := later("ana@example.org", "2030-01-02T03:10:00Z")
+	_, _, first := r.do("POST", "/emails", r.send, "once", body)
+	_, _, moved := r.do("PATCH", "/emails/"+first["id"].(string), r.send, "", `{"scheduled_at":"2030-01-02T03:20:00Z"}`)
+	if moved["scheduled_at"] != "2030-01-02T03:20:00Z" {
+		t.Fatalf("moved: %v", moved)
+	}
+	at = at.Add(10 * time.Minute)
+	code, _, again := r.do("POST", "/emails", r.send, "once", body)
+	if code != 200 || again["id"] != first["id"] || again["scheduled_at"] != "2030-01-02T03:20:00Z" {
+		t.Fatalf("made again after its time: %d %v", code, again)
+	}
+	for idem, want := range map[string]string{"never-made": "validation_error", "": "validation_error"} {
+		if code, name, _ := r.do("POST", "/emails", r.send, idem, body); code != 422 || name != want {
+			t.Errorf("key %q: %d %s", idem, code, name)
+		}
+	}
+	if code, name, _ := r.do("POST", "/emails", r.send, "", later("ana@example.org", "0001-01-01T00:00:00Z")); code != 422 || name != "validation_error" || len(r.drv.held) != 0 {
+		t.Errorf("the year one: %d %s, %d sent", code, name, len(r.drv.held))
+	}
+}
+
+// A key bound to a sending domain neither reads nor cancels another
+// domain's waiting email.
+func TestABoundKeyTouchesOnlyItsOwnDomainsWaitingEmails(t *testing.T) {
+	r := laterRig(t, 0, 0)
+	_, _, sent := r.do("POST", "/emails", r.send, "", later("ana@example.org", "2030-01-03T08:00:00Z"))
+	id := sent["id"].(string)
+	bound, _, err := r.keys.Create(context.Background(), "other", store.ScopeAdmin, "other.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range [][3]string{{"GET", "/emails/" + id, ""}, {"POST", "/emails/" + id + "/cancel", ""},
+		{"PATCH", "/emails/" + id, `{"scheduled_at":"2030-01-04T08:00:00Z"}`}} {
+		if code, name, _ := r.do(call[0], call[1], bound, "", call[2]); code != 404 || name != "not_found" {
+			t.Errorf("%s %s: %d %s", call[0], call[1], code, name)
+		}
+	}
+	if _, _, read := r.do("GET", "/emails/"+id, r.send, "", ""); read["state"] != "scheduled" || read["scheduled_at"] != "2030-01-03T08:00:00Z" {
+		t.Errorf("after the tries: %v", read)
 	}
 }

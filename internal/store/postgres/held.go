@@ -15,7 +15,7 @@ import (
 // heldColumns are a waiting email's, as heldRow reads them. An email
 // taken for a try still waits, as far as anyone asking is told.
 const heldColumns = `s.id::text, s.api_key_id::text, s.sender, s.recipients, s.send_at,
-	CASE WHEN s.state = 'cancelled' THEN 'cancelled' ELSE 'scheduled' END, s.reason, s.tries, s.created_at, s.updated_at`
+	CASE WHEN s.state = 'cancelled' THEN 'cancelled' ELSE 'scheduled' END, s.reason, s.tries, s.claim, s.created_at, s.updated_at`
 
 // addressee is an address as it is kept with a waiting email.
 type addressee struct {
@@ -29,7 +29,7 @@ func heldRow(row pgx.CollectableRow) (store.Held, error) {
 		raw []byte
 		to  []addressee
 	)
-	if err := row.Scan(&h.ID, &h.KeyID, &h.Sender, &raw, &h.SendAt, &h.State, &h.Reason, &h.Tries, &h.CreatedAt, &h.UpdatedAt); err != nil {
+	if err := row.Scan(&h.ID, &h.KeyID, &h.Sender, &raw, &h.SendAt, &h.State, &h.Reason, &h.Tries, &h.Claim, &h.CreatedAt, &h.UpdatedAt); err != nil {
 		return h, err
 	}
 	if err := json.Unmarshal(raw, &to); err != nil {
@@ -53,6 +53,11 @@ func hold(ctx context.Context, tx pgx.Tx, s store.Start) (string, error) {
 		size += int64(len(f.Content))
 	}
 	if s.Hold.Room > 0 {
+		// One at a time: two that each found room would together
+		// overrun it.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('cairnpost.scheduled_emails.room'))`); err != nil {
+			return "", err
+		}
 		var held int64
 		if err := tx.QueryRow(ctx, `SELECT coalesce(sum(bytes), 0)::bigint FROM scheduled_emails`).Scan(&held); err != nil {
 			return "", err

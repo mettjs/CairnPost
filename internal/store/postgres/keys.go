@@ -71,13 +71,21 @@ func (db *DB) ListKeys(ctx context.Context, domain string, limit int) ([]store.K
 
 // RevokeKey implements store.Keys.
 func (db *DB) RevokeKey(ctx context.Context, prefix string) error {
-	tag, err := db.pool.Exec(ctx,
-		`UPDATE api_keys SET revoked_at = now() WHERE prefix = $1 AND revoked_at IS NULL`, prefix)
-	if err != nil {
+	// With it go the emails it asked for ahead of time: what they said
+	// is not kept for a key nobody may use any more.
+	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`UPDATE api_keys SET revoked_at = now() WHERE prefix = $1 AND revoked_at IS NULL`, prefix)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return store.ErrNotFound
+		}
+		return cancelOf(ctx, tx, prefix)
+	})
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("postgres: revoke a key: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
-	}
-	return nil
+	return err
 }

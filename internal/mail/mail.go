@@ -220,7 +220,7 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 	if !c.at.IsZero() {
 		// Kept to be sent later: what it says is kept with it, whether
 		// or not what emails say is kept once they are sent.
-		start.Hold, start.Content = hold(c, s.opt.ScheduleRoom), nil
+		start.Hold, start.Content, start.ReplayOnly = hold(c, s.opt.ScheduleRoom), nil, c.late
 	}
 	claim, err := s.store.Start(ctx, start)
 	if err != nil {
@@ -228,7 +228,9 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 	}
 	switch claim.Outcome {
 	case store.Replay:
-		return Receipt{ID: claim.ID, Suppressed: claim.Dropped, ScheduledAt: c.at}, nil
+		return Receipt{ID: claim.ID, Suppressed: claim.Dropped, ScheduledAt: s.movedTo(ctx, claim.ID, c.at)}, nil
+	case store.Absent:
+		return Receipt{}, errLate
 	case store.Full:
 		return Receipt{}, ErrScheduleFull
 	case store.InFlight:

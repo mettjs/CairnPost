@@ -15,16 +15,20 @@ import (
 // what it said is gone with its files.
 const cancelled = `state = 'cancelled', words = NULL, bytes = 0, claimed_at = NULL, updated_at = now()`
 
-// ending changes one email that is in a state, and deletes its files
-// when told to. Its error for an email that is not in that state is
-// ErrTooLate, and ErrNotFound for none.
-func (db *DB) ending(ctx context.Context, what, id, state, set string, files bool, args ...any) error {
+// taken is the condition an email is one taking's under: $2 is the
+// claim.
+const taken = `state = 'sending' AND claim = $2`
+
+// ending changes one email that fits a condition, and deletes what it
+// said (its files, and what a failed try kept of its words) when told
+// to. Its error for an email that does not fit is ErrTooLate, and
+// ErrNotFound for none. $1 is the id; args are $2 on.
+func (db *DB) ending(ctx context.Context, what, id, where, set string, forget bool, args ...any) error {
 	if !uuidShape.MatchString(id) {
 		return store.ErrNotFound
 	}
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE scheduled_emails SET `+set+` WHERE id = $1::uuid AND state = $2`,
-			append([]any{id, state}, args...)...)
+		tag, err := tx.Exec(ctx, `UPDATE scheduled_emails SET `+set+` WHERE id = $1::uuid AND `+where, append([]any{id}, args...)...)
 		if err != nil {
 			return err
 		}
@@ -38,10 +42,10 @@ func (db *DB) ending(ctx context.Context, what, id, state, set string, files boo
 			}
 			return store.ErrNotFound
 		}
-		if files {
-			_, err = tx.Exec(ctx, `DELETE FROM scheduled_files WHERE email_id = $1::uuid`, id)
+		if !forget {
+			return nil
 		}
-		return err
+		return forgetWords(ctx, tx, []string{id})
 	})
 	if err != nil && !errors.Is(err, store.ErrTooLate) && !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("postgres: %s a waiting email: %w", what, err)
@@ -49,36 +53,82 @@ func (db *DB) ending(ctx context.Context, what, id, state, set string, files boo
 	return err
 }
 
+// forgetWords deletes what cancelled emails said beside their own rows:
+// their files, and what a failed try of them kept of their words.
+func forgetWords(ctx context.Context, tx pgx.Tx, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM scheduled_files WHERE email_id = ANY($1::uuid[])`, ids); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `DELETE FROM message_contents WHERE message_id = ANY($1::uuid[])`, ids)
+	return err
+}
+
 // Cancel implements store.Schedule.
 func (db *DB) Cancel(ctx context.Context, id string) error {
-	return db.ending(ctx, "cancel", id, "scheduled", cancelled+`, reason = ''`, true)
+	return db.ending(ctx, "cancel", id, `state = 'scheduled'`, cancelled+`, reason = ''`, true)
 }
 
 // Drop implements store.Schedule.
-func (db *DB) Drop(ctx context.Context, id, reason string) error {
-	return db.ending(ctx, "drop", id, "sending", cancelled+`, reason = $3`, true, reason)
+func (db *DB) Drop(ctx context.Context, id string, claim int, reason string) error {
+	return db.ending(ctx, "drop", id, taken, cancelled+`, reason = $3`, true, claim, reason)
 }
 
-// Reschedule implements store.Schedule.
+// Reschedule implements store.Schedule. A new time is a new start: the
+// tries made for the old one are not held against it.
 func (db *DB) Reschedule(ctx context.Context, id string, at time.Time) error {
-	return db.ending(ctx, "reschedule", id, "scheduled", `send_at = $3, next_try_at = $3, updated_at = now()`, false, at)
+	return db.ending(ctx, "reschedule", id, `state = 'scheduled'`, `send_at = $2, next_try_at = $2, tries = 0, updated_at = now()`, false, at)
 }
 
 // Postpone implements store.Schedule.
-func (db *DB) Postpone(ctx context.Context, id string, wait time.Duration) error {
-	return db.ending(ctx, "postpone", id, "sending",
-		`state = 'scheduled', claimed_at = NULL, next_try_at = now() + make_interval(secs => $3), updated_at = now()`, false, wait.Seconds())
+func (db *DB) Postpone(ctx context.Context, id string, claim int, wait time.Duration) error {
+	return db.ending(ctx, "postpone", id, taken,
+		`state = 'scheduled', claimed_at = NULL, next_try_at = now() + make_interval(secs => $3), updated_at = now()`, false, claim, wait.Seconds())
 }
 
 // Release implements store.Schedule.
-func (db *DB) Release(ctx context.Context, id string) error {
+func (db *DB) Release(ctx context.Context, id string, claim int) error {
 	if !uuidShape.MatchString(id) {
 		return nil
 	}
-	if _, err := db.pool.Exec(ctx, `DELETE FROM scheduled_emails WHERE id = $1::uuid AND state = 'sending'`, id); err != nil {
+	if _, err := db.pool.Exec(ctx, `DELETE FROM scheduled_emails WHERE id = $1::uuid AND `+taken, id, claim); err != nil {
 		return fmt.Errorf("postgres: release a waiting email: %w", err)
 	}
 	return nil
+}
+
+// settled ends the wait of an email whose message was just settled for
+// good, in the same step: so a server that stops right after leaves
+// nothing that could be taken for an email still to send.
+func settled(ctx context.Context, q execer, id string) error {
+	_, err := q.Exec(ctx, `DELETE FROM scheduled_emails WHERE id = $1::uuid AND state = 'sending'`, id)
+	return err
+}
+
+// begun marks a taken email as begun under its taking: false when it
+// is no longer that taker's.
+func begun(ctx context.Context, tx pgx.Tx, id string, claim int) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE scheduled_emails SET claimed_at = now(), tries = tries + 1 WHERE id = $1::uuid AND `+taken, id, claim)
+	return tag.RowsAffected() == 1, err
+}
+
+// cancelOf cancels the waiting emails of an API key that was revoked.
+func cancelOf(ctx context.Context, tx pgx.Tx, prefix string) error {
+	rows, err := tx.Query(ctx, `
+		UPDATE scheduled_emails s SET `+cancelled+`, reason = $2
+		FROM api_keys k WHERE k.id = s.api_key_id AND k.prefix = $1 AND s.state = 'scheduled' RETURNING s.id::text`,
+		prefix, store.HeldKeyRevoked)
+	if err != nil {
+		return err
+	}
+	gone, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	return forgetWords(ctx, tx, gone)
 }
 
 // TakeDue implements store.Schedule. Whether an email's time has come
@@ -97,7 +147,7 @@ func (db *DB) TakeDue(ctx context.Context, limit int) ([]store.Held, error) {
 				words = CASE WHEN due.revoked THEN NULL ELSE s.words END,
 				bytes = CASE WHEN due.revoked THEN 0 ELSE s.bytes END,
 				claimed_at = CASE WHEN due.revoked THEN NULL ELSE now() END,
-				tries = s.tries + CASE WHEN due.revoked THEN 0 ELSE 1 END, updated_at = now()
+				claim = s.claim + CASE WHEN due.revoked THEN 0 ELSE 1 END, updated_at = now()
 			FROM due WHERE s.id = due.id RETURNING `+heldColumns, limit, store.HeldKeyRevoked)
 		if err != nil {
 			return err
@@ -114,10 +164,7 @@ func (db *DB) TakeDue(ctx context.Context, limit int) ([]store.Held, error) {
 				out = append(out, h)
 			}
 		}
-		if len(gone) > 0 {
-			_, err = tx.Exec(ctx, `DELETE FROM scheduled_files WHERE email_id = ANY($1::uuid[])`, gone)
-		}
-		return err
+		return forgetWords(ctx, tx, gone)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("postgres: take the emails whose time has come: %w", err)
@@ -125,7 +172,10 @@ func (db *DB) TakeDue(ctx context.Context, limit int) ([]store.Held, error) {
 	return out, nil
 }
 
-// Recover implements store.Schedule.
+// Recover implements store.Schedule. An email whose message is settled
+// for good is no longer here (settled), so of those left: one with a
+// message not failed was being sent when its server stopped; any other
+// was not begun, or its last try was not taken.
 func (db *DB) Recover(ctx context.Context, older time.Duration, limit int) (int, error) {
 	n := 0
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {

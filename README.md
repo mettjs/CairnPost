@@ -200,9 +200,10 @@ curl -X POST http://localhost:8025/emails/01a1d08e-.../cancel -H "Authorization:
 - **What is checked when.** The request is checked when it is asked for,
   as a send is. The suppression list is read when the email goes: an
   address put on it meanwhile is left out, and an email with nobody left
-  in `to` or `cc` is cancelled (`"reason": "suppressed"`). An email whose
-  API key was revoked before its time is cancelled too
-  (`"reason": "key_revoked"`).
+  in `to` or `cc` is cancelled (`"reason": "suppressed"`). Revoking an
+  API key cancels the emails it asked for that still wait
+  (`"reason": "key_revoked"`), at once, and what they said is deleted
+  then.
 - **Cancelling and moving.** The key that asked for an email may cancel
   or move it, and so may an admin key that may read it. Once the email is
   being sent, was sent or was cancelled, both answer 409 `not_scheduled`.
@@ -211,9 +212,16 @@ curl -X POST http://localhost:8025/emails/01a1d08e-.../cancel -H "Authorization:
 - **If the provider is not taking mail** when the time comes, the email
   is tried again, a minute later at first and then less often, until
   `CAIRNPOST_SCHEDULE_GIVE_UP` (a day) has passed since it was due; then
-  it is `failed`. If the provider's answer is lost, the email is
-  `unknown` and is not sent again: nobody is there to ask for a second
-  one, and two would be worse.
+  it is `failed`. Between two tries it still reads `scheduled` by its id,
+  while lists and counts show the try that failed. A later try goes to
+  whom the first was to go to, less whoever was suppressed since. If the
+  provider's answer is lost, the email is `unknown` and is not sent
+  again: nobody is there to ask for a second one, and two would be
+  worse. An email this server itself could not send by then is
+  cancelled (`"reason": "failed"`).
+- **Where it is listed.** An email keeps the id it was given when it was
+  asked for, and lists go by id: once sent, it is listed among the emails
+  of the day it was asked for, not of the day it went.
 - **What is kept.** To send an email later, CairnPost must keep what it
   says and its files: they are held in the database until the email is
   sent or cancelled and deleted then, whatever
@@ -225,8 +233,10 @@ curl -X POST http://localhost:8025/emails/01a1d08e-.../cancel -H "Authorization:
   GiB), words and files. Past it, asking for another answers 503
   `schedule_full`.
 - An `Idempotency-Key` is remembered from the asking, for
-  `CAIRNPOST_IDEMPOTENCY_TTL`: the same request again answers the same
-  email, with the same time.
+  `CAIRNPOST_IDEMPOTENCY_TTL` (a day), not until the email goes: within
+  it the same request again answers the same email and the time it waits
+  for now, even after that time has passed; after it, the same request
+  is a new email.
 - Emails of a batch may each have a `scheduled_at`.
 
 **An email's state**, from `GET /emails/{id}`:

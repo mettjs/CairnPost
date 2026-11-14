@@ -140,6 +140,12 @@ const (
 	// Full: the email was to wait, and the emails that wait already
 	// hold as much as they may.
 	Full
+	// Gone: the email was to be begun under the id it waited with, and
+	// is not the caller's to send (any more): it was taken again by
+	// another, cancelled, or already handed to the upstream.
+	Gone
+	// Absent: asked with ReplayOnly, the request was not made before.
+	Absent
 )
 
 // Claim is Start's answer.
@@ -161,8 +167,15 @@ type Claim struct {
 type Start struct {
 	// ID is the id the email was given when it was put to wait, "" for
 	// an email sent as it is asked for. With it, a try that failed
-	// earlier is begun again on the same record.
-	ID string
+	// earlier is begun again on the same record. Claim is the taking
+	// (Held.Claim) the send is made under: the claim is Gone if the
+	// email is no longer that taker's.
+	ID    string
+	Claim int
+	// ReplayOnly asks only whether this request was made before under
+	// its Idempotency-Key: nothing is started or kept, and a request
+	// that was not is Absent.
+	ReplayOnly bool
 	// Hold, when set, keeps the email to be sent later: nothing is
 	// started, and the claim's ID is the id it waits under.
 	Hold   *Hold

@@ -29,7 +29,7 @@ func TestEveryStateHasWords(t *testing.T) {
 			t.Errorf("%s: %+v", state, w)
 		}
 	}
-	for _, reason := range []string{store.HeldSuppressed, store.HeldKeyRevoked} {
+	for _, reason := range store.HeldReasons {
 		if cancelledFor[reason] == "" {
 			t.Errorf("an email cancelled for %s has no words", reason)
 		}

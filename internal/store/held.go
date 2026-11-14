@@ -20,7 +20,14 @@ const (
 	HeldSuppressed = "suppressed"
 	// HeldKeyRevoked: the API key that asked for it had been revoked.
 	HeldKeyRevoked = "key_revoked"
+	// HeldFailed: it could not be sent for a fault of this server's,
+	// each time it was tried until it was given up on.
+	HeldFailed = "failed"
 )
+
+// HeldReasons is every reason an email that waited is cancelled for by
+// nobody's asking.
+var HeldReasons = []string{HeldSuppressed, HeldKeyRevoked, HeldFailed}
 
 // ErrTooLate is an email that no longer waits: it is being sent, was
 // sent, or was cancelled.
@@ -39,8 +46,13 @@ type Held struct {
 	// Reason says why it was cancelled when nobody asked: HeldSuppressed
 	// or HeldKeyRevoked; "" otherwise.
 	Reason string
-	// Tries is how many times it was handed to the driver.
-	Tries     int
+	// Tries is how many times it was begun: handed, or about to be, to
+	// the driver.
+	Tries int
+	// Claim names the taking it was answered by (TakeDue): what a taker
+	// then does to it, it does under this number, and does nothing once
+	// the email was taken again by another.
+	Claim     int
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -77,7 +89,7 @@ type Schedule interface {
 	// Waiting counts the emails that wait, of a domain or of all.
 	Waiting(ctx context.Context, domain string) (int, error)
 	// Cancel ends an email's wait and deletes what it said and its
-	// files. ErrTooLate once it is being sent; ErrNotFound for none.
+	// files, with what a failed try of it kept of its words. ErrTooLate once it is being sent; ErrNotFound for none.
 	Cancel(ctx context.Context, id string) error
 	// Reschedule gives a waiting email another time; errors as Cancel.
 	Reschedule(ctx context.Context, id string, at time.Time) error
@@ -85,16 +97,20 @@ type Schedule interface {
 	// come, limit at most, the longest due first. One whose API key was
 	// revoked meanwhile is cancelled and not answered.
 	TakeDue(ctx context.Context, limit int) ([]Held, error)
-	// Postpone hands a taken email back to wait for another try.
-	Postpone(ctx context.Context, id string, wait time.Duration) error
+	// Postpone hands a taken email back to wait for another try. It,
+	// Drop and Release are of one taking (Held.Claim): ErrTooLate once
+	// the email was taken again or is gone.
+	Postpone(ctx context.Context, id string, claim int, wait time.Duration) error
 	// Drop cancels a taken email for a reason: it will not be sent.
-	Drop(ctx context.Context, id, reason string) error
-	// Release forgets a taken email: it was sent or will never be, and
-	// what became of it is with the messages.
-	Release(ctx context.Context, id string) error
-	// Recover finds the emails taken longer ago than a send can last,
-	// by a server that then stopped. One that had been handed to the
-	// provider is forgotten: its message says what is known. One that
-	// had not waits again.
+	Drop(ctx context.Context, id string, claim int, reason string) error
+	// Release forgets a taken email, if its record did not already:
+	// Sent, Failed and Lost end its wait in the step that settles the
+	// message.
+	Release(ctx context.Context, id string, claim int) error
+	// Recover finds the emails taken, or begun, longer ago than a send
+	// can last, by a server that then stopped. One that was being sent
+	// is forgotten: its message says what is known, and it is not sent
+	// again. One that had not been begun, or whose last try the
+	// provider did not take, waits again.
 	Recover(ctx context.Context, older time.Duration, limit int) (int, error)
 }

@@ -92,7 +92,10 @@ func (db *DB) Sent(ctx context.Context, id, upstreamID string) error {
 		_, err := tx.Exec(ctx, `
 			UPDATE messages SET state = 'sent', upstream_id = nullif($2, ''), updated_at = now()
 			WHERE email_id = $1::uuid AND state <> 'failed'`, id, upstreamID)
-		return err
+		if err != nil {
+			return err
+		}
+		return settled(ctx, tx, id)
 	})
 	if err != nil {
 		return fmt.Errorf("postgres: mark a message sent: %w", err)
@@ -107,9 +110,11 @@ func (db *DB) Failed(ctx context.Context, id string) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE message_id = $1::uuid`, id); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `
-			UPDATE messages SET state = 'failed', updated_at = now() WHERE email_id = $1::uuid`, id)
-		return err
+		if _, err := tx.Exec(ctx, `
+			UPDATE messages SET state = 'failed', updated_at = now() WHERE email_id = $1::uuid`, id); err != nil {
+			return err
+		}
+		return settled(ctx, tx, id)
 	})
 	if err != nil {
 		return fmt.Errorf("postgres: mark a message failed: %w", err)
@@ -128,7 +133,13 @@ func (db *DB) Unsent(ctx context.Context, id string) error {
 
 // Lost implements store.Mail.
 func (db *DB) Lost(ctx context.Context, id string) error {
-	if err := markUnknown(ctx, db.pool, true, id); err != nil {
+	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		if err := markUnknown(ctx, tx, true, id); err != nil {
+			return err
+		}
+		return settled(ctx, tx, id)
+	})
+	if err != nil {
 		return fmt.Errorf("postgres: mark a message's answer lost: %w", err)
 	}
 	return nil
@@ -233,34 +244,50 @@ func split(of []store.Addressee) (addresses, kinds []string) {
 
 // resume starts an email under the id it waited with. The first time
 // that is insertMessage. After a try that the provider did not take,
-// the same rows are sending again, so the email is counted once: the
-// suppression list is read anew, and an address put on it since stays
-// failed and is named among those left out.
-func resume(ctx context.Context, tx pgx.Tx, s store.Start) (string, []store.Addressee, []string, error) {
-	rows, err := tx.Query(ctx, `SELECT id::text FROM messages WHERE email_id = $1::uuid ORDER BY id FOR UPDATE`, s.ID)
+// the same rows are sending again, so the email is counted once. It
+// goes to whom the first try was to go to, less whoever was put on the
+// suppression list since: such an address stays failed and is named
+// among those left out. An address taken off the list since is not
+// added: it has no row to say what becomes of it.
+//
+// gone says the email is not to be sent: some address of it is not
+// failed, so it was handed to the upstream already.
+func resume(ctx context.Context, tx pgx.Tx, s store.Start) (id string, kept []store.Addressee, dropped []string, gone bool, err error) {
+	rows, err := tx.Query(ctx, `SELECT recipient, kind, state FROM messages WHERE email_id = $1::uuid ORDER BY id FOR UPDATE`, s.ID)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, false, err
 	}
-	tried, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return "", nil, nil, err
+	var (
+		tried []store.Addressee
+		a     store.Addressee
+		state string
+	)
+	if _, err := pgx.ForEachRow(rows, []any{&a.Address, &a.Kind, &state}, func() error {
+		tried, gone = append(tried, a), gone || state != store.StateFailed
+		return nil
+	}); err != nil || gone {
+		return "", nil, nil, gone, err
 	}
 	if len(tried) == 0 {
-		return insertMessage(ctx, tx, s)
+		id, kept, dropped, err = insertMessage(ctx, tx, s)
+		return id, kept, dropped, false, err
 	}
-	kept, dropped, err := addressed(ctx, tx, s)
+	s.Recipients = tried
+	kept, dropped, err = addressed(ctx, tx, s)
 	if err != nil || len(kept) == 0 {
-		return "", nil, dropped, err
+		return "", nil, dropped, false, err
 	}
 	addresses, kinds := split(kept)
 	if _, err := tx.Exec(ctx, `
 		UPDATE messages m SET state = 'sending', kind = w.kind, updated_at = now()
 		FROM unnest($2::text[], $3::text[]) AS w(recipient, kind)
-		WHERE m.email_id = $1::uuid AND m.recipient = w.recipient AND m.state = 'failed'`, s.ID, addresses, kinds); err != nil {
-		return "", nil, nil, err
+		WHERE m.email_id = $1::uuid AND m.recipient = w.recipient`, s.ID, addresses, kinds); err != nil {
+		return "", nil, nil, false, err
 	}
-	_, err = tx.Exec(ctx, `UPDATE messages SET left_out = $2 WHERE id = $1::uuid`, s.ID, dropped)
-	return s.ID, kept, dropped, err
+	// Who was left out before stays left out; who is now, joins them.
+	err = tx.QueryRow(ctx, `
+		UPDATE messages SET left_out = left_out || $2::text[] WHERE id = $1::uuid RETURNING left_out`, s.ID, dropped).Scan(&dropped)
+	return s.ID, kept, dropped, false, err
 }
 
 // Content implements store.Mail. Its age is read on the database's clock.

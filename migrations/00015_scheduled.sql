@@ -19,12 +19,18 @@ CREATE TABLE scheduled_emails (
     -- cancelled: it will not be sent; what it said is gone.
     state         text NOT NULL CHECK (state IN ('scheduled', 'sending', 'cancelled')),
     -- Why it was cancelled when nobody asked: "suppressed" (nobody it was
-    -- addressed to could be sent to any more) or "key_revoked".
+    -- addressed to could be sent to any more), "key_revoked" or "failed"
+    -- (this server could not send it, each time it tried).
     reason        text NOT NULL DEFAULT '',
     -- When it is next to be tried: send_at, until a try finds the mail
     -- provider not taking mail.
     next_try_at   timestamptz NOT NULL,
+    -- How many times it was begun: handed, or about to be, to the mail
+    -- provider.
     tries         integer NOT NULL DEFAULT 0,
+    -- Which taking this is: whoever took it an earlier time, and was
+    -- held to have stopped, can change nothing about it any more.
+    claim         integer NOT NULL DEFAULT 0,
     claimed_at    timestamptz,
     -- What it says, as JSON kept as bytes: never searched. NULL once
     -- cancelled.

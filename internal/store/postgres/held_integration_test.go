@@ -26,7 +26,7 @@ func taken(t *testing.T, db *postgres.DB, id string) (store.Held, bool) {
 	for _, h := range due {
 		if h.ID == id {
 			found = h
-		} else if err := db.Postpone(context.Background(), h.ID, 0); err != nil {
+		} else if err := db.Postpone(context.Background(), h.ID, h.Claim, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -94,7 +94,7 @@ func TestAnEmailWaitsAndIsSentUnderItsId(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, ok := taken(t, db, id)
-	if !ok || h.Tries != 1 {
+	if !ok || h.Tries != 0 || h.Claim != 1 {
 		t.Fatalf("at its time: %+v %v", h, ok)
 	}
 	// Taken, it is the sender's: nobody else takes or cancels it.
@@ -104,15 +104,27 @@ func TestAnEmailWaitsAndIsSentUnderItsId(t *testing.T) {
 	if err := db.Cancel(ctx, id); !errors.Is(err, store.ErrTooLate) {
 		t.Fatalf("cancelled while it is sent: %v", err)
 	}
-	begin := store.Start{ID: id, KeyID: k.ID, Sender: h.Sender, Recipients: h.Recipients, Driver: "test"}
+	begin := store.Start{ID: id, Claim: h.Claim, KeyID: k.ID, Sender: h.Sender, Recipients: h.Recipients, Driver: "test"}
+	stale := begin
+	stale.Claim = h.Claim + 7
+	if c, err := db.Start(ctx, stale); err != nil || c.Outcome != store.Gone {
+		t.Fatalf("begun by one who did not take it: %+v %v", c, err)
+	}
 	if c, err := db.Start(ctx, begin); err != nil || c.Outcome != store.Started || c.ID != id || len(c.Recipients) != 2 {
 		t.Fatalf("begun: %+v %v", c, err)
+	}
+	// Begun, it is not begun a second time: it is with the provider.
+	if c, err := db.Start(ctx, begin); err != nil || c.Outcome != store.Gone {
+		t.Fatalf("begun twice: %+v %v", c, err)
 	}
 	// The provider does not take it: it waits again, and its key stays.
 	if err := db.Unsent(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Postpone(ctx, id, 0); err != nil {
+	if err := db.Postpone(ctx, id, h.Claim+1, 0); !errors.Is(err, store.ErrTooLate) {
+		t.Fatalf("put back by one who did not take it: %v", err)
+	}
+	if err := db.Postpone(ctx, id, h.Claim, 0); err != nil {
 		t.Fatal(err)
 	}
 	if again, err := db.Start(ctx, ask); err != nil || again.Outcome != store.Replay {
@@ -122,18 +134,27 @@ func TestAnEmailWaitsAndIsSentUnderItsId(t *testing.T) {
 	if _, err := db.Suppress(ctx, store.Suppression{Domain: domain, Address: to[1].Address, Reason: store.ReasonManual}); err != nil {
 		t.Fatal(err)
 	}
-	if h, ok = taken(t, db, id); !ok || h.Tries != 2 {
+	if h, ok = taken(t, db, id); !ok || h.Tries != 2 || h.Claim != 2 {
 		t.Fatalf("the second try: %+v %v", h, ok)
 	}
+	if c, err := db.Start(ctx, begin); err != nil || c.Outcome != store.Gone {
+		t.Fatalf("begun under the taking before: %+v %v", c, err)
+	}
+	begin.Claim = h.Claim
 	c, err := db.Start(ctx, begin)
 	if err != nil || c.Outcome != store.Started || len(c.Recipients) != 1 || len(c.Dropped) != 1 {
 		t.Fatalf("begun again: %+v %v", c, err)
 	}
+	// Sent, its wait is over in the same step: nothing is left for a
+	// server that stops right here to send again.
 	if err := db.Sent(ctx, id, "<up>"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Release(ctx, id); err != nil {
-		t.Fatal(err)
+	if n, err := db.Recover(ctx, 0, 1000); err != nil {
+		t.Fatalf("%d recovered: %v", n, err)
+	}
+	if _, ok := taken(t, db, id); ok {
+		t.Fatal("sent, it was taken again")
 	}
 	m, err := db.Message(ctx, id)
 	if err != nil || m.State != store.StateSent || len(m.Recipients) != 2 || m.Recipients[1].State != store.StateFailed || len(m.LeftOut) != 1 {
@@ -206,12 +227,10 @@ func TestAWaitingEmailIsCancelledAndRecovered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Revoking a key cancels what it asked for, at once.
 	revoked := ask(other)
 	if err := db.RevokeKey(ctx, other.Prefix); err != nil {
 		t.Fatal(err)
-	}
-	if _, ok := taken(t, db, revoked); ok {
-		t.Fatal("an email of a revoked key was taken")
 	}
 	h, err = db.Held(ctx, revoked)
 	words, _, _ = db.HeldWords(ctx, revoked)
@@ -226,13 +245,59 @@ func TestAWaitingEmailIsCancelledAndRecovered(t *testing.T) {
 	if n, err := db.Recover(ctx, 0, 1000); n < 1 || err != nil {
 		t.Fatalf("%d recovered: %v", n, err)
 	}
-	if h, ok := taken(t, db, left); !ok || h.Tries != 2 {
+	h, ok := taken(t, db, left)
+	if !ok || h.Claim != 2 || h.Tries != 0 {
 		t.Fatalf("after recovery: %+v %v", h, ok)
 	}
-	if err := db.Drop(ctx, left, store.HeldSuppressed); err != nil {
+	// Refused for good, its wait is over too.
+	gone := ask(k)
+	g, _ := taken(t, db, gone)
+	if c, err := db.Start(ctx, store.Start{ID: gone, Claim: g.Claim, KeyID: k.ID, Sender: g.Sender, Recipients: g.Recipients, Driver: "test"}); err != nil || c.Outcome != store.Started {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if err := db.Failed(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Held(ctx, gone); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("refused for good, it still waits: %v", err)
+	}
+	if err := db.Drop(ctx, left, h.Claim, store.HeldSuppressed); err != nil {
 		t.Fatal(err)
 	}
 	if h, err := db.Held(ctx, left); err != nil || h.State != store.StateCancelled || h.Reason != store.HeldSuppressed {
 		t.Fatalf("dropped: %+v %v", h, err)
+	}
+}
+
+// A request made again after its time is asked only whether it was made
+// before: it is that email, or nothing.
+func TestARequestIsOnlyLookedUp(t *testing.T) {
+	ctx := context.Background()
+	db := open(t)
+	k := key(t, db)
+	ask := store.Start{KeyID: k.ID, Sender: "app@" + k.ID + ".example.com", Recipients: store.To("ana-" + k.ID + "@example.org"), Driver: "test",
+		IdemKey: "once", Fingerprint: []byte("one"), TTL: time.Hour, InDoubt: time.Minute,
+		Hold: &store.Hold{SendAt: time.Now().Add(time.Hour), Words: []byte("w")}, ReplayOnly: true}
+	if c, err := db.Start(ctx, ask); err != nil || c.Outcome != store.Absent {
+		t.Fatalf("never made: %+v %v", c, err)
+	}
+	if n, _ := db.Waiting(ctx, k.ID+".example.com"); n != 0 {
+		t.Fatalf("looking it up kept %d", n)
+	}
+	ask.ReplayOnly = false
+	made, err := db.Start(ctx, ask)
+	if err != nil || made.Outcome != store.Started {
+		t.Fatalf("%+v %v", made, err)
+	}
+	ask.ReplayOnly = true
+	if c, err := db.Start(ctx, ask); err != nil || c.Outcome != store.Replay || c.ID != made.ID {
+		t.Fatalf("made before: %+v %v", c, err)
+	}
+	ask.Fingerprint = []byte("two")
+	if c, err := db.Start(ctx, ask); err != nil || c.Outcome != store.Absent {
+		t.Fatalf("another request under the key: %+v %v", c, err)
+	}
+	if err := db.Cancel(ctx, made.ID); err != nil {
+		t.Fatal(err)
 	}
 }

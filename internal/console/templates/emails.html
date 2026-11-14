@@ -20,7 +20,7 @@
       <tr>
         <td data-label="To"><a href="{{$.Root}}/emails/{{.ID}}">{{(index .Recipients 0).Address}}</a>{{if gt (len .Recipients) 1}} <span class="by">and {{minus (len .Recipients) 1}} more</span>{{end}}</td>
         <td data-label="From" class="wrap">{{.Sender}}</td>
-        <td data-label="Goes out"><time datetime="{{stamp .SendAt}}">{{when $.Zone .SendAt}}</time>{{if gt .Tries 0}} <span class="by">tried {{.Tries}} {{if eq .Tries 1}}time{{else}}times{{end}}, will be tried again</span>{{end}}</td>
+        <td data-label="Goes out"><time datetime="{{stamp .SendAt}}">{{when $.Zone .SendAt}}</time>{{if gt .Tries 0}} <span class="by">tried {{.Tries}} {{if eq .Tries 1}}time{{else}}times{{end}}; it will be tried again</span>{{end}}</td>
         <td data-label="Asked for"><time datetime="{{stamp .CreatedAt}}">{{when $.Zone .CreatedAt}}</time></td>
       </tr>
       {{end}}

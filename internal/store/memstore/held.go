@@ -100,16 +100,16 @@ func (s *Store) Waiting(_ context.Context, domain string) (int, error) {
 	return len(s.waiting(domain)), nil
 }
 
-// ending finds an email that is waiting (taken or not, as asked) and
-// changes it.
-func (s *Store) ending(id string, taken bool, change func(*held)) error {
+// ending finds an email that waits and is not taken (claim 0), or one
+// taken under a claim, and changes it.
+func (s *Store) ending(id string, claim int, change func(*held)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	h, ok := s.held[id]
 	switch {
 	case !ok:
 		return store.ErrNotFound
-	case h.State == store.StateCancelled || h.taken != taken:
+	case h.State == store.StateCancelled || h.taken != (claim > 0) || claim > 0 && h.Claim != claim:
 		return store.ErrTooLate
 	}
 	change(h)
@@ -117,38 +117,69 @@ func (s *Store) ending(id string, taken bool, change func(*held)) error {
 	return nil
 }
 
-func cancel(h *held, reason string) {
+// cancel ends an email's wait and forgets what it said, with what a
+// failed try of it kept of its words.
+func (s *Store) cancel(h *held, reason string) {
 	h.State, h.Reason, h.taken, h.words, h.files, h.bytes = store.StateCancelled, reason, false, nil, nil, 0
+	delete(s.contents, h.ID)
 }
 
 // Cancel implements store.Schedule.
 func (s *Store) Cancel(_ context.Context, id string) error {
-	return s.ending(id, false, func(h *held) { cancel(h, "") })
+	return s.ending(id, 0, func(h *held) { s.cancel(h, "") })
 }
 
 // Drop implements store.Schedule.
-func (s *Store) Drop(_ context.Context, id, reason string) error {
-	return s.ending(id, true, func(h *held) { cancel(h, reason) })
+func (s *Store) Drop(_ context.Context, id string, claim int, reason string) error {
+	return s.ending(id, claim, func(h *held) { s.cancel(h, reason) })
 }
 
 // Reschedule implements store.Schedule.
 func (s *Store) Reschedule(_ context.Context, id string, at time.Time) error {
-	return s.ending(id, false, func(h *held) { h.SendAt, h.next = at, at })
+	return s.ending(id, 0, func(h *held) { h.SendAt, h.next, h.Tries = at, at, 0 })
 }
 
 // Postpone implements store.Schedule.
-func (s *Store) Postpone(_ context.Context, id string, wait time.Duration) error {
-	return s.ending(id, true, func(h *held) { h.taken, h.next = false, s.Now().Add(wait) })
+func (s *Store) Postpone(_ context.Context, id string, claim int, wait time.Duration) error {
+	return s.ending(id, claim, func(h *held) { h.taken, h.next = false, s.Now().Add(wait) })
 }
 
 // Release implements store.Schedule.
-func (s *Store) Release(_ context.Context, id string) error {
+func (s *Store) Release(_ context.Context, id string, claim int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if h, ok := s.held[id]; ok && h.taken {
+	if h, ok := s.held[id]; ok && h.taken && h.Claim == claim {
 		delete(s.held, id)
 	}
 	return nil
+}
+
+// settled ends the wait of an email whose message was settled for good.
+func (s *Store) settled(id string) {
+	if h, ok := s.held[id]; ok && h.taken {
+		delete(s.held, id)
+	}
+}
+
+// begun marks a taken email as begun under its taking: false when it is
+// no longer that taker's.
+func (s *Store) begun(id string, claim int) bool {
+	h, ok := s.held[id]
+	if !ok || !h.taken || h.Claim != claim {
+		return false
+	}
+	h.claimed, h.Tries = s.Now(), h.Tries+1
+	return true
+}
+
+// cancelOf cancels the waiting emails of a key that was revoked.
+func (s *Store) cancelOf(keyID string) {
+	for _, h := range s.held {
+		if h.KeyID == keyID && h.State == store.StateScheduled && !h.taken {
+			s.cancel(h, store.HeldKeyRevoked)
+			h.UpdatedAt = s.Now()
+		}
+	}
 }
 
 // revoked says whether a key, by its id, was revoked.
@@ -176,10 +207,10 @@ func (s *Store) TakeDue(_ context.Context, limit int) ([]store.Held, error) {
 	var out []store.Held
 	for _, h := range due[:min(limit, len(due))] {
 		if h.UpdatedAt = now; s.revoked(h.KeyID) {
-			cancel(h, store.HeldKeyRevoked)
+			s.cancel(h, store.HeldKeyRevoked)
 			continue
 		}
-		h.taken, h.claimed, h.Tries = true, now, h.Tries+1
+		h.taken, h.claimed, h.Claim = true, now, h.Claim+1
 		out = append(out, h.Held)
 	}
 	return out, nil

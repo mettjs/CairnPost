@@ -128,6 +128,7 @@ func (s *Store) RevokeKey(_ context.Context, prefix string) error {
 	now := s.Now()
 	k.RevokedAt = &now
 	s.keys[prefix] = k
+	s.cancelOf(k.ID)
 	return nil
 }
 
@@ -173,18 +174,27 @@ func (s *Store) newMessage(st store.Start) (string, []store.Addressee, []string)
 		return s.inForce(store.SuppressionKey(st.Sender, a.Address))
 	})
 	if tried := s.rows(st.ID); st.ID != "" && len(tried) > 0 {
-		// A try the provider did not take, begun again on its rows.
+		// A try the provider did not take, begun again on its rows: to
+		// whom it was to go then, less whoever is suppressed since.
+		var was []store.Addressee
+		for _, id := range tried {
+			was = append(was, store.Addressee{Address: s.messages[id].Recipient, Kind: s.messages[id].Kind})
+		}
+		kept, dropped = store.Addressed(was, func(a store.Addressee) bool {
+			return s.inForce(store.SuppressionKey(st.Sender, a.Address))
+		})
 		if len(kept) == 0 {
 			return "", nil, dropped
 		}
 		for _, id := range tried {
 			m := s.messages[id]
-			if i := slices.IndexFunc(kept, func(a store.Addressee) bool { return a.Address == m.Recipient }); i >= 0 && m.State == store.StateFailed {
+			if i := slices.IndexFunc(kept, func(a store.Addressee) bool { return a.Address == m.Recipient }); i >= 0 {
 				s.count(m, m.State, store.StateSending)
 				m.State, m.Kind, m.UpdatedAt = store.StateSending, kept[i].Kind, now
 			}
 			if id == st.ID {
-				m.LeftOut = dropped
+				m.LeftOut = append(m.LeftOut, dropped...)
+				dropped = m.LeftOut
 			}
 			s.messages[id] = m
 		}
@@ -277,6 +287,9 @@ func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 	row, held := s.idems[slot]
 	expired := held && now.Sub(row.created) >= st.TTL
 	inDoubt := held && !row.done && now.Sub(row.tried) >= st.InDoubt
+	if st.ReplayOnly && (!held || expired || !row.done || !bytes.Equal(row.fingerprint, st.Fingerprint)) {
+		return store.Claim{Outcome: store.Absent}, nil
+	}
 	switch {
 	case !held, expired, inDoubt:
 		// Nobody holds the key, it was remembered long enough, or its last
@@ -315,6 +328,18 @@ func (s *Store) start(st store.Start) store.Claim {
 	if st.Hold != nil {
 		return s.hold(st)
 	}
+	if st.ID != "" {
+		// An email that waited: begun only by the one who took it, and
+		// only while nothing of it was handed to the upstream.
+		if !s.begun(st.ID, st.Claim) {
+			return store.Claim{Outcome: store.Gone}
+		}
+		for _, row := range s.rows(st.ID) {
+			if s.messages[row].State != store.StateFailed {
+				return store.Claim{Outcome: store.Gone}
+			}
+		}
+	}
 	id, kept, dropped := s.newMessage(st)
 	if id == "" {
 		return store.Claim{Outcome: store.Suppressed}
@@ -327,6 +352,7 @@ func (s *Store) Lost(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.settle(id, store.StateUnknown, "", store.StateSending)
+	s.settled(id)
 	return nil
 }
 
@@ -345,6 +371,7 @@ func (s *Store) Sent(_ context.Context, id, upstreamID string) error {
 			row.done = true
 		}
 	}
+	s.settled(id)
 	return nil
 }
 
@@ -366,5 +393,6 @@ func (s *Store) Failed(_ context.Context, id string) error {
 			delete(s.idems, at)
 		}
 	}
+	s.settled(id)
 	return nil
 }

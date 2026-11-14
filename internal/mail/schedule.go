@@ -25,9 +25,27 @@ func hold(c checked, room int64) *store.Hold {
 	return h
 }
 
-// ErrGone: an email that waited no longer does, so there is nothing to
-// send: it was cancelled, or sent by another.
-var ErrGone = errors.New("mail: the email no longer waits")
+// ErrGone: an email that waited is not the caller's to send: it was
+// cancelled, taken again by another, or handed to the mail provider
+// already.
+var ErrGone = errors.New("mail: the email is not this sender's to send")
+
+// heldTimeout bounds reading a waiting email, with its files, and
+// recording that it is being sent.
+const heldTimeout = 30 * time.Second
+
+// movedTo is when an email asked for again will be sent: the time it
+// waits for now, which may have been moved since, or the time asked for
+// when it waits no more.
+func (s *Service) movedTo(ctx context.Context, id string, asked time.Time) time.Time {
+	if asked.IsZero() {
+		return asked
+	}
+	if h, err := s.held.Held(ctx, id); err == nil {
+		return h.SendAt
+	}
+	return asked
+}
 
 // SendHeld sends an email whose time has come, which the caller took
 // from those that wait. again says that if the mail provider is not
@@ -37,7 +55,10 @@ var ErrGone = errors.New("mail: the email no longer waits")
 // ErrSuppressed when nobody it is addressed to can be sent to any more,
 // ErrGone, or a failure of our own before anything was sent.
 func (s *Service) SendHeld(ctx context.Context, h store.Held, again bool) error {
-	raw, files, err := s.held.HeldWords(ctx, h.ID)
+	// Reading it and recording the send are bounded, as the send is.
+	reading, cancel := context.WithTimeout(ctx, heldTimeout)
+	defer cancel()
+	raw, files, err := s.held.HeldWords(reading, h.ID)
 	if err != nil {
 		return fmt.Errorf("mail: read a waiting email: %w", err)
 	}
@@ -55,10 +76,13 @@ func (s *Service) SendHeld(ctx context.Context, h store.Held, again bool) error 
 		msg.Attachments = append(msg.Attachments, driver.Attachment{Filename: f.Filename, Type: f.Type, ContentID: f.ContentID, Content: f.Content})
 	}
 	msg = addressed(msg, h.Recipients)
-	claim, err := s.store.Start(ctx, store.Start{ID: h.ID, KeyID: h.KeyID, Sender: h.Sender, Recipients: h.Recipients,
+	claim, err := s.store.Start(reading, store.Start{ID: h.ID, Claim: h.Claim, KeyID: h.KeyID, Sender: h.Sender, Recipients: h.Recipients,
 		Driver: s.driver.Name(), Content: s.contentOf(msg), KeepContent: s.opt.KeepContent})
 	if err != nil {
 		return fmt.Errorf("mail: record the send: %w", err)
+	}
+	if claim.Outcome == store.Gone {
+		return ErrGone
 	}
 	if claim.Outcome == store.Suppressed {
 		s.log.Info("mail: a waiting email was not sent; nobody it is addressed to in the open can be sent to",
