@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/mettjs/cairnpost/internal/store"
 )
@@ -41,7 +42,7 @@ func (s *Store) Endpoint(_ context.Context, id string) (store.Endpoint, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e := s.endpoint(id); e != nil {
-		return *e, nil
+		return s.shown(e), nil
 	}
 	return store.Endpoint{}, store.ErrNotFound
 }
@@ -53,7 +54,7 @@ func (s *Store) ListEndpoints(_ context.Context, domain string) ([]store.Endpoin
 	var out []store.Endpoint
 	for _, e := range s.endpoints {
 		if domain == "" || e.Domain == store.Fold(domain) {
-			out = append(out, *e)
+			out = append(out, s.shown(e))
 		}
 	}
 	return out, nil
@@ -79,7 +80,81 @@ func (s *Store) UpdateEndpoint(_ context.Context, id string, c store.EndpointCha
 	if c.Enabled != nil {
 		e.Enabled = *c.Enabled
 	}
-	return *e, nil
+	return s.shown(e), nil
+}
+
+// before is a signing key an endpoint had, and until when it signs.
+type before struct {
+	secret []byte
+	until  time.Time
+}
+
+// shown is an endpoint as it is answered: with the keys it had before
+// that still sign, the last changed first. The lock is held.
+func (s *Store) shown(e *store.Endpoint) store.Endpoint {
+	out := *e
+	out.Previous, out.PreviousUntil = nil, nil
+	keys := slices.Clone(s.previous[e.ID])
+	slices.SortStableFunc(keys, func(a, b before) int { return b.until.Compare(a.until) })
+	for _, k := range keys {
+		if k.until.After(s.Now()) && len(out.Previous) < store.PreviousKept {
+			if out.PreviousUntil == nil {
+				until := k.until
+				out.PreviousUntil = &until
+			}
+			out.Previous = append(out.Previous, k.secret)
+		}
+	}
+	return out
+}
+
+// RotateSecret implements store.Webhooks.
+func (s *Store) RotateSecret(_ context.Context, id string, secret []byte, overlap time.Duration) (store.Endpoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.endpoint(id)
+	if e == nil {
+		return store.Endpoint{}, store.ErrNotFound
+	}
+	if overlap > 0 {
+		if s.previous == nil {
+			s.previous = map[string][]before{}
+		}
+		s.previous[id] = append(s.previous[id], before{e.Secret, s.Now().Add(overlap)})
+	}
+	e.Secret = secret
+	return s.shown(e), nil
+}
+
+// ResumeEndpoint implements store.Webhooks.
+func (s *Store) ResumeEndpoint(_ context.Context, id string) (store.Endpoint, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.endpoint(id)
+	if e == nil {
+		return store.Endpoint{}, false, store.ErrNotFound
+	}
+	if e.PausedAt == nil {
+		return s.shown(e), false, nil
+	}
+	// What was given up while it failed is owed again.
+	for _, d := range s.deliveries {
+		if d.EndpointID == id && d.State == store.DeliveryFailed && d.AttemptedAt != nil && !d.AttemptedAt.Before(*e.FailingSince) {
+			d.State, d.NextAt = store.DeliveryPending, s.Now()
+		}
+	}
+	e.FailingSince, e.PausedAt = nil, nil
+	return s.shown(e), true, nil
+}
+
+// EndpointAnswered implements store.Webhooks.
+func (s *Store) EndpointAnswered(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.endpoint(id); e != nil && e.PausedAt == nil {
+		e.FailingSince = nil
+	}
+	return nil
 }
 
 // DeleteEndpoint implements store.Webhooks.
@@ -91,5 +166,6 @@ func (s *Store) DeleteEndpoint(_ context.Context, id string) error {
 	}
 	s.endpoints = slices.DeleteFunc(s.endpoints, func(e *store.Endpoint) bool { return e.ID == id })
 	s.deliveries = slices.DeleteFunc(s.deliveries, func(d *delivery) bool { return d.EndpointID == id })
+	delete(s.previous, id)
 	return nil
 }

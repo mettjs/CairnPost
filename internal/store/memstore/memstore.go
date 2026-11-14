@@ -31,10 +31,11 @@ type Store struct {
 	seq        int
 	keys       map[string]store.Key // by prefix
 	messages   map[string]store.Message
-	idems      map[string]*idem   // by key id + "\x00" + idempotency key
-	contents   map[string]content // by message id
-	details    map[string]content // by event id
-	sessions   map[string]session // by the hash of the token
+	idems      map[string]*idem    // by key id + "\x00" + idempotency key
+	contents   map[string]content  // by message id
+	details    map[string]content  // by event id
+	sessions   map[string]session  // by the hash of the token
+	previous   map[string][]before // signing keys endpoints had, by endpoint
 	events     []store.Event
 	suppressed map[string]*suppression
 	endpoints  []*store.Endpoint

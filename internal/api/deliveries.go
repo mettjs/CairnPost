@@ -10,8 +10,10 @@ import (
 
 type deliveryView struct {
 	// ID is the webhook's id as the endpoint was given it.
-	ID      string `json:"id"`
-	EmailID string `json:"email_id"`
+	ID string `json:"id"`
+	// EmailID is the email the webhook is about; absent for one that is
+	// about no email (address.suppressed).
+	EmailID string `json:"email_id,omitempty"`
 	Type    string `json:"type"`
 	// State is "pending", "delivered" or "failed" (given up).
 	State    string `json:"state"`

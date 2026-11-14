@@ -103,6 +103,15 @@ type Webhook struct {
 	// Poll is CAIRNPOST_WEBHOOK_POLL: how long the sender rests when
 	// nothing is due. Default 2s.
 	Poll time.Duration
+	// PauseAfter is CAIRNPOST_WEBHOOK_PAUSE_AFTER: how long an endpoint
+	// may fail every try before it is paused, in days ("5d") or as a
+	// duration, 1h at least; "off" never pauses, and is 0. Default 5d.
+	PauseAfter time.Duration
+	// SecretOverlap is CAIRNPOST_WEBHOOK_SECRET_OVERLAP: how long, after
+	// an endpoint's signing secret is changed, webhooks are signed with
+	// the one before as well. In days or as a duration, 7d at most;
+	// "off" ends the old one at once, and is 0. Default 24h.
+	SecretOverlap time.Duration
 	// AllowPrivate is CAIRNPOST_WEBHOOK_ALLOW_PRIVATE: let an endpoint be
 	// plain http, and at an address that is not on the public internet.
 	// For an application on the same private network. Default false.

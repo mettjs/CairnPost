@@ -106,7 +106,7 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 		Mail: mail.New(db, kept, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 			InDoubtWindow: time.Minute}, log),
 		Keys: ks, Ping: db.Ping, Driver: capture.Name, MaxBodyBytes: 1 << 20, Log: log,
-		Webhooks: webhook.NewService(db, poster, true, 20, time.Now),
+		Webhooks: webhook.NewService(db, poster, true, 20, 24*time.Hour, time.Now),
 	})
 	// An application's endpoint, told what becomes of this run's emails.
 	var hooks []*http.Request

@@ -51,13 +51,47 @@ type Service struct {
 	// perDomain is how many endpoints may hear about one sending domain,
 	// and how many about all.
 	perDomain int
-	now       func() time.Time
+	// overlap is how long, after an endpoint's signing key is changed,
+	// its webhooks are signed with the key before as well.
+	overlap time.Duration
+	now     func() time.Time
 }
 
 // NewService returns the service. insecure allows http endpoints as well
-// as https; perDomain is how many endpoints one sending domain may have.
-func NewService(s store.Webhooks, p *Poster, insecure bool, perDomain int, now func() time.Time) *Service {
-	return &Service{store: s, poster: p, insecure: insecure, perDomain: perDomain, now: now}
+// as https; perDomain is how many endpoints one sending domain may have;
+// overlap is how long a signing key that was changed goes on signing.
+func NewService(s store.Webhooks, p *Poster, insecure bool, perDomain int, overlap time.Duration, now func() time.Time) *Service {
+	return &Service{store: s, poster: p, insecure: insecure, perDomain: perDomain, overlap: overlap, now: now}
+}
+
+// Overlap is how long a signing key that was changed goes on signing
+// beside the new one.
+func (s *Service) Overlap() time.Duration { return s.overlap }
+
+// States an endpoint can be in, as StateOf answers them.
+const (
+	// StateOn: it is owed what happens, and sent it.
+	StateOn = "on"
+	// StateOff: it is owed nothing new, and what it was owed waits.
+	StateOff = "off"
+	// StatePaused: it failed for too long. It is owed what happens, and
+	// nothing is sent until it is resumed.
+	StatePaused = "paused"
+)
+
+// States is every state an endpoint can be in.
+var States = []string{StateOn, StateOff, StatePaused}
+
+// StateOf is the one place that says how an endpoint stands. Off comes
+// first: one that is off is owed nothing, paused or not.
+func StateOf(e store.Endpoint) string {
+	switch {
+	case !e.Enabled:
+		return StateOff
+	case e.PausedAt != nil:
+		return StatePaused
+	}
+	return StateOn
 }
 
 func plain(s string) bool { return utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl) }

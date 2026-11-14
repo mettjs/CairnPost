@@ -2,7 +2,9 @@
 {{define "main"}}
 <p class="back"><a href="{{.Root}}/webhooks">Webhooks</a></p>
 <h1 class="long">{{.Data.Endpoint.URL}}</h1>
-<p class="lede">{{if .Data.Endpoint.Enabled}}<span class="state state-ok">On</span> It is told what becomes of emails{{if .Data.Endpoint.Domain}} from <code>{{.Data.Endpoint.Domain}}</code>{{else}} from every sending domain{{end}}.{{else}}<span class="state state-off">Off</span> Nothing is sent to it. What it was owed when it was turned off waits until it is on, or until its email's record is deleted; it is told nothing of what happens meanwhile, even later.{{end}}</p>
+{{$state := endpointState .Data.Endpoint}}
+<p class="lede"><span class="state state-{{endpointTone .Data.Endpoint}}">{{endpointLabel .Data.Endpoint}}</span> {{if eq $state "paused"}}It took nothing for too long, so nothing is sent to it since <time datetime="{{stamp .Data.Endpoint.PausedAt}}">{{when .Data.Endpoint.PausedAt}}</time>. It is still owed everything that happens. Once it answers again, resume it: what it is owed is sent then, with what was given up while it failed.{{else if eq $state "on"}}It is told what becomes of emails{{if .Data.Endpoint.Domain}} from <code>{{.Data.Endpoint.Domain}}</code>{{else}} from every sending domain{{end}}.{{else}}Nothing is sent to it. What it was owed when it was turned off waits until it is on, or until its email's record is deleted; it is told nothing of what happens meanwhile, even later.{{if .Data.Endpoint.PausedAt}} It was also paused for failing, and stays paused when it is turned on.{{end}}{{end}}</p>
+{{if and (eq $state "on") .Data.Endpoint.FailingSince}}<p class="notice">Every try since <time datetime="{{stamp .Data.Endpoint.FailingSince}}">{{when .Data.Endpoint.FailingSince}}</time> has failed.{{if .Data.PauseAfter}} If a webhook is given up once that has gone on for {{.Data.PauseAfter}}, the endpoint is paused.{{end}} A test that is answered ends it.</p>{{end}}
 {{if .Data.Problem}}<p class="problem" role="alert">The change was not saved. {{.Data.Problem}} <a href="#change">Go to the form</a></p>{{end}}
 
 <div class="actions row-actions">
@@ -10,6 +12,12 @@
     <input type="hidden" name="in" value="{{.Data.State}}"><input type="hidden" name="at" value="{{.Data.After}}">
     <button type="submit">Send a test</button>
   </form>
+  {{if eq $state "paused"}}
+  <form method="post" action="{{.Root}}/webhooks/{{.Data.Endpoint.ID}}/resume">
+    <input type="hidden" name="in" value="{{.Data.State}}"><input type="hidden" name="at" value="{{.Data.After}}">
+    <button class="quiet" type="submit">Resume</button>
+  </form>
+  {{end}}
   <form method="post" action="{{.Root}}/webhooks/{{.Data.Endpoint.ID}}/enabled">
     <input type="hidden" name="in" value="{{.Data.State}}"><input type="hidden" name="at" value="{{.Data.After}}">
     <input type="hidden" name="enabled" value="{{if .Data.Endpoint.Enabled}}off{{else}}on{{end}}">
@@ -21,7 +29,7 @@
 <dl class="facts">
   <div><dt>Id</dt><dd><code>{{.Data.Endpoint.ID}}</code></dd></div>
   <div><dt>Made</dt><dd><time datetime="{{stamp .Data.Endpoint.CreatedAt}}">{{when .Data.Endpoint.CreatedAt}}</time></dd></div>
-  <div><dt>Signing secret</dt><dd>Shown once, when the endpoint was made. If it is lost, remove the endpoint and make it again.</dd></div>
+  <div><dt>Signing secret</dt><dd>Shown once, when it was made. {{with .Data.Endpoint.PreviousUntil}}It was changed, and until <time datetime="{{stamp .}}">{{when .}}</time> webhooks are signed with the one before as well. {{end}}<a href="{{.Root}}/webhooks/{{.Data.Endpoint.ID}}/secret">Change the secret</a></dd></div>
 </dl>
 
 <section aria-labelledby="sent">
@@ -48,9 +56,9 @@
         <td data-label="Event"><code>{{typeOf .Kind}}</code>{{if .MessageID}} <a class="by" href="{{$.Root}}/emails/{{.MessageID}}">the email</a>{{end}}</td>
         <td data-label="State"><span class="state state-{{deliveryTone .State}}">{{deliveryLabel .State}}</span></td>
         <td data-label="Tries">{{.Attempts}}</td>
-        <td data-label="Last answer" class="wrap">{{met .LastStatus .LastFailure}}{{if eq .State "pending"}} <span class="by">{{if $.Data.Endpoint.Enabled}}Next try <time datetime="{{stamp .NextAt}}">{{when .NextAt}}</time>{{else}}Waits until the endpoint is on{{end}}</span>{{end}}</td>
+        <td data-label="Last answer" class="wrap">{{met .LastStatus .LastFailure}}{{if eq .State "pending"}} <span class="by">{{if eq $state "paused"}}Waits until the endpoint is resumed{{else if eq $state "on"}}Next try <time datetime="{{stamp .NextAt}}">{{when .NextAt}}</time>{{else}}Waits until the endpoint is on{{end}}</span>{{end}}</td>
         <td data-label="When"><time datetime="{{stamp .CreatedAt}}">{{when .CreatedAt}}</time></td>
-        <td class="act">{{if ne .State "delivered"}}<form method="post" action="{{$.Root}}/webhooks/{{$.Data.Endpoint.ID}}/deliveries/{{.ID}}/retry"><input type="hidden" name="in" value="{{$.Data.State}}"><input type="hidden" name="at" value="{{$.Data.After}}"><button class="link" type="submit">{{if $.Data.Endpoint.Enabled}}Try now{{else}}Try when on{{end}}</button></form>{{end}}</td>
+        <td class="act">{{if ne .State "delivered"}}<form method="post" action="{{$.Root}}/webhooks/{{$.Data.Endpoint.ID}}/deliveries/{{.ID}}/retry"><input type="hidden" name="in" value="{{$.Data.State}}"><input type="hidden" name="at" value="{{$.Data.After}}"><button class="link" type="submit">{{if eq $state "paused"}}Try when resumed{{else if eq $state "on"}}Try now{{else}}Try when on{{end}}</button></form>{{end}}</td>
       </tr>
       {{end}}
       </tbody>

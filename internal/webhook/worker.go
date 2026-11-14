@@ -24,6 +24,9 @@ type Options struct {
 	// once and then once after each wait; when they are used up, it is
 	// given up.
 	Retries []time.Duration
+	// PauseAfter is how long an endpoint may fail every try before it is
+	// paused; 0 never pauses.
+	PauseAfter time.Duration
 }
 
 const (

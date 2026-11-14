@@ -46,7 +46,10 @@ type Deps struct {
 	// marked Secure whatever the request looks like: behind a proxy that
 	// ends TLS, the server sees plain http and must not go by that.
 	PlainHTTP bool
-	Log       *slog.Logger
+	// PauseAfter is how long a webhook endpoint may fail every try
+	// before it is paused, 0 for never: the pages say so.
+	PauseAfter time.Duration
+	Log        *slog.Logger
 }
 
 type console struct {

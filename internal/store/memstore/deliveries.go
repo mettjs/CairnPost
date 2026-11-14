@@ -13,6 +13,8 @@ import (
 type delivery struct {
 	store.Delivery
 	event store.Event
+	// about is the suppression it tells of, for one that tells of no event.
+	about *store.Suppression
 	// taken is until when a try in progress holds it, nil for none.
 	taken *time.Time
 }
@@ -29,6 +31,18 @@ func (s *Store) owe(e store.Event, domain string) {
 	}
 }
 
+// oweNotice writes what each endpoint is owed for an address suppressed
+// because of an email with no record here. The lock is held.
+func (s *Store) oweNotice(sup store.Suppression) {
+	for _, end := range s.endpoints {
+		if end.Enabled && (end.Domain == "" || end.Domain == sup.Domain) && (len(end.Kinds) == 0 || slices.Contains(end.Kinds, store.KindSuppressed)) {
+			s.deliveries = append(s.deliveries, &delivery{about: &sup, Delivery: store.Delivery{ID: s.next("dlv"),
+				EndpointID: end.ID, Kind: store.KindSuppressed, State: store.DeliveryPending,
+				NextAt: s.Now(), CreatedAt: s.Now()}})
+		}
+	}
+}
+
 // TakeDeliveries implements store.Webhooks.
 func (s *Store) TakeDeliveries(_ context.Context, max, perEndpoint int, busy []string, lease time.Duration) ([]store.Due, error) {
 	s.mu.Lock()
@@ -40,14 +54,18 @@ func (s *Store) TakeDeliveries(_ context.Context, max, perEndpoint int, busy []s
 	for _, d := range due {
 		end := s.endpoint(d.EndpointID)
 		free := d.taken == nil || !d.taken.After(now)
-		if len(out) == max || !end.Enabled || slices.Contains(busy, end.ID) || d.State != store.DeliveryPending ||
+		if len(out) == max || !end.Enabled || end.PausedAt != nil || slices.Contains(busy, end.ID) || d.State != store.DeliveryPending ||
 			d.NextAt.After(now) || !free || taken[end.ID] == perEndpoint {
 			continue
 		}
 		taken[end.ID]++
 		until := now.Add(lease)
 		d.Attempts, d.AttemptedAt, d.taken = d.Attempts+1, &now, &until
-		out = append(out, store.Due{Delivery: d.Delivery, Endpoint: *end, Event: d.event, Message: s.messages[d.MessageID]})
+		due := store.Due{Delivery: d.Delivery, Endpoint: s.shown(end), Suppression: d.about}
+		if d.about == nil {
+			due.Event, due.Message = d.event, s.messages[d.MessageID]
+		}
+		out = append(out, due)
 	}
 	return out, nil
 }
@@ -68,21 +86,46 @@ func (s *Store) DeliveryDone(_ context.Context, id string, status int) error {
 	if d := s.delivery(id); d != nil && d.State != store.DeliveryDelivered {
 		now := s.Now()
 		d.State, d.DeliveredAt, d.LastStatus, d.LastFailure, d.taken = store.DeliveryDelivered, &now, status, "", nil
+		// One paused meanwhile keeps when its failing began.
+		if end := s.endpoint(d.EndpointID); end.PausedAt == nil {
+			end.FailingSince = nil
+		}
 	}
 	return nil
 }
 
 // DeliveryMissed implements store.Webhooks.
-func (s *Store) DeliveryMissed(_ context.Context, id string, attempt, status int, failure string, retryIn time.Duration, final bool) error {
+func (s *Store) DeliveryMissed(_ context.Context, id string, attempt, status int, failure string, retryIn time.Duration, final bool,
+	pauseAfter time.Duration) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if d := s.delivery(id); d != nil && d.State == store.DeliveryPending && d.Attempts == attempt {
-		d.NextAt, d.LastStatus, d.LastFailure, d.taken = s.Now().Add(retryIn), status, failure, nil
-		if final {
-			d.State = store.DeliveryFailed
-		}
+	d := s.delivery(id)
+	if d == nil || d.State != store.DeliveryPending || d.Attempts != attempt {
+		return false, nil
 	}
-	return nil
+	now := s.Now()
+	d.NextAt, d.LastStatus, d.LastFailure, d.taken = now.Add(retryIn), status, failure, nil
+	if final {
+		d.State = store.DeliveryFailed
+	}
+	end := s.endpoint(d.EndpointID)
+	if end.PausedAt != nil {
+		return false, nil
+	}
+	if end.FailingSince == nil {
+		// The failing began when this try was made.
+		tried := now
+		if d.AttemptedAt != nil {
+			tried = *d.AttemptedAt
+		}
+		end.FailingSince = &tried
+	}
+	// Paused only by a webhook given up, once the failing is old enough.
+	if final && pauseAfter > 0 && now.Sub(*end.FailingSince) >= pauseAfter {
+		end.PausedAt = &now
+		return true, nil
+	}
+	return false, nil
 }
 
 // DeliveryReleased implements store.Webhooks.

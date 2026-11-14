@@ -9,7 +9,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/mettjs/cairnpost/internal/store"
 )
 
 // secretPrefix starts a signing secret as it is shown.
@@ -37,3 +40,20 @@ func sign(key []byte, id string, at time.Time, body []byte) string {
 	mac.Write(body)
 	return "v1," + base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
+
+// signatures is a webhook's signature under each key in use, the current
+// one first, as the scheme carries several: separated by a space. A
+// receiver accepts a webhook when any of them matches.
+func signatures(keys [][]byte, id string, at time.Time, body []byte) string {
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if len(key) > 0 {
+			out = append(out, sign(key, id, at, body))
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// keysOf is the keys an endpoint's webhooks are signed with now: its
+// own, and those it had before that are still within their time.
+func keysOf(e store.Endpoint) [][]byte { return append([][]byte{e.Secret}, e.Previous...) }

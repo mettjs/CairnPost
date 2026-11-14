@@ -48,11 +48,31 @@ func (c *console) enableEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	on, id := asked == "on", r.PathValue("id")
-	_, err := c.Webhooks.Update(r.Context(), who(r).Domain, id, webhook.Change{Enabled: &on})
+	e, err := c.Webhooks.Update(r.Context(), who(r).Domain, id, webhook.Change{Enabled: &on})
+	word := "endpoint-" + asked
 	if err == nil {
 		c.Log.Info("console: a webhook endpoint was turned on or off", "by", who(r).Prefix, "endpoint", id, "enabled", on)
+		if webhook.StateOf(e) == webhook.StatePaused {
+			word = "endpoint-on-paused" // on again, and paused as it was
+		}
 	}
-	c.did(w, r, err, "endpoint-"+asked, listed(r))
+	c.did(w, r, err, word, listed(r))
+}
+
+// resumeEndpoint ends an endpoint's pause. One that is not paused is
+// left as it is, and the page says so.
+func (c *console) resumeEndpoint(w http.ResponseWriter, r *http.Request) {
+	if !c.small(w, r) {
+		return
+	}
+	id := r.PathValue("id")
+	_, resumed, err := c.Webhooks.Resume(r.Context(), who(r).Domain, id)
+	word := "endpoint-not-paused"
+	if err == nil && resumed {
+		c.Log.Info("console: a webhook endpoint was resumed", "by", who(r).Prefix, "endpoint", id)
+		word = "endpoint-resumed"
+	}
+	c.did(w, r, err, word, listed(r))
 }
 
 // testEndpoint sends an endpoint a signed test webhook now. What it met
@@ -88,8 +108,10 @@ func (c *console) retryDelivery(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, store.ErrNotFound):
 		// Delivered meanwhile, or never this endpoint's.
 		err, word = nil, "retry-gone"
-	case err == nil && !e.Enabled:
+	case err == nil && webhook.StateOf(e) == webhook.StateOff:
 		word = "retry-off"
+	case err == nil && webhook.StateOf(e) == webhook.StatePaused:
+		word = "retry-paused"
 	}
 	if err == nil && word != "retry-gone" {
 		c.Log.Info("console: a webhook delivery was retried", "by", who(r).Prefix, "endpoint", e.ID)
@@ -112,4 +134,40 @@ func (c *console) removeEndpoint(w http.ResponseWriter, r *http.Request) {
 		c.Log.Info("console: a webhook endpoint was removed", "by", who(r).Prefix, "endpoint", id)
 	}
 	c.did(w, r, err, "endpoint-removed", Root+"/webhooks")
+}
+
+// secretView is the page that changes an endpoint's signing secret:
+// asking first, and then, once, the new secret.
+type secretView struct {
+	Endpoint store.Endpoint
+	// Secret is the new secret, "" while asking.
+	Secret string
+	// Overlap is how long both secrets sign, in words; "" when the old
+	// one stops at once.
+	Overlap string
+}
+
+// secretPage asks before an endpoint's signing secret is changed.
+func (c *console) secretPage(w http.ResponseWriter, r *http.Request) {
+	if e, ok := c.endpoint(w, r); ok {
+		v := secretView{Endpoint: e}
+		if overlap := c.Webhooks.Overlap(); overlap > 0 {
+			v.Overlap = span(overlap)
+		}
+		c.render(w, r, http.StatusOK, "secret", v)
+	}
+}
+
+// rotateSecret changes an endpoint's signing secret and shows the new
+// one, this once: on the answer itself, never on a page asked for again.
+func (c *console) rotateSecret(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	e, err := c.Webhooks.Rotate(r.Context(), who(r).Domain, id)
+	if err != nil {
+		c.did(w, r, err, "", "")
+		return
+	}
+	// The endpoint's id and nothing of the secret.
+	c.Log.Info("console: a webhook endpoint's signing secret was changed", "by", who(r).Prefix, "endpoint", id)
+	c.render(w, r, http.StatusOK, "secret", secretView{Endpoint: e, Secret: webhook.Reveal(e.Secret)})
 }

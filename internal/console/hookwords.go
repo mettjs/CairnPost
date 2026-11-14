@@ -53,6 +53,14 @@ func deliveryWords(state string) (label, tone string) {
 	return state, "off"
 }
 
+// endpointStates names each state an endpoint can be in, and how it is
+// coloured.
+var endpointStates = map[string][2]string{
+	webhook.StateOn:     {"On", "ok"},
+	webhook.StateOff:    {"Off", "off"},
+	webhook.StatePaused: {"Paused", "failing"},
+}
+
 // hookFields names, as the forms do, the parts of an endpoint the
 // webhook service says what they must be.
 var hookFields = map[string]string{"url": "The URL", "description": "The description"}

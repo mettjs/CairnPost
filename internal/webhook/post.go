@@ -73,9 +73,10 @@ func NewPoster(timeout time.Duration, anywhere bool, perHost int, version string
 // Timeout is the most one try may take.
 func (p *Poster) Timeout() time.Duration { return p.timeout }
 
-// Post sends one webhook, signed now, and answers what it met. id names
-// the webhook and is the same on every try; the timestamp is this try's.
-func (p *Poster) Post(ctx context.Context, url string, key []byte, id string, body []byte) Result {
+// Post sends one webhook, signed now under each of keys, and answers what
+// it met. id names the webhook and is the same on every try; the
+// timestamp is this try's.
+func (p *Poster) Post(ctx context.Context, url string, keys [][]byte, id string, body []byte) Result {
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -83,7 +84,7 @@ func (p *Poster) Post(ctx context.Context, url string, key []byte, id string, bo
 		return Result{Failure: FailOther}
 	}
 	at := p.now()
-	signature, stamp := sign(key, id, at, body), strconv.FormatInt(at.Unix(), 10)
+	signature, stamp := signatures(keys, id, at, body), strconv.FormatInt(at.Unix(), 10)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", p.agent)
 	// The same three values under both names in use for this scheme.

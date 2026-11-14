@@ -66,6 +66,8 @@ func New(d Deps) http.Handler {
 	mux.Handle("GET /webhooks/{id}/deliveries", a.auth(true, a.listDeliveries))
 	mux.Handle("POST /webhooks/{id}/deliveries/{delivery}/retry", a.auth(true, a.retryDelivery))
 	mux.Handle("POST /webhooks/{id}/test", a.auth(true, a.testWebhook))
+	mux.Handle("POST /webhooks/{id}/secret", a.auth(true, a.rotateWebhookSecret))
+	mux.Handle("POST /webhooks/{id}/resume", a.auth(true, a.resumeWebhook))
 	if d.Captured != nil {
 		mux.Handle("GET /capture/emails", a.auth(true, a.captured))
 	}

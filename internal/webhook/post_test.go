@@ -46,7 +46,7 @@ func TestAWebhookIsSignedUnderBothNamesAndFreshOnEachTry(t *testing.T) {
 	p := NewPoster(time.Second, true, 2, "test", func() time.Time { return now })
 	key := newSecret()
 	for range 2 {
-		if r := p.Post(context.Background(), srv.URL, key, "dlv-1", []byte(`{"type":"email.bounced"}`)); !r.Delivered() || r.Status != 204 {
+		if r := p.Post(context.Background(), srv.URL, [][]byte{key}, "dlv-1", []byte(`{"type":"email.bounced"}`)); !r.Delivered() || r.Status != 204 {
 			t.Fatalf("%+v", r)
 		}
 		now = now.Add(10 * time.Minute)
@@ -109,7 +109,7 @@ func TestWhatATryMeetsIsNamedFromAClosedSet(t *testing.T) {
 		"this machine by v6": {NewPoster(time.Second, false, 2, "test", time.Now), "http://[::ffff:127.0.0.1]:80/", 200, Result{0, FailBlocked}},
 	} {
 		status.Store(int32(c.answer))
-		if got := c.poster.Post(context.Background(), c.url, []byte("k"), "id", []byte("{}")); got != c.want {
+		if got := c.poster.Post(context.Background(), c.url, [][]byte{[]byte("k")}, "id", []byte("{}")); got != c.want {
 			t.Errorf("%s: %+v, want %+v", name, got, c.want)
 		}
 	}

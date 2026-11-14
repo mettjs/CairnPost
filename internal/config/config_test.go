@@ -51,14 +51,28 @@ func TestWebhookSettings(t *testing.T) {
 		c.Webhook.Retries[0] != 5*time.Second || c.Webhook.Retries[6] != 10*time.Hour {
 		t.Fatalf("defaults: %+v %v", c.Webhook, err)
 	}
-	c, err = Load(env(append(base, "CAIRNPOST_WEBHOOK_RETRIES", "1s, 2m", "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE", "TRUE")...))
-	if err != nil || len(c.Webhook.Retries) != 2 || c.Webhook.Retries[1] != 2*time.Minute || !c.Webhook.AllowPrivate {
+	if c.Webhook.PauseAfter != 5*24*time.Hour || c.Webhook.SecretOverlap != 24*time.Hour {
+		t.Fatalf("an endpoint is paused after %v and an old secret signs for %v by default, want five days and one",
+			c.Webhook.PauseAfter, c.Webhook.SecretOverlap)
+	}
+	c, err = Load(env(append(base, "CAIRNPOST_WEBHOOK_RETRIES", "1s, 2m", "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE", "TRUE",
+		"CAIRNPOST_WEBHOOK_PAUSE_AFTER", "2d")...))
+	if err != nil || len(c.Webhook.Retries) != 2 || c.Webhook.Retries[1] != 2*time.Minute || !c.Webhook.AllowPrivate ||
+		c.Webhook.PauseAfter != 48*time.Hour {
 		t.Fatalf("set: %+v %v", c.Webhook, err)
+	}
+	if c, err = Load(env(append(base, "CAIRNPOST_WEBHOOK_PAUSE_AFTER", "off", "CAIRNPOST_WEBHOOK_SECRET_OVERLAP", "off")...)); err != nil ||
+		c.Webhook.PauseAfter != 0 || c.Webhook.SecretOverlap != 0 {
+		t.Fatalf("pausing and the overlap off: %v %v %v", c.Webhook.PauseAfter, c.Webhook.SecretOverlap, err)
+	}
+	if c, err = Load(env(append(base, "CAIRNPOST_WEBHOOK_SECRET_OVERLAP", "3d")...)); err != nil || c.Webhook.SecretOverlap != 72*time.Hour {
+		t.Fatalf("an overlap of three days: %v %v", c.Webhook.SecretOverlap, err)
 	}
 	for name, value := range map[string]string{
 		"CAIRNPOST_WEBHOOK_RETRIES": "5s,soon", "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE": "yes", "CAIRNPOST_MAX_KEYS": "0",
 		"CAIRNPOST_WEBHOOK_WORKERS": "65", "CAIRNPOST_WEBHOOK_TIMEOUT": "0s", "CAIRNPOST_WEBHOOK_PER_ENDPOINT": "9",
-		"CAIRNPOST_WEBHOOK_MAX_ENDPOINTS": "1001",
+		"CAIRNPOST_WEBHOOK_MAX_ENDPOINTS": "1001", "CAIRNPOST_WEBHOOK_PAUSE_AFTER": "59m", "CAIRNPOST_WEBHOOK_PAUSE_AFTER ": "never",
+		"CAIRNPOST_WEBHOOK_SECRET_OVERLAP": "8d", "CAIRNPOST_WEBHOOK_SECRET_OVERLAP ": "soon",
 	} {
 		name = strings.TrimSpace(name)
 		if _, err := Load(env(append(base, name, value)...)); err == nil || !strings.Contains(err.Error(), name) {

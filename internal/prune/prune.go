@@ -96,7 +96,8 @@ func (p *Pruner) Run(ctx context.Context) {
 		if c != (Counts{}) {
 			// Counts only: no address and no id.
 			p.log.Info("prune: forgot what was kept long enough", "contents", c.Contents, "details", c.Details, "console_sessions", c.Sessions, "idempotency_keys", c.Keys,
-				"emails", c.Emails, "lifted_suppressions", c.Lifted)
+				"emails", c.Emails, "lifted_suppressions", c.Lifted,
+				"suppression_webhooks", c.Notices, "old_signing_keys", c.Secrets)
 		}
 		select {
 		case <-ctx.Done():
@@ -136,7 +137,7 @@ func (p *Pruner) Sweep(ctx context.Context) (int, error) {
 }
 
 // Counts is how much a pass deleted.
-type Counts struct{ Contents, Details, Sessions, Keys, Emails, Lifted int }
+type Counts struct{ Contents, Details, Sessions, Keys, Emails, Lifted, Notices, Secrets int }
 
 // Pass prunes everything due now. What emails said, and what was said of
 // them, goes first and each on its own: it is the most private thing
@@ -146,12 +147,14 @@ type Counts struct{ Contents, Details, Sessions, Keys, Emails, Lifted int }
 func (p *Pruner) Pass(ctx context.Context) (Counts, error) {
 	var (
 		c    Counts
-		errs [4]error
+		errs [5]error
 	)
 	c.Contents, errs[0] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneContents(ctx, batch) })
 	c.Details, errs[1] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneDetails(ctx, batch) })
 	c.Sessions, errs[2] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneSessions(ctx, batch) })
 	errs[3] = p.records(ctx, &c)
+	// A signing key an endpoint had before is not kept past its use.
+	c.Secrets, errs[4] = all(ctx, func(ctx context.Context) (int, error) { return p.store.ForgetSecrets(ctx, batch) })
 	return c, errors.Join(errs[:]...)
 }
 
@@ -176,6 +179,10 @@ func (p *Pruner) records(ctx context.Context, c *Counts) error {
 		return err
 	}
 	c.Lifted, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneLifted(ctx, before, batch) })
+	if err != nil {
+		return err
+	}
+	c.Notices, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneNotices(ctx, before, batch) })
 	return err
 }
 
