@@ -43,6 +43,10 @@ type Options struct {
 	// Keep is how long an email's record is kept; 0 keeps records for
 	// ever, and then only keys and kept words are pruned.
 	Keep time.Duration
+	// KeepCounts is how long the send counts are kept; 0 keeps them for
+	// ever. It is not the records' time: a count outlives the emails it
+	// counts.
+	KeepCounts time.Duration
 	// Unanswered is how long a send may stay "sending" before it is
 	// recorded as unknown, and how often that is looked for; 0 never
 	// looks. It must be longer than any send is given.
@@ -97,7 +101,7 @@ func (p *Pruner) Run(ctx context.Context) {
 			// Counts only: no address and no id.
 			p.log.Info("prune: forgot what was kept long enough", "contents", c.Contents, "details", c.Details, "console_sessions", c.Sessions, "idempotency_keys", c.Keys,
 				"emails", c.Emails, "lifted_suppressions", c.Lifted,
-				"suppression_webhooks", c.Notices, "old_signing_keys", c.Secrets)
+				"suppression_webhooks", c.Notices, "old_signing_keys", c.Secrets, "counted_hours", c.Hours)
 		}
 		select {
 		case <-ctx.Done():
@@ -137,7 +141,7 @@ func (p *Pruner) Sweep(ctx context.Context) (int, error) {
 }
 
 // Counts is how much a pass deleted.
-type Counts struct{ Contents, Details, Sessions, Keys, Emails, Lifted, Notices, Secrets int }
+type Counts struct{ Contents, Details, Sessions, Keys, Emails, Lifted, Notices, Secrets, Hours int }
 
 // Pass prunes everything due now. What emails said, and what was said of
 // them, goes first and each on its own: it is the most private thing
@@ -147,7 +151,7 @@ type Counts struct{ Contents, Details, Sessions, Keys, Emails, Lifted, Notices, 
 func (p *Pruner) Pass(ctx context.Context) (Counts, error) {
 	var (
 		c    Counts
-		errs [5]error
+		errs [6]error
 	)
 	c.Contents, errs[0] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneContents(ctx, batch) })
 	c.Details, errs[1] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneDetails(ctx, batch) })
@@ -155,6 +159,9 @@ func (p *Pruner) Pass(ctx context.Context) (Counts, error) {
 	errs[3] = p.records(ctx, &c)
 	// A signing key an endpoint had before is not kept past its use.
 	c.Secrets, errs[4] = all(ctx, func(ctx context.Context) (int, error) { return p.store.ForgetSecrets(ctx, batch) })
+	if p.opt.KeepCounts > 0 {
+		c.Hours, errs[5] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneCounts(ctx, p.opt.KeepCounts, batch) })
+	}
 	return c, errors.Join(errs[:]...)
 }
 

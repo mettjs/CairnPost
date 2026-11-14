@@ -65,7 +65,7 @@ func (r *rig) suppressed() int {
 
 func (r *rig) pass(keep time.Duration) Counts {
 	r.t.Helper()
-	c, err := New(r.s, Options{Every: time.Hour, KeyTTL: 24 * time.Hour, Keep: keep}, quiet).Pass(context.Background())
+	c, err := New(r.s, Options{Every: time.Hour, KeyTTL: 24 * time.Hour, Keep: keep, KeepCounts: 62 * 24 * time.Hour}, quiet).Pass(context.Background())
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -146,11 +146,13 @@ func TestALiftOutlivesEveryEmailSentBeforeIt(t *testing.T) {
 	}
 	r.days(25)
 	r.send("<c>", "new@example.org", "") // sent after the lift: holds nothing back
-	if c := r.pass(month); c != (Counts{}) {
+	// Its hour's count is past the counts' own time by now, and goes.
+	if c := r.pass(month); c != (Counts{Hours: 1}) {
 		t.Fatalf("with an email sent before the lift on record: %+v", c)
 	}
 	r.days(6) // that email is now a month quiet
-	if c := r.pass(month); c != (Counts{Emails: 1, Lifted: 1}) {
+	// Another hour's count has come to the end of its own time too.
+	if c := r.pass(month); c != (Counts{Emails: 1, Lifted: 1, Hours: 1}) {
 		t.Fatalf("once it is gone: %+v", c)
 	}
 }
@@ -175,11 +177,12 @@ func TestAnEmailIsKeptFromTheLastThingThatHappenedToIt(t *testing.T) {
 	}
 }
 
-func TestKeepingForEverPrunesOnlyKeys(t *testing.T) {
+func TestKeepingForEverPrunesKeysAndOldCountsOnly(t *testing.T) {
 	r := newRig(t)
 	r.send("<a>", "ana@example.org", "a")
 	r.days(400)
-	if c := r.pass(0); c != (Counts{Keys: 1}) {
+	// The counts have a time of their own, whatever the records'.
+	if c := r.pass(0); c != (Counts{Keys: 1, Hours: 1}) {
 		t.Fatalf("%+v", c)
 	}
 }

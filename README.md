@@ -237,6 +237,10 @@ names no email. A suppression that was lifted is forgotten once the lift is
 that old too and every email sent before it is gone, so until then a late
 bounce cannot undo the lift. The retention is 7 days at least, because a receiving server may go on
 trying an email for days before it bounces; `off` keeps records for ever.
+How many emails were sent each hour from each sending domain, and how many
+of them were delivered, bounced and so on, is counted apart from the
+records and kept for `CAIRNPOST_COUNTS_RETENTION`, 62 days by default,
+whatever the records' retention is: numbers only, with no address in them.
 The pruner runs every `CAIRNPOST_PRUNE_EVERY`, and `GET /health` says
 `"pruning": "running"` or `"failing"`. Mail still goes while it is failing.
 
@@ -435,6 +439,7 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_IDEMPOTENCY_TTL` | `24h` | How long an `Idempotency-Key` is remembered. |
 | `CAIRNPOST_RETENTION` | `30d` | How long an email's record is kept after the last thing that happened to it, in days (`30d`) or hours (`720h`). At least `7d`, and longer than `CAIRNPOST_IDEMPOTENCY_TTL` and than the waits of `CAIRNPOST_WEBHOOK_RETRIES` together. `off` keeps records for ever. |
 | `CAIRNPOST_CONTENT_RETENTION` | `off` | How long what an email said, and what the receiving server said of it, is kept and shown to admin keys: a time such as `24h` or `7d`, `30d` at most and no longer than `CAIRNPOST_RETENTION`. `off` keeps none. |
+| `CAIRNPOST_COUNTS_RETENTION` | `62d` | How long the counts of what was sent each hour, and what became of it, are kept: numbers only, apart from the records and whatever `CAIRNPOST_RETENTION` is. At least `62d`. `off` keeps them for ever. |
 | `CAIRNPOST_PRUNE_EVERY` | `1h` | How long the pruner rests between passes. |
 | `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. It is also how long a send may stay `sending` before it is taken to be abandoned (by a server that stopped in the middle of it) and set to `unknown`: looked for that often, so within twice this time, and never sooner than `CAIRNPOST_SEND_TIMEOUT` plus a minute. |
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |

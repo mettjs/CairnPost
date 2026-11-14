@@ -160,6 +160,7 @@ type Store interface {
 	Pruning
 	Sessions
 	Domains
+	Counts
 	// Ping reports whether the store can be reached.
 	Ping(ctx context.Context) error
 }
