@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -150,13 +151,35 @@ func (db *DB) PruneMessages(ctx context.Context, before time.Time, limit int) (i
 		if err != nil || len(emails) == 0 {
 			return err
 		}
-		rows, err = tx.Query(ctx, `SELECT id::text FROM messages WHERE email_id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, emails)
+		// Its other rows are taken too, and looked at again once they
+		// are held: an event recorded meanwhile at one of them keeps the
+		// email.
+		rows, err = tx.Query(ctx, `SELECT id::text, email_id::text, updated_at > $2 FROM messages WHERE email_id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, emails, before)
 		if err != nil {
 			return err
 		}
-		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		if err != nil {
+		var ids, of []string
+		fresh := map[string]bool{}
+		var (
+			id, email string
+			newer     bool
+		)
+		if _, err := pgx.ForEachRow(rows, []any{&id, &email, &newer}, func() error {
+			if ids, of = append(ids, id), append(of, email); newer {
+				fresh[email] = true
+			}
+			return nil
+		}); err != nil {
 			return err
+		}
+		for i := len(ids) - 1; i >= 0; i-- {
+			if fresh[of[i]] {
+				ids = slices.Delete(ids, i, i+1)
+			}
+		}
+		n = len(emails) - len(fresh)
+		if len(ids) == 0 {
+			return nil
 		}
 		// The suppressions these messages caused let go of them. Their rows
 		// are taken in the list's order, as lifting a whole domain takes
@@ -166,8 +189,7 @@ func (db *DB) PruneMessages(ctx context.Context, before time.Time, limit int) (i
 			ORDER BY domain, address FOR UPDATE`, ids); err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `DELETE FROM messages WHERE id = ANY($1::uuid[])`, ids)
-		n = int(tag.RowsAffected())
+		_, err = tx.Exec(ctx, `DELETE FROM messages WHERE id = ANY($1::uuid[])`, ids)
 		return err
 	})
 	if err != nil {

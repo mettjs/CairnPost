@@ -19,6 +19,7 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		// events about one email are applied one after the other.
 		var (
 			messageID, state  string
+			emailID           string
 			sender, recipient string
 			sentAt            time.Time
 			newer             bool
@@ -26,16 +27,18 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		reason, suppresses := store.SuppressionFor(e.Kind, e.Permanent, e.Code)
 		// An email to several addresses has a row for each, all under the
 		// upstream's one id: the event is about the address it names. One
-		// that names none is about the email's first; one that names an
-		// address the email was not sent to is about no row.
+		// that names an address the email was not sent to is about no
+		// row, and so is one that names none, unless the email went to
+		// one address: there is no telling whose it is, and it must not
+		// suppress the wrong one.
 		err := tx.QueryRow(ctx, `
-			SELECT m.id::text, m.state, m.sender, m.recipient, m.created_at,
+			SELECT m.id::text, m.email_id::text, m.state, m.sender, m.recipient, m.created_at,
 			       NOT EXISTS (SELECT 1 FROM events e WHERE e.message_id = m.id AND e.kind = m.state AND e.occurred_at >= $3)
 			FROM messages m WHERE m.driver = $1 AND m.upstream_id = $2
-			  AND ($4 = '' OR lower(m.recipient COLLATE "C") = lower($4 COLLATE "C")
+			  AND (lower(m.recipient COLLATE "C") = lower($4 COLLATE "C")
 			       OR NOT EXISTS (SELECT 1 FROM messages o WHERE o.email_id = m.email_id AND o.id <> m.id))
 			ORDER BY (lower(m.recipient COLLATE "C") = lower($4 COLLATE "C")) DESC, m.id LIMIT 1 FOR UPDATE OF m`,
-			e.Driver, e.UpstreamID, e.At, e.Recipient).Scan(&messageID, &state, &sender, &recipient, &sentAt, &newer)
+			e.Driver, e.UpstreamID, e.At, e.Recipient).Scan(&messageID, &emailID, &state, &sender, &recipient, &sentAt, &newer)
 		if errors.Is(err, pgx.ErrNoRows) {
 			outcome = store.NoMessage
 			// The email has no record here: its send's answer was lost, or
@@ -82,8 +85,9 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		// A bounce for good, or a complaint, suppresses the address for the
 		// domain that sent, in the same step as the event that says so.
 		if suppresses {
+			// The suppression names the email, not the row of one address.
 			domain, address := store.SuppressionKey(sender, recipient)
-			if err := suppressByEvent(ctx, tx, domain, address, reason, messageID, sentAt); err != nil {
+			if err := suppressByEvent(ctx, tx, domain, address, reason, emailID, sentAt); err != nil {
 				return err
 			}
 			// Whether the address is on the list now is kept with the
@@ -102,14 +106,15 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		if moves {
 			to = store.StateOf[e.Kind]
 		}
-		if moves && to == store.StateFailed {
-			// The email never went: its key is free for a retry, as after
-			// a refusal at send.
-			if _, err := tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE message_id = $1::uuid`, messageID); err != nil {
-				return err
-			}
+		if _, err = tx.Exec(ctx, `UPDATE messages SET state = $2, updated_at = now() WHERE id = $1::uuid`, messageID, to); err != nil || !moves || to != store.StateFailed {
+			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE messages SET state = $2, updated_at = now() WHERE id = $1::uuid`, messageID, to)
+		// An email that went to nobody is free to be tried again under
+		// its key, as after a refusal at send. One that failed at some
+		// addresses is not: it would go twice to the others.
+		_, err = tx.Exec(ctx, `
+			DELETE FROM idempotency_keys WHERE message_id = $1::uuid
+			  AND NOT EXISTS (SELECT 1 FROM messages WHERE email_id = $1::uuid AND state <> 'failed')`, emailID)
 		return err
 	})
 	if err != nil {

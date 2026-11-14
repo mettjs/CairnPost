@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/driver"
@@ -31,7 +30,7 @@ var (
 	// suppression list: it bounced for good, complained, or was put there
 	// by hand. Nothing is sent, and nothing will be until a suppression is
 	// lifted. An email with other recipients goes to those.
-	ErrSuppressed = errors.New("mail: every recipient is suppressed for this sending domain")
+	ErrSuppressed = errors.New("mail: nobody the email is addressed to in the open can be sent to: each is suppressed for this sending domain")
 	// ErrInDoubt: the upstream's answer was lost, so the email may have
 	// gone. It is the only error after which that is so: every other one
 	// means nothing was sent.
@@ -101,7 +100,8 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 // key as it arrived: the request's fingerprint is keyed by it.
 //
 // An address that is suppressed is left out and named in the receipt;
-// the email goes to the others. With none left it is ErrSuppressed.
+// the email goes to the others. With nobody left in "to" or "cc" it is
+// ErrSuppressed: a hidden copy alone is not sent.
 //
 // An error is an *Invalid, ErrDomain, ErrSuppressed, a *Busy (ErrInFlight), ErrMismatch,
 // a driver's ErrRejected or ErrUnavailable, ErrInDoubt, or a failure of
@@ -131,7 +131,7 @@ func (s *Service) Send(ctx context.Context, key store.Key, presented string, r R
 	}
 	switch claim.Outcome {
 	case store.Replay:
-		return Receipt{ID: claim.ID}, nil
+		return Receipt{ID: claim.ID, Suppressed: claim.Dropped}, nil
 	case store.InFlight:
 		return Receipt{}, &Busy{After: claim.RetryAfter}
 	case store.Mismatch:
@@ -139,7 +139,7 @@ func (s *Service) Send(ctx context.Context, key store.Key, presented string, r R
 	case store.Suppressed:
 		// Said to the operator, without an address: a person who stops
 		// getting mail should be findable from the log's side too.
-		s.log.Info("mail: a send was refused; every recipient is suppressed for the sending domain",
+		s.log.Info("mail: a send was refused; nobody it is addressed to in the open can be sent to",
 			"domain", c.domain, "earlier_try", claim.ID)
 		// The id, if any, is an earlier try under the key whose answer
 		// never came: that email may have gone.
@@ -149,25 +149,24 @@ func (s *Service) Send(ctx context.Context, key store.Key, presented string, r R
 	if len(claim.Dropped) > 0 {
 		s.log.Info("mail: an email goes to fewer addresses; the others are suppressed for the sending domain",
 			"domain", c.domain, "message", claim.ID, "left_out", len(claim.Dropped))
-		msg = without(msg, claim.Dropped)
+		msg = addressed(msg, claim.Recipients)
 	}
 	return Receipt{ID: claim.ID, Suppressed: claim.Dropped}, s.deliver(ctx, claim.ID, msg)
 }
 
-// without is a message that goes to none of some addresses. Left with
-// no "to", its first "cc" takes that place, or else its first "bcc": an
-// email is to someone.
-func without(m driver.Message, dropped []string) driver.Message {
-	keep := func(list []string) []string {
-		return slices.DeleteFunc(slices.Clone(list), func(a string) bool { return slices.Contains(dropped, a) })
-	}
-	m.To, m.Cc, m.Bcc = keep(m.To), keep(m.Cc), keep(m.Bcc)
-	switch {
-	case len(m.To) > 0:
-	case len(m.Cc) > 0:
-		m.To, m.Cc = m.Cc[:1], m.Cc[1:]
-	case len(m.Bcc) > 0:
-		m.To, m.Bcc = m.Bcc[:1], m.Bcc[1:]
+// addressed is a message that goes to the addresses the store kept, each
+// as the kind it was recorded as.
+func addressed(m driver.Message, kept []store.Addressee) driver.Message {
+	m.To, m.Cc, m.Bcc = nil, nil, nil
+	for _, a := range kept {
+		switch a.Kind {
+		case store.KindTo:
+			m.To = append(m.To, a.Address)
+		case store.KindCc:
+			m.Cc = append(m.Cc, a.Address)
+		default:
+			m.Bcc = append(m.Bcc, a.Address)
+		}
 	}
 	return m
 }

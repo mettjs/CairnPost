@@ -102,6 +102,9 @@ type Message struct {
 	Recipient  string
 	Kind       string
 	Recipients []Recipient
+	// LeftOut are the addresses the email was asked to go to and did
+	// not, being suppressed when it was sent.
+	LeftOut    []string
 	Driver     string
 	UpstreamID string
 	State      string
@@ -139,9 +142,11 @@ type Claim struct {
 	ID string
 	// RetryAfter is, for InFlight, how long until a retry is let through.
 	RetryAfter time.Duration
-	// Dropped are, for Started, the addresses left out because they are
-	// suppressed: the email goes to the others.
-	Dropped []string
+	// Recipients are, for Started, the addresses the email goes to and
+	// as what (see Addressed). Dropped are, for Started and Replay, the
+	// addresses left out because they are suppressed.
+	Recipients []Addressee
+	Dropped    []string
 }
 
 // Start is a send about to be made.

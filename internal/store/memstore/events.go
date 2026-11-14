@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"time"
 
@@ -52,10 +53,11 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 	}
 	if suppresses {
 		domain, address := store.SuppressionKey(m.Sender, m.Recipient)
-		s.suppress(store.Suppression{Domain: domain, Address: address, Reason: reason, MessageID: m.ID}, since(m.CreatedAt))
+		// A suppression names the email, not the row of one address.
+		s.suppress(store.Suppression{Domain: domain, Address: address, Reason: reason, MessageID: m.EmailID}, since(m.CreatedAt))
 		// One in force by an event that could name no message is given this one.
 		if row := s.suppressed[slot(domain, address)]; row.lifted == nil && row.Reason == reason && row.MessageID == "" {
-			row.MessageID = m.ID
+			row.MessageID = m.EmailID
 		}
 		// Whether the address is on the list now is kept with the event.
 		e.Suppressed = s.inForce(domain, address)
@@ -66,15 +68,18 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 	to := m.State
 	if store.Moves(m.State, e.Kind, newer) {
 		to = store.StateOf[e.Kind]
-		if to == store.StateFailed {
-			for at, row := range s.idems {
-				if row.messageID == m.ID {
-					delete(s.idems, at)
-				}
+	}
+	s.setState(m.ID, to, "")
+	// An email that went to nobody is free to be tried again under its
+	// key; one that failed at some addresses is not: it would go twice
+	// to the others.
+	if !slices.ContainsFunc(s.rows(m.EmailID), func(id string) bool { return s.messages[id].State != store.StateFailed }) {
+		for at, row := range s.idems {
+			if row.messageID == m.EmailID {
+				delete(s.idems, at)
 			}
 		}
 	}
-	s.setState(m.ID, to, "")
 	return store.Kept, nil
 }
 
@@ -102,9 +107,10 @@ func (s *Store) Details(_ context.Context, messageID string, keep time.Duration)
 	return out, nil
 }
 
-// about is the row an event is about: of the address it names; of the
-// email's first, for one that names none or whose email went to one
-// address; none ("" id), for an address the email did not go to.
+// about is the row an event is about: of the address it names, or the
+// only one of an email that went to one address. None ("" id) for an
+// address the email did not go to, and for an event that names none
+// about an email to several: there is no telling whose it is.
 func (s *Store) about(e store.Event) store.Message {
 	var first store.Message
 	if e.UpstreamID == "" {
@@ -121,7 +127,7 @@ func (s *Store) about(e store.Event) store.Message {
 			first = m
 		}
 	}
-	if e.Recipient != "" && first.ID != "" && len(s.rows(first.EmailID)) > 1 {
+	if first.ID != "" && len(s.rows(first.EmailID)) > 1 {
 		return store.Message{}
 	}
 	return first

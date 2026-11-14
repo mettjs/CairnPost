@@ -269,8 +269,11 @@ func TestABoundKeyReadsItsDomainsEmails(t *testing.T) {
 func TestAnEmailToSeveralIsOneRowAndShowsEachAddress(t *testing.T) {
 	r := newRig(t, nil)
 	b := r.signedIn(r.admin)
+	if _, err := r.s.Suppress(context.Background(), store.Suppression{Domain: "example.com", Address: "gone@example.org", Reason: store.ReasonManual}); err != nil {
+		t.Fatal(err)
+	}
 	sent, err := r.mail.Send(context.Background(), r.sendKey, r.send, mail.Request{From: "app@example.com",
-		To: []string{"ana@example.org"}, Cc: []string{"bo@example.org"}, Bcc: []string{"cy@example.org"}, Subject: "s", Text: "t"})
+		To: []string{"ana@example.org", "gone@example.org"}, Cc: []string{"bo@example.org"}, Bcc: []string{"cy@example.org"}, Subject: "s", Text: "t"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +295,7 @@ func TestAnEmailToSeveralIsOneRowAndShowsEachAddress(t *testing.T) {
 	}
 	page := b.do("GET", "/emails/"+sent.ID, nil).Body.String()
 	for _, want := range []string{"Email to ana@example.org and 2 more", "Who it went to", ">Copy<", ">Hidden copy<", "cy@example.org",
-		`<span class="why">bo@example.org</span>`, "Each address has its own outcome."} {
+		`<span class="why">bo@example.org</span>`, "Each address has its own outcome.", "<dt>Not sent to</dt>", "gone@example.org"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the email's page lacks %q", want)
 		}

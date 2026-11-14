@@ -10,13 +10,17 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
-// recipients reads "to", "cc" or "bcc" as one address or a list of them.
+// recipients reads "to", "cc" or "bcc" as one address or a list of
+// them. null and "" are no address, as a client writes a field it left
+// empty.
 type recipients []string
 
 func (r *recipients) UnmarshalJSON(raw []byte) error {
 	var one string
 	if json.Unmarshal(raw, &one) == nil {
-		*r = recipients{one}
+		if *r = nil; one != "" {
+			*r = recipients{one}
+		}
 		return nil
 	}
 	var many []string
@@ -79,9 +83,12 @@ type emailView struct {
 	To         string          `json:"to"`
 	State      string          `json:"state"`
 	Recipients []recipientView `json:"recipients"`
-	CreatedAt  time.Time       `json:"created_at"`
-	UpdatedAt  time.Time       `json:"updated_at"`
-	Events     []eventView     `json:"events"`
+	// Suppressed are the addresses it was asked to go to and did not,
+	// being on the suppression list when it was sent.
+	Suppressed []string    `json:"suppressed,omitempty"`
+	CreatedAt  time.Time   `json:"created_at"`
+	UpdatedAt  time.Time   `json:"updated_at"`
+	Events     []eventView `json:"events"`
 	// Content is what the email said: there only where the operator keeps
 	// it, while it is kept, and for an admin key that may see the sending
 	// domain.
@@ -129,12 +136,9 @@ func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Times are answered in UTC, whatever zone the server runs in.
 		view := emailView{ID: m.ID, From: m.Sender, To: m.Recipient, State: m.State, Recipients: []recipientView{},
-			CreatedAt: m.CreatedAt.UTC(), UpdatedAt: m.UpdatedAt.UTC(), Events: []eventView{}}
+			Suppressed: m.LeftOut, CreatedAt: m.CreatedAt.UTC(), UpdatedAt: m.Heard().UTC(), Events: []eventView{}}
 		for _, r := range m.Recipients {
 			view.Recipients = append(view.Recipients, recipientView{r.Address, r.Kind, r.State, r.UpdatedAt.UTC()})
-			if r.UpdatedAt.After(view.UpdatedAt) {
-				view.UpdatedAt = r.UpdatedAt.UTC() // the email's is its latest address's
-			}
 		}
 		// What it said is for whoever runs CairnPost: an admin key. A
 		// send key is never shown it, not even for its own emails. If it

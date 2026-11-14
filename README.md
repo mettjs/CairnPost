@@ -96,8 +96,12 @@ of them: 50 in all unless `CAIRNPOST_MAX_RECIPIENTS` says otherwise, one
 `to` at least, no address twice. It is one email with one id, and each
 address has an outcome of its own: `GET /emails/{id}` lists them under
 `recipients`, each with its `kind` (`to`, `cc`, `bcc`) and its `state`.
-The email's own `to` and `state` are those of its first address. An event
-says which address it is about in `to`, and a webhook does the same.
+The email's own `to` and `state` are those of its first address, so read
+`recipients` to know what became of an email to several: `failed` there
+says it did not go to that address, not that it went to nobody. An event
+says which address it is about in `to`, and a webhook does the same. An
+`Idempotency-Key` is freed by a failure only once the email failed at
+every address.
 
 **An email's state**, from `GET /emails/{id}`:
 
@@ -125,8 +129,11 @@ that address from that sending domain: writing there again only harms the
 domain's standing with mail providers. A send to it answers 422
 `recipient_suppressed` and nothing is sent. When an email names several
 addresses and some are suppressed, it goes to the others, and the answer
-lists the ones left out under `suppressed`; it is refused only when every
-address is. Nothing else suppresses: not a
+lists the ones left out under `suppressed`, as `GET /emails/{id}` and a
+repeat under the same `Idempotency-Key` do afterwards. Left with no `to`,
+its first `cc` is sent as `to`. It is refused when nobody in `to` or `cc`
+is left: a `bcc` is never sent as `to`, where the other hidden addresses
+would see it. Nothing else suppresses: not a
 full mailbox, not a delay, and not a refusal that is about the sender (a
 status of class 5.7: a failed signature, a policy, a blocklist), or one
 fault in the domain's setup would shut out everyone written to while it
@@ -285,7 +292,7 @@ The status tells a program what to do:
 | Status | Name | Meaning |
 |---|---|---|
 | 422 | `validation_error`, `rejected_by_upstream` | The request is at fault and will never succeed. Do not retry. |
-| 422 | `recipient_suppressed` | The address is on the sending domain's suppression list, or every address is when the email names several. Nothing was sent now. Do not retry; lift the suppression if it is wrong. If the answer has an `id`, an earlier try under the same `Idempotency-Key` got no answer from the provider and may have gone: the id is that try's. |
+| 422 | `recipient_suppressed` | The address is on the sending domain's suppression list, or every address in `to` and `cc` is when the email names several. Nothing was sent now. Do not retry; lift the suppression if it is wrong. If the answer has an `id`, an earlier try under the same `Idempotency-Key` got no answer from the provider and may have gone: the id is that try's. |
 | 409 | `invalid_idempotent_request` | The key was already used with a different request, which was sent. Do not retry. |
 | 409 | `concurrent_idempotent_requests` | A send under this key is in flight, or its answer has not come yet. Retry after `Retry-After`. |
 | 401, 403 | `missing_api_key`, `invalid_api_key`, `domain_not_allowed`, `admin_key_required` | The key is missing, wrong, or not allowed to do this. |

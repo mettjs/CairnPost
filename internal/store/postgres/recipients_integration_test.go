@@ -110,3 +110,111 @@ func TestAnEmailToSeveralAddressesIsOneEmail(t *testing.T) {
 		t.Fatalf("after pruning: %v", err)
 	}
 }
+
+// What follows from an email to several: a hidden copy never takes the
+// place of "to", who was left out is said again on a replay, a key is
+// freed only once the email failed at every address, an event that names
+// no address moves none, and a suppression names the email.
+func TestWhatFollowsFromAnEmailToSeveral(t *testing.T) {
+	ctx := context.Background()
+	db := open(t)
+	k := key(t, db)
+	keyID, domain, tag := k.ID, k.ID+".example.com", k.ID
+	gone := "gone-" + tag + "@example.org"
+	at := func(name string) string { return name + "-" + tag + "@example.org" }
+	if _, err := db.Suppress(ctx, store.Suppression{Domain: domain, Address: gone, Reason: store.ReasonManual}); err != nil {
+		t.Fatal(err)
+	}
+	send := func(idem string, rs ...store.Addressee) store.Claim {
+		t.Helper()
+		c, err := db.Start(ctx, store.Start{KeyID: keyID, Sender: "app@" + domain, Driver: "test", TTL: time.Hour, InDoubt: time.Hour,
+			IdemKey: idem, Fingerprint: []byte("f"), Recipients: rs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	event := func(id, up, kind, recipient string) store.Recorded {
+		t.Helper()
+		got, err := db.RecordEvent(ctx, store.Event{Driver: "test", UpstreamEventID: id + tag, UpstreamID: up, Kind: kind,
+			Permanent: kind == store.EventBounced, Code: "5.1.1", At: time.Now(), Sender: "app@" + domain, Recipient: recipient})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	to, cc, bcc := store.KindTo, store.KindCc, store.KindBcc
+	// With nobody left in the open, nothing is sent: a hidden copy sent
+	// as "to" would be shown to the other hidden ones.
+	if c := send("", store.Addressee{Address: gone, Kind: to}, store.Addressee{Address: at("b1"), Kind: bcc},
+		store.Addressee{Address: at("b2"), Kind: bcc}); c.Outcome != store.Suppressed || c.ID != "" {
+		t.Fatalf("with hidden copies alone left: %+v", c)
+	}
+	// A copy takes the place of "to", and is kept as what it went as.
+	idem := "k-" + tag
+	first := send(idem, store.Addressee{Address: gone, Kind: to}, store.Addressee{Address: at("y"), Kind: cc}, store.Addressee{Address: at("z"), Kind: bcc})
+	if first.Outcome != store.Started || len(first.Recipients) != 2 || first.Recipients[0] != (store.Addressee{Address: at("y"), Kind: to}) ||
+		first.Recipients[1].Kind != bcc || len(first.Dropped) != 1 {
+		t.Fatalf("a copy in the place of to: %+v", first)
+	}
+	up := "<follows-" + tag + ">"
+	if err := db.Sent(ctx, first.ID, up); err != nil {
+		t.Fatal(err)
+	}
+	m, err := db.Message(ctx, first.ID)
+	if err != nil || m.Kind != to || len(m.LeftOut) != 1 || m.LeftOut[0] != gone {
+		t.Fatalf("what is kept: %+v %v", m, err)
+	}
+	// The same request again says again who was left out.
+	if again := send(idem, store.Addressee{Address: gone, Kind: to}); again.Outcome != store.Replay || again.ID != first.ID ||
+		len(again.Dropped) != 1 || again.Dropped[0] != gone {
+		t.Fatalf("a replay: %+v", again)
+	}
+	// Failed at one address, the email still went to the other: its key
+	// is kept. Failed at both, it went to nobody, and the key is free.
+	if got := event("f1", up, store.EventFailed, at("y")); got != store.Kept {
+		t.Fatalf("a failure at the first address: %v", got)
+	}
+	if again := send(idem, store.Addressee{Address: at("y"), Kind: to}); again.Outcome != store.Replay {
+		t.Fatalf("the key was freed while one address was sent to: %+v", again)
+	}
+	if got := event("f2", up, store.EventFailed, at("z")); got != store.Kept {
+		t.Fatalf("a failure at the other address: %v", got)
+	}
+	if fresh := send(idem, store.Addressee{Address: at("y"), Kind: to}); fresh.Outcome != store.Started || fresh.ID == first.ID {
+		t.Fatalf("after it failed everywhere: %+v", fresh)
+	}
+	// An event that names no address is about none of several.
+	two := send("", store.Addressee{Address: at("p"), Kind: to}, store.Addressee{Address: at("q"), Kind: cc})
+	up2 := "<unnamed-" + tag + ">"
+	if err := db.Sent(ctx, two.ID, up2); err != nil {
+		t.Fatal(err)
+	}
+	if got := event("u1", up2, store.EventBounced, ""); got != store.NoMessage {
+		t.Fatalf("an event naming nobody: %v", got)
+	}
+	if m, _ := db.Message(ctx, two.ID); m.State != store.StateSent || m.Recipients[1].State != store.StateSent {
+		t.Fatalf("it moved an address: %+v", m)
+	}
+	// A bounce at a copy suppresses that address, and names the email.
+	if got := event("u2", up2, store.EventBounced, at("q")); got != store.Kept {
+		t.Fatalf("a bounce at the copy: %v", got)
+	}
+	list, err := db.ListSuppressions(ctx, domain, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range list {
+		if s.Address == at("q") {
+			found = s.MessageID == two.ID
+		}
+	}
+	if !found {
+		t.Fatalf("the suppression does not name the email %s: %+v", two.ID, list)
+	}
+	// An id is the same email however it is cased.
+	if m, err := db.Message(ctx, strings.ToUpper(two.ID)); err != nil || len(m.Recipients) != 2 {
+		t.Fatalf("by an id in capitals: %+v %v", m, err)
+	}
+}

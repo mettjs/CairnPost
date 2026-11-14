@@ -395,12 +395,29 @@ func TestASuppressedAddressAmongSeveralIsLeftOut(t *testing.T) {
 	if m := r.drv.last; !slices.Equal(m.To, []string{"cy@example.org"}) || !slices.Equal(m.Cc, []string{"bo@example.org"}) || len(m.Bcc) != 0 {
 		t.Fatalf("the driver was handed %+v", m)
 	}
+	// The copy that took the place of "to" is kept as "to", and who was
+	// left out is kept with the email.
 	m, _ := r.store.Message(ctx, sent.ID)
-	if m.Recipient != "cy@example.org" || len(m.Recipients) != 2 {
+	if m.Recipient != "cy@example.org" || m.Kind != store.KindTo || len(m.Recipients) != 2 ||
+		!slices.Equal(m.LeftOut, []string{"ANA@example.org", "di@example.org"}) {
 		t.Fatalf("what is kept: %+v", m)
 	}
 	req.To, req.Cc = []string{"ana@example.org"}, nil
 	if _, err := r.svc.Send(ctx, r.key, "cp_presented", req); !errors.Is(err, mail.ErrSuppressed) || r.drv.sends != 1 {
 		t.Fatalf("with every address suppressed: %v, %d sends", err, r.drv.sends)
+	}
+	// A hidden copy never takes the place of "to": the other hidden ones
+	// would see it. With nobody left in the open, nothing is sent.
+	req.Bcc = []string{"b1@example.org", "b2@example.org"}
+	if _, err := r.svc.Send(ctx, r.key, "cp_presented", req); !errors.Is(err, mail.ErrSuppressed) || r.drv.sends != 1 {
+		t.Fatalf("with hidden copies alone left: %v, %d sends", err, r.drv.sends)
+	}
+	// The same request again, under its key, says again who was left out.
+	keyed := request("k-left-out")
+	keyed.To = []string{"bo@example.org", "ana@example.org"}
+	first, err := r.svc.Send(ctx, r.key, "cp_presented", keyed)
+	again, err2 := r.svc.Send(ctx, r.key, "cp_presented", keyed)
+	if err != nil || err2 != nil || again.ID != first.ID || r.drv.sends != 2 || !slices.Equal(again.Suppressed, []string{"ana@example.org"}) {
+		t.Fatalf("a replay: %+v %+v %v %v, %d sends", first, again, err, err2, r.drv.sends)
 	}
 }

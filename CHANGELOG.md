@@ -14,7 +14,8 @@ Every change a user of CairnPost can notice is written here. The format is
   all, `CAIRNPOST_MAX_RECIPIENTS`). It is one email with one id, and
   `GET /emails/{id}` says under `recipients` what became of it at each
   address. A suppressed address among them is left out and named under
-  `suppressed` in the answer; the email is refused only when all are.
+  `suppressed`, in the answer and in `GET /emails/{id}`; the email is
+  refused when nobody in `to` or `cc` is left.
 - `GET /emails/{id}`: what became of an email (`sending`, `sent`, `deferred`,
   `delivered`, `bounced`, `complained`, `failed`, `unknown`) and each event
   that happened to it.

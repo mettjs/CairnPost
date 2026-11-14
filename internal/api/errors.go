@@ -61,8 +61,8 @@ func (a *app) failSend(w http.ResponseWriter, id string, err error) {
 			"This API key may only send from its own domain. Use a key for this domain, or change the from address.", ""}
 	case errors.Is(err, mail.ErrSuppressed):
 		p = problem{http.StatusUnprocessableEntity, "recipient_suppressed",
-			"This address is on the suppression list for the sending domain: an earlier email to it bounced for good " +
-				"or was marked as spam, or it was added by hand. Nothing was sent now. " +
+			"Every address this email names in \"to\" and \"cc\" is on the suppression list for the sending domain: " +
+				"an earlier email to it bounced for good or was marked as spam, or it was added by hand. Nothing was sent now. " +
 				"If that is wrong, an admin can lift it with POST /suppressions/lift.", id}
 		if id != "" {
 			p.Message += " An earlier try under this Idempotency-Key got no answer from the mail provider and may " +

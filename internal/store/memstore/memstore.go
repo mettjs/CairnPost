@@ -163,21 +163,19 @@ func (s *Store) email(m store.Message) store.Message {
 	return m
 }
 
-// newMessage records an email as sending, a row for each address that
-// is not suppressed, and answers its id and the addresses left out; ""
-// when none is left.
-func (s *Store) newMessage(st store.Start) (string, []string) {
+// newMessage records an email as sending, a row for each address it
+// goes to (store.Addressed), and answers its id, those addresses and
+// the ones left out; "" when nobody is left.
+func (s *Store) newMessage(st store.Start) (string, []store.Addressee, []string) {
 	now, email := s.Now(), ""
-	var dropped []string
-	for _, r := range st.Recipients {
-		if s.inForce(store.SuppressionKey(st.Sender, r.Address)) {
-			dropped = append(dropped, r.Address)
-			continue
-		}
+	kept, dropped := store.Addressed(st.Recipients, func(a store.Addressee) bool {
+		return s.inForce(store.SuppressionKey(st.Sender, a.Address))
+	})
+	for _, r := range kept {
 		m := store.Message{ID: s.next("msg"), KeyID: st.KeyID, Sender: st.Sender, Recipient: r.Address, Kind: r.Kind,
 			Driver: st.Driver, State: store.StateSending, CreatedAt: now, UpdatedAt: now}
 		if email == "" {
-			email = m.ID
+			email, m.LeftOut = m.ID, dropped
 		}
 		m.EmailID = email
 		s.messages[m.ID] = m
@@ -186,7 +184,7 @@ func (s *Store) newMessage(st store.Start) (string, []string) {
 	if email != "" && st.Content != nil {
 		s.contents[email] = content{raw: bytes.Clone(st.Content()), sent: now, expires: now.Add(st.KeepContent)}
 	}
-	return email, dropped
+	return email, kept, dropped
 }
 
 // content is words kept: an email's, or a receiving server's about it.
@@ -279,7 +277,8 @@ func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 	case row.done && !bytes.Equal(row.fingerprint, st.Fingerprint):
 		return store.Claim{Outcome: store.Mismatch}, nil
 	case row.done:
-		return store.Claim{Outcome: store.Replay, ID: row.messageID}, nil
+		// Who was left out the first time is said again.
+		return store.Claim{Outcome: store.Replay, ID: row.messageID, Dropped: s.messages[row.messageID].LeftOut}, nil
 	}
 	return store.Claim{Outcome: store.InFlight, RetryAfter: row.tried.Add(st.InDoubt).Sub(now)}, nil
 }
@@ -287,11 +286,11 @@ func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 // start records an email as sending, unless every address of it is
 // suppressed.
 func (s *Store) start(st store.Start) store.Claim {
-	id, dropped := s.newMessage(st)
+	id, kept, dropped := s.newMessage(st)
 	if id == "" {
 		return store.Claim{Outcome: store.Suppressed}
 	}
-	return store.Claim{Outcome: store.Started, ID: id, Dropped: dropped}
+	return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}
 }
 
 // Lost implements store.Mail.

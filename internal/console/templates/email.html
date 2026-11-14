@@ -13,8 +13,9 @@
   {{if not $several}}<div><dt>To</dt><dd class="long">{{.Data.Email.Recipient}}</dd></div>{{end}}
   <div><dt>From</dt><dd class="long">{{.Data.Email.Sender}}</dd></div>
   <div><dt>Sent</dt><dd><time datetime="{{stamp .Data.Email.CreatedAt}}">{{when $.Zone .Data.Email.CreatedAt}}</time></dd></div>
-  <div><dt>Last heard of</dt><dd><time datetime="{{stamp .Data.Email.UpdatedAt}}">{{when $.Zone .Data.Email.UpdatedAt}}</time></dd></div>
+  <div><dt>Last heard of</dt><dd><time datetime="{{stamp .Data.Email.Heard}}">{{when $.Zone .Data.Email.Heard}}</time></dd></div>
   <div><dt>Mail provider</dt><dd>{{.Data.Email.Driver}}</dd></div>
+  {{with .Data.Email.LeftOut}}<div><dt>Not sent to</dt><dd class="long">{{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}<br><span class="by">On the suppression list when the email was sent.</span></dd></div>{{end}}
 </dl>
 {{if $several}}
 <section aria-labelledby="went">

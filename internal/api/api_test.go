@@ -503,7 +503,8 @@ func TestAnEmailToSeveralIsOneIdWithEachAddress(t *testing.T) {
 	}
 	code, _, got := r.do("GET", "/emails/"+id, r.send, "", "")
 	all, _ := got["recipients"].([]any)
-	if code != 200 || got["to"] != "ana@example.org" || len(all) != 3 {
+	out, _ := got["suppressed"].([]any)
+	if code != 200 || got["to"] != "ana@example.org" || len(all) != 3 || len(out) != 1 || out[0] != "gone@example.org" {
 		t.Fatalf("the email: %d %v", code, got)
 	}
 	for i, want := range [][2]string{{"ana@example.org", "to"}, {"bo@example.org", "cc"}, {"cy@example.org", "bcc"}} {
@@ -515,5 +516,12 @@ func TestAnEmailToSeveralIsOneIdWithEachAddress(t *testing.T) {
 	// A send to everyone answers no list of those left out.
 	if _, _, whole := r.do("POST", "/emails", r.send, "", good); whole["suppressed"] != nil {
 		t.Errorf("a send to all its addresses says some were left out: %v", whole)
+	}
+	// A list a client left empty, written as null or "", is no address.
+	if code, _, got := r.do("POST", "/emails", r.send, "", `{"from":"app@example.com","to":"ana@example.org","cc":null,"bcc":"","subject":"s","text":"t"}`); code != 200 {
+		t.Errorf("with empty lists: %d %v", code, got)
+	}
+	if code, name, _ := r.do("POST", "/emails", r.send, "", `{"from":"app@example.com","to":null,"subject":"s","text":"t"}`); code != 422 || name != "validation_error" {
+		t.Errorf("with no to: %d %s", code, name)
 	}
 }

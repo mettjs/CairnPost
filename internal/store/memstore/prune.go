@@ -152,7 +152,7 @@ func (s *Store) PruneMessages(_ context.Context, before time.Time, limit int) (i
 			row.MessageID = ""
 		}
 	}
-	return len(gone), nil
+	return emails, nil
 }
 
 // PruneLifted implements store.Pruning.

@@ -30,11 +30,11 @@ func (db *DB) Message(ctx context.Context, id string) (store.Message, error) {
 
 // messageColumns are a message's row, as scanMessage reads it.
 const messageColumns = `m.id::text, m.email_id::text, m.api_key_id::text, m.sender, m.recipient, m.kind, m.driver,
-	coalesce(m.upstream_id, ''), m.state, m.created_at, m.updated_at`
+	coalesce(m.upstream_id, ''), m.state, m.created_at, m.updated_at, m.left_out`
 
 func scanMessage(row pgx.Row) (store.Message, error) {
 	var m store.Message
-	err := row.Scan(&m.ID, &m.EmailID, &m.KeyID, &m.Sender, &m.Recipient, &m.Kind, &m.Driver, &m.UpstreamID, &m.State, &m.CreatedAt, &m.UpdatedAt)
+	err := row.Scan(&m.ID, &m.EmailID, &m.KeyID, &m.Sender, &m.Recipient, &m.Kind, &m.Driver, &m.UpstreamID, &m.State, &m.CreatedAt, &m.UpdatedAt, &m.LeftOut)
 	return m, err
 }
 
@@ -48,8 +48,9 @@ func email(ctx context.Context, q querier, id string) (store.Message, error) {
 	if err != nil {
 		return store.Message{}, err
 	}
-	of, err := recipientsOf(ctx, q, []string{id})
-	m.Recipients = of[id]
+	// By the id as the database writes it, whatever case it was asked in.
+	of, err := recipientsOf(ctx, q, []string{m.ID})
+	m.Recipients = of[m.ID]
 	return m, err
 }
 
@@ -146,50 +147,55 @@ func markUnknown(ctx context.Context, q execer, happened bool, ids ...string) er
 }
 
 // insertMessage records an email as sending, a row for each address,
-// and answers its id. It is the one way a send starts, so it is where a
-// suppressed address is left out: the email goes to the others, and the
-// addresses left out are answered. With none left it records nothing
-// and answers "".
+// and answers its id with who it goes to. It is the one way a send
+// starts, so it is where a suppressed address is left out (store.Addressed):
+// the email goes to the others, and the addresses left out are kept
+// with it and answered. With nobody left it records nothing and
+// answers "".
 //
 // The list is read here, when the send starts, and not again: a send
 // started in the second or so before a bounce is recorded still goes.
-func insertMessage(ctx context.Context, tx pgx.Tx, s store.Start) (string, []string, error) {
+func insertMessage(ctx context.Context, tx pgx.Tx, s store.Start) (string, []store.Addressee, []string, error) {
 	domain := store.DomainOf(s.Sender)
-	var addresses, kinds, folded []string
-	for _, r := range s.Recipients {
-		_, key := store.SuppressionKey(s.Sender, r.Address)
-		addresses, kinds, folded = append(addresses, r.Address), append(kinds, r.Kind), append(folded, key)
+	folded := make([]string, len(s.Recipients))
+	for i, r := range s.Recipients {
+		_, folded[i] = store.SuppressionKey(s.Sender, r.Address)
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT w.n FROM unnest($2::text[]) WITH ORDINALITY AS w(address, n)
-		WHERE EXISTS (SELECT 1 FROM suppressions s WHERE s.domain = $1 AND s.address = w.address AND s.lifted_at IS NULL)
-		ORDER BY w.n`, domain, folded)
+		SELECT DISTINCT w.address FROM unnest($2::text[]) AS w(address)
+		WHERE EXISTS (SELECT 1 FROM suppressions s WHERE s.domain = $1 AND s.address = w.address AND s.lifted_at IS NULL)`, domain, folded)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	out, err := pgx.CollectRows(rows, pgx.RowTo[int])
+	listed, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	var dropped []string
-	for i := len(out) - 1; i >= 0; i-- {
-		at := out[i] - 1
-		dropped = append([]string{addresses[at]}, dropped...)
-		addresses, kinds = slices.Delete(addresses, at, at+1), slices.Delete(kinds, at, at+1)
+	kept, dropped := store.Addressed(s.Recipients, func(a store.Addressee) bool {
+		_, key := store.SuppressionKey(s.Sender, a.Address)
+		return slices.Contains(listed, key)
+	})
+	if len(kept) == 0 {
+		return "", nil, dropped, nil
 	}
-	if len(addresses) == 0 {
-		return "", dropped, nil
+	addresses, kinds := make([]string, len(kept)), make([]string, len(kept))
+	for i, a := range kept {
+		addresses[i], kinds[i] = a.Address, a.Kind
+	}
+	if dropped == nil {
+		dropped = []string{}
 	}
 	// The email's id is its first row's: made first, so it is the oldest.
 	var id string
 	err = tx.QueryRow(ctx, `
 		WITH email AS (SELECT uuidv7() AS id)
-		INSERT INTO messages (id, email_id, api_key_id, sender, recipient, kind, driver, state, sender_domain)
-		SELECT CASE WHEN w.n = 1 THEN email.id ELSE uuidv7() END, email.id, $1::uuid, $2, w.recipient, w.kind, $5, 'sending', $6
+		INSERT INTO messages (id, email_id, api_key_id, sender, recipient, kind, driver, state, sender_domain, left_out)
+		SELECT CASE WHEN w.n = 1 THEN email.id ELSE uuidv7() END, email.id, $1::uuid, $2, w.recipient, w.kind, $5, 'sending', $6,
+		       CASE WHEN w.n = 1 THEN $7::text[] ELSE '{}' END
 		FROM email, unnest($3::text[], $4::text[]) WITH ORDINALITY AS w(recipient, kind, n)
-		RETURNING email_id::text`, s.KeyID, s.Sender, addresses, kinds, s.Driver, domain).Scan(&id)
+		RETURNING email_id::text`, s.KeyID, s.Sender, addresses, kinds, s.Driver, domain, dropped).Scan(&id)
 	if err != nil || s.Content == nil {
-		return id, dropped, err
+		return id, kept, dropped, err
 	}
 	// With its message, in the one step: a message is never without the
 	// content it was to be kept with, and a send that is rolled back
@@ -197,7 +203,7 @@ func insertMessage(ctx context.Context, tx pgx.Tx, s store.Start) (string, []str
 	_, err = tx.Exec(ctx, `
 		INSERT INTO message_contents (message_id, content, expires_at)
 		VALUES ($1::uuid, $2, now() + make_interval(secs => $3))`, id, s.Content(), s.KeepContent.Seconds())
-	return id, dropped, err
+	return id, kept, dropped, err
 }
 
 // Content implements store.Mail. Its age is read on the database's clock.
