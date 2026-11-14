@@ -13,7 +13,7 @@
 <body>
 {{if .Who}}
 <header class="band">
-  <a class="mark" href="{{.Root}}/">{{template "cairn"}}CairnPost</a>
+  <a class="mark" href="{{.Root}}/">{{template "cairn"}}<span class="word">Cairn<b>Post</b></span></a>
   <p class="pulse{{if .Pulse.Failing}} pulse-failing{{end}}">{{if .Pulse.Failing}}{{template "ico" "failing"}}{{else}}{{template "ico" "ok"}}{{end}}<a href="{{.Root}}/#server">{{.Pulse.Says}}</a></p>
   <form class="who" method="post" action="{{.Root}}/signout">
     <span class="who-name" title="The key you are signed in with">{{.Who.Name}}</span>

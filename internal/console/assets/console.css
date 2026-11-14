@@ -111,14 +111,17 @@ code {
   background: var(--band); color: var(--on-band);
 }
 
-.mark {
-  display: flex; align-items: center; gap: 0.5rem;
-  font: 700 14px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--on-band); text-decoration: none;
-}
-.mark svg { width: 22px; height: 22px; fill: var(--on-band); }
-.mark .top { fill: var(--hi); }
-.mark .flap { fill: none; stroke: var(--band); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+/* The name, as the logo writes it: "Cairn" plain, the tool's name bold,
+   beside the cairn whose top stone is the tool's. */
+.mark { display: flex; align-items: center; gap: 0.55rem; color: var(--on-band); text-decoration: none; }
+.word { font: 400 1.2rem/1 var(--sans); letter-spacing: -0.03em; }
+.word b { font-weight: 800; }
+.mark svg, .brand svg { width: 26px; height: 26px; flex: none; fill: currentColor; }
+.mark .top, .brand .top { fill: var(--hi); }
+.mark .flap, .brand .flap { fill: none; stroke: var(--on-hi); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.brand { display: flex; align-items: center; gap: 0.7rem; }
+.brand .word { font-size: 2.25rem; }
+.brand svg { width: 46px; height: 46px; }
 
 .pulse { display: flex; align-items: center; gap: 0.45rem; margin: 0; font-size: 14px; color: var(--on-band); }
 .pulse a { color: inherit; font-weight: 400; text-decoration: none; }
