@@ -79,7 +79,7 @@ func (r *rig) bounceOf(up, to string) { r.t.Helper(); r.bounceFrom("example.com"
 func (r *rig) bounceFrom(domain, up, to string) {
 	r.t.Helper()
 	ctx := context.Background()
-	c, err := r.store.Start(ctx, store.Start{KeyID: "k", Sender: "app@" + domain, Recipient: to, Driver: "fake"})
+	c, err := r.store.Start(ctx, store.Start{KeyID: "k", Sender: "app@" + domain, Recipients: store.To(to), Driver: "fake"})
 	if err != nil || c.Outcome != store.Started {
 		r.t.Fatalf("%v %v", c.Outcome, err)
 	}
@@ -306,7 +306,7 @@ func TestSuppressedSaysWhatIsSo(t *testing.T) {
 	r, app := newRig(t, true), newReceiver(t)
 	ctx := context.Background()
 	r.svc.Create(ctx, "", webhook.New{URL: app.srv.URL})
-	late := store.Start{KeyID: "k", Sender: "app@example.com", Recipient: "ana@example.org", Driver: "fake"}
+	late := store.Start{KeyID: "k", Sender: "app@example.com", Recipients: store.To("ana@example.org"), Driver: "fake"}
 	c, _ := r.store.Start(ctx, late) // sent before the first bounce is known
 	r.store.Sent(ctx, c.ID, "up-late")
 	r.bounceOf("up-first", "ana@example.org")
@@ -324,5 +324,36 @@ func TestSuppressedSaysWhatIsSo(t *testing.T) {
 	if len(app.bodies) != 2 || !strings.Contains(app.bodies[0], `"suppressed":true`) ||
 		!strings.Contains(app.bodies[1], `"suppressed":false`) || !strings.Contains(app.bodies[1], `"type":"Permanent"`) {
 		t.Fatalf("%v", app.bodies)
+	}
+}
+
+// A webhook about an email that went to several names the email by its
+// one id and says which address it is about.
+func TestAWebhookAboutOneOfSeveralAddressesNamesTheEmailAndTheAddress(t *testing.T) {
+	r, app := newRig(t, true), newReceiver(t)
+	ctx := context.Background()
+	e, err := r.svc.Create(ctx, "", webhook.New{URL: app.srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.store.Start(ctx, store.Start{KeyID: "k", Sender: "app@example.com", Driver: "fake",
+		Recipients: []store.Addressee{{Address: "ana@example.org", Kind: store.KindTo}, {Address: "bo@example.org", Kind: store.KindBcc}}})
+	if err != nil || c.Outcome != store.Started {
+		t.Fatalf("%v %v", c.Outcome, err)
+	}
+	r.store.Sent(ctx, c.ID, "up-several")
+	if got, err := r.store.RecordEvent(ctx, store.Event{Driver: "fake", UpstreamEventID: "e-several", UpstreamID: "up-several",
+		Kind: store.EventBounced, Permanent: true, Code: "5.1.1", At: r.now, Recipient: "Bo@example.org"}); err != nil || got != store.Kept {
+		t.Fatalf("%v %v", got, err)
+	}
+	if n := r.pass(); n != 1 || len(app.bodies) != 1 {
+		t.Fatalf("%d taken, %d received", n, len(app.bodies))
+	}
+	if body := app.bodies[0]; !strings.Contains(body, `"email_id":"`+c.ID+`"`) || !strings.Contains(body, `"to":["bo@example.org"]`) ||
+		strings.Contains(body, "ana@example.org") {
+		t.Fatalf("the webhook: %s", body)
+	}
+	if list := r.deliveries(e.ID); len(list) != 1 || list[0].MessageID != c.ID {
+		t.Fatalf("the delivery names %+v, want the email %s", list, c.ID)
 	}
 }

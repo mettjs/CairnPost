@@ -135,16 +135,27 @@ func (db *DB) Horizon(ctx context.Context, keep time.Duration) (time.Time, error
 func (db *DB) PruneMessages(ctx context.Context, before time.Time, limit int) (int, error) {
 	n := 0
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		// An email goes whole, once nothing has come of any address of
+		// it since: its first row is taken, and the others with it.
 		rows, err := tx.Query(ctx, `
 			SELECT m.id::text FROM messages m
-			WHERE m.updated_at <= $1
+			WHERE m.updated_at <= $1 AND m.email_id = m.id
+			  AND NOT EXISTS (SELECT 1 FROM messages r WHERE r.email_id = m.id AND r.updated_at > $1)
 			  AND NOT EXISTS (SELECT 1 FROM idempotency_keys k WHERE k.message_id = m.id)
 			ORDER BY m.updated_at LIMIT $2 FOR UPDATE OF m SKIP LOCKED`, before, limit)
 		if err != nil {
 			return err
 		}
+		emails, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil || len(emails) == 0 {
+			return err
+		}
+		rows, err = tx.Query(ctx, `SELECT id::text FROM messages WHERE email_id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, emails)
+		if err != nil {
+			return err
+		}
 		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		if err != nil || len(ids) == 0 {
+		if err != nil {
 			return err
 		}
 		// The suppressions these messages caused let go of them. Their rows

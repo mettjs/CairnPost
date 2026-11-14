@@ -40,6 +40,11 @@ var helpers = template.FuncMap{
 	"meaning":  func(state string) string { return wordsOf(state).Meaning },
 	"tone":     func(state string) string { return wordsOf(state).Tone },
 	"happened": happened,
+	// An email that went to several: what became of it at each, and
+	// what a kind of recipient is called.
+	"outcomes": outcomes,
+	"kind":     func(kind string) string { return kindWords[kind] },
+	"minus":    func(a, b int) int { return a - b },
 	// A reason an address is suppressed for, as a label and in a sentence.
 	"why":     why,
 	"because": because,

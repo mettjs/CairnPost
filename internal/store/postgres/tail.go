@@ -13,7 +13,7 @@ import (
 // EventsAfter implements store.Events. An event's id is made when it is
 // recorded and ids are in time order, so "after" is "with a greater id".
 func (db *DB) EventsAfter(ctx context.Context, after, domain string, limit int) ([]store.Event, error) {
-	const columns = `e.id::text, e.message_id::text, e.driver, e.kind, e.permanent, coalesce(e.code, ''),
+	const columns = `e.id::text, m.email_id::text, e.driver, e.kind, e.permanent, coalesce(e.code, ''),
 		coalesce(e.reason, ''), e.occurred_at, m.sender, m.recipient`
 	query, args, newest := `
 		SELECT `+columns+` FROM events e JOIN messages m ON m.id = e.message_id

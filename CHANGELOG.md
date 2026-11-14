@@ -8,8 +8,13 @@ Every change a user of CairnPost can notice is written here. The format is
 
 ### Added
 
-- `POST /emails`: send one email to one recipient with an API key. A request
-  with an `Idempotency-Key` repeated with the same content is one email.
+- `POST /emails`: send one email with an API key. A request with an
+  `Idempotency-Key` repeated with the same content is one email.
+- Several addresses: `to`, `cc` and `bcc` take one address or a list (50 in
+  all, `CAIRNPOST_MAX_RECIPIENTS`). It is one email with one id, and
+  `GET /emails/{id}` says under `recipients` what became of it at each
+  address. A suppressed address among them is left out and named under
+  `suppressed` in the answer; the email is refused only when all are.
 - `GET /emails/{id}`: what became of an email (`sending`, `sent`, `deferred`,
   `delivered`, `bounced`, `complained`, `failed`, `unknown`) and each event
   that happened to it.

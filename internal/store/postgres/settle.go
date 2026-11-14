@@ -115,9 +115,9 @@ func (db *DB) ListDeliveries(ctx context.Context, endpointID, state, before stri
 		return nil, nil
 	}
 	rows, err := db.pool.Query(ctx, `
-		SELECT d.id::text, d.endpoint_id::text, coalesce(ev.kind, $5), coalesce(ev.message_id::text, ''), d.state, d.attempts, d.next_at,
+		SELECT d.id::text, d.endpoint_id::text, coalesce(ev.kind, $5), coalesce(m.email_id::text, ''), d.state, d.attempts, d.next_at,
 		       coalesce(d.last_status, 0), coalesce(d.last_failure, ''), d.created_at, d.attempted_at, d.delivered_at
-		FROM webhook_deliveries d LEFT JOIN events ev ON ev.id = d.event_id
+		FROM webhook_deliveries d LEFT JOIN events ev ON ev.id = d.event_id LEFT JOIN messages m ON m.id = ev.message_id
 		WHERE d.endpoint_id = $1::uuid AND ($2 = '' OR d.state = $2) AND ($3 = '' OR d.id < nullif($3, '')::uuid)
 		ORDER BY d.id DESC LIMIT $4`, endpointID, state, before, limit, store.KindSuppressed)
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
-// recipients reads "to" as one address or a list of them.
+// recipients reads "to", "cc" or "bcc" as one address or a list of them.
 type recipients []string
 
 func (r *recipients) UnmarshalJSON(raw []byte) error {
@@ -21,7 +21,7 @@ func (r *recipients) UnmarshalJSON(raw []byte) error {
 	}
 	var many []string
 	if err := json.Unmarshal(raw, &many); err != nil {
-		return errors.New("to must be an address or a list of addresses")
+		return errors.New("must be an address or a list of addresses")
 	}
 	*r = many
 	return nil
@@ -30,6 +30,8 @@ func (r *recipients) UnmarshalJSON(raw []byte) error {
 type sendBody struct {
 	From    string            `json:"from"`
 	To      recipients        `json:"to"`
+	Cc      recipients        `json:"cc"`
+	Bcc     recipients        `json:"bcc"`
 	ReplyTo string            `json:"reply_to"`
 	Subject string            `json:"subject"`
 	HTML    string            `json:"html"`
@@ -37,45 +39,70 @@ type sendBody struct {
 	Headers map[string]string `json:"headers"`
 }
 
-// sendEmail is POST /emails: one email to one recipient. It answers once
-// the mail provider has taken the email, with the email's id.
+// sendEmail is POST /emails: one email, to one address or several. It
+// answers once the mail provider has taken the email, with the email's
+// id, and with the addresses it was not sent to because they are
+// suppressed, if any were.
 func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 	var body sendBody
 	if !a.body(w, r, &body, "The body must be JSON with from, to, subject and html or text; "+
-		"reply_to and headers are optional. No other field is supported.") {
+		"cc, bcc, reply_to and headers are optional. No other field is supported.") {
 		return
 	}
 	c := callerOf(r)
-	id, err := a.Mail.Send(r.Context(), c.key, c.presented, mail.Request{
-		From: body.From, To: body.To, ReplyTo: body.ReplyTo, Subject: body.Subject,
+	sent, err := a.Mail.Send(r.Context(), c.key, c.presented, mail.Request{
+		From: body.From, To: body.To, Cc: body.Cc, Bcc: body.Bcc, ReplyTo: body.ReplyTo, Subject: body.Subject,
 		HTML: body.HTML, Text: body.Text, Headers: body.Headers,
 		IdemKey: r.Header.Get("Idempotency-Key"),
 	})
 	if err != nil {
-		a.failSend(w, id, err)
+		a.failSend(w, sent.ID, err)
 		return
 	}
-	write(w, http.StatusOK, map[string]string{"id": id})
+	write(w, http.StatusOK, sentView{sent.ID, sent.Suppressed})
+}
+
+// sentView is what a send answers.
+type sentView struct {
+	ID string `json:"id"`
+	// Suppressed are the addresses the email was not sent to, because
+	// they are on the sending domain's suppression list; left out when
+	// it went to all of them.
+	Suppressed []string `json:"suppressed,omitempty"`
 }
 
 type emailView struct {
-	ID        string      `json:"id"`
-	From      string      `json:"from"`
-	To        string      `json:"to"`
-	State     string      `json:"state"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
-	Events    []eventView `json:"events"`
+	ID   string `json:"id"`
+	From string `json:"from"`
+	// To is the first address the email was sent to, and State what
+	// became of it there. Recipients has every address and its own.
+	To         string          `json:"to"`
+	State      string          `json:"state"`
+	Recipients []recipientView `json:"recipients"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+	Events     []eventView     `json:"events"`
 	// Content is what the email said: there only where the operator keeps
 	// it, while it is kept, and for an admin key that may see the sending
 	// domain.
 	Content *mail.Content `json:"content,omitempty"`
 }
 
+// recipientView is one address of an email and what became of it there.
+type recipientView struct {
+	Address string `json:"address"`
+	// Kind is "to", "cc" or "bcc".
+	Kind      string    `json:"kind"`
+	State     string    `json:"state"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // eventView is one thing that happened to an email after it was sent.
 type eventView struct {
 	Type string    `json:"type"`
 	At   time.Time `json:"at"`
+	// To is the address it happened at.
+	To string `json:"to"`
 	// Permanent says, for a bounce, that the address will never take mail.
 	Permanent bool `json:"permanent,omitempty"`
 	// Code is the receiving server's status ("5.1.1"); Reason the mail
@@ -101,7 +128,14 @@ func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "unavailable", "The email could not be read. Try again shortly.")
 	default:
 		// Times are answered in UTC, whatever zone the server runs in.
-		view := emailView{m.ID, m.Sender, m.Recipient, m.State, m.CreatedAt.UTC(), m.UpdatedAt.UTC(), []eventView{}, nil}
+		view := emailView{ID: m.ID, From: m.Sender, To: m.Recipient, State: m.State, Recipients: []recipientView{},
+			CreatedAt: m.CreatedAt.UTC(), UpdatedAt: m.UpdatedAt.UTC(), Events: []eventView{}}
+		for _, r := range m.Recipients {
+			view.Recipients = append(view.Recipients, recipientView{r.Address, r.Kind, r.State, r.UpdatedAt.UTC()})
+			if r.UpdatedAt.After(view.UpdatedAt) {
+				view.UpdatedAt = r.UpdatedAt.UTC() // the email's is its latest address's
+			}
+		}
 		// What it said is for whoever runs CairnPost: an admin key. A
 		// send key is never shown it, not even for its own emails. If it
 		// cannot be read, the record is answered without it.
@@ -117,7 +151,7 @@ func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, e := range events {
-			view.Events = append(view.Events, eventView{e.Kind, e.At.UTC(), e.Permanent, e.Code, e.Reason, said[e.ID]})
+			view.Events = append(view.Events, eventView{e.Kind, e.At.UTC(), e.Recipient, e.Permanent, e.Code, e.Reason, said[e.ID]})
 		}
 		write(w, http.StatusOK, view)
 	}
@@ -129,7 +163,9 @@ type CapturedEmail struct {
 	At       time.Time         `json:"at"`
 	From     string            `json:"from"`
 	FromName string            `json:"from_name,omitempty"`
-	To       string            `json:"to"`
+	To       []string          `json:"to"`
+	Cc       []string          `json:"cc,omitempty"`
+	Bcc      []string          `json:"bcc,omitempty"`
 	ReplyTo  string            `json:"reply_to,omitempty"`
 	Subject  string            `json:"subject"`
 	HTML     string            `json:"html,omitempty"`

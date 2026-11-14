@@ -68,7 +68,7 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 
 | Call | Does |
 |---|---|
-| `POST /emails` | Send one email to one recipient. Answers `{"id": "..."}` once the provider has taken it. |
+| `POST /emails` | Send one email, to one address or several. Answers `{"id": "..."}` once the provider has taken it, with `suppressed` naming any address it was not sent to. |
 | `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any, or its sending domain's if it is bound to one. Where content is kept, an admin key also sees what the email said, as `content`. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
 | `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
@@ -88,8 +88,16 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent and old records pruned. |
 
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both;
-`reply_to` and `headers` are optional. Any other field is refused, never
-silently dropped.
+`cc`, `bcc`, `reply_to` and `headers` are optional. Any other field is
+refused, never silently dropped.
+
+**Several addresses.** `to`, `cc` and `bcc` each take one address or a list
+of them: 50 in all unless `CAIRNPOST_MAX_RECIPIENTS` says otherwise, one
+`to` at least, no address twice. It is one email with one id, and each
+address has an outcome of its own: `GET /emails/{id}` lists them under
+`recipients`, each with its `kind` (`to`, `cc`, `bcc`) and its `state`.
+The email's own `to` and `state` are those of its first address. An event
+says which address it is about in `to`, and a webhook does the same.
 
 **An email's state**, from `GET /emails/{id}`:
 
@@ -115,7 +123,10 @@ email, so it is kept only where content is (see "What an email said").
 bounce), or its owner marks an email as spam, CairnPost stops sending to
 that address from that sending domain: writing there again only harms the
 domain's standing with mail providers. A send to it answers 422
-`recipient_suppressed` and nothing is sent. Nothing else suppresses: not a
+`recipient_suppressed` and nothing is sent. When an email names several
+addresses and some are suppressed, it goes to the others, and the answer
+lists the ones left out under `suppressed`; it is refused only when every
+address is. Nothing else suppresses: not a
 full mailbox, not a delay, and not a refusal that is about the sender (a
 status of class 5.7: a failed signature, a policy, a blocklist), or one
 fault in the domain's setup would shut out everyone written to while it
@@ -274,7 +285,7 @@ The status tells a program what to do:
 | Status | Name | Meaning |
 |---|---|---|
 | 422 | `validation_error`, `rejected_by_upstream` | The request is at fault and will never succeed. Do not retry. |
-| 422 | `recipient_suppressed` | The address is on the sending domain's suppression list. Nothing was sent now. Do not retry; lift the suppression if it is wrong. If the answer has an `id`, an earlier try under the same `Idempotency-Key` got no answer from the provider and may have gone: the id is that try's. |
+| 422 | `recipient_suppressed` | The address is on the sending domain's suppression list, or every address is when the email names several. Nothing was sent now. Do not retry; lift the suppression if it is wrong. If the answer has an `id`, an earlier try under the same `Idempotency-Key` got no answer from the provider and may have gone: the id is that try's. |
 | 409 | `invalid_idempotent_request` | The key was already used with a different request, which was sent. Do not retry. |
 | 409 | `concurrent_idempotent_requests` | A send under this key is in flight, or its answer has not come yet. Retry after `Retry-After`. |
 | 401, 403 | `missing_api_key`, `invalid_api_key`, `domain_not_allowed`, `admin_key_required` | The key is missing, wrong, or not allowed to do this. |
@@ -367,7 +378,8 @@ manage the suppression list and the webhook endpoints, check each sending
 domain's DNS, and list, make and revoke API keys. A new key is shown once,
 on the page that made it.
 
-- The first page counts an email in the hour or day it was sent,
+- The first page counts each address an email went to, as the metrics
+  do: an email to three is three. It counts one in the hour or day it was sent,
   whenever its outcome came, and compares the period, up to its last
   whole hour, with the same stretch one period earlier. Emails the mail
   provider refused, or gave no answer about, are said apart.
@@ -398,7 +410,9 @@ on the page that made it.
   domain's keys only, and sees that domain's emails, suppressions and
   webhook endpoints only.
 - Emails are listed newest first, a hundred to a page, and can be narrowed
-  to a state and to one recipient. The address you look for is kept with
+  to a state and to one recipient. An email to several addresses is one
+  row that says how many more it went to, and its page shows what became
+  of it at each. The address you look for is kept with
   your session on the server; the page's address carries only a random
   handle for it. So the address is in no proxy's log and not in the
   browser's history, it is forgotten when the session ends or when you
@@ -467,7 +481,8 @@ cairnpost version               print the version
 `keys`, `suppressions`, `webhooks`, `tail` and `migrate` work on the database directly, so they run where the
 server runs. `tail` shows the last delivery events and then each new one
 (`-domain` for one sending domain's, `-last` for how many to begin with,
-`-once` to stop after them). A key has a scope, `send` or `admin`, and may be bound to one
+`-once` to stop after them). `send` takes `-to`, `-cc` and `-bcc`, each
+one address or several with commas between. A key has a scope, `send` or `admin`, and may be bound to one
 sending domain with `--domain`.
 
 `domains check` reads public DNS only: it needs no database and no
@@ -502,6 +517,7 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. It is also how long a send may stay `sending` before it is taken to be abandoned (by a server that stopped in the middle of it) and set to `unknown`: looked for that often, so within twice this time, and never sooner than `CAIRNPOST_SEND_TIMEOUT` plus a minute. |
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
+| `CAIRNPOST_MAX_RECIPIENTS` | `50` | How many addresses one email may name, counting `to`, `cc` and `bcc` (1 to 1000). Set it to what the provider takes or below. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
 | `CAIRNPOST_DNS_TIMEOUT` | `6s` | The most one check of a domain's DNS records may take, in the console and in `domains check`: a second at least, a minute at most. Raise it where the first DNS server is slow to answer. |
 | `CAIRNPOST_DNS_SERVER` | the system's | The one DNS server those checks ask, as an IP address with or without a port (`1.1.1.1`). Set it where the machine's own resolver does not answer as the public internet does: a home router that makes up answers, or one that is silent about names that do not exist. |

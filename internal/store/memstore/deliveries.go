@@ -63,7 +63,10 @@ func (s *Store) TakeDeliveries(_ context.Context, max, perEndpoint int, busy []s
 		d.Attempts, d.AttemptedAt, d.taken = d.Attempts+1, &now, &until
 		due := store.Due{Delivery: d.Delivery, Endpoint: s.shown(end), Suppression: d.about}
 		if d.about == nil {
+			// The email is named by its own id, and the address is the
+			// one the event is about.
 			due.Event, due.Message = d.event, s.messages[d.MessageID]
+			due.Message.ID, due.Delivery.MessageID, due.Event.MessageID = due.Message.EmailID, due.Message.EmailID, due.Message.EmailID
 		}
 		out = append(out, due)
 	}
@@ -151,7 +154,11 @@ func (s *Store) ListDeliveries(_ context.Context, endpointID, state, before stri
 		d := s.deliveries[i]
 		// By id, not by meeting the row named: it may have been pruned.
 		if (before == "" || d.ID < before) && d.EndpointID == endpointID && (state == "" || d.State == state) {
-			out = append(out, d.Delivery)
+			shown := d.Delivery
+			if m, kept := s.messages[shown.MessageID]; kept {
+				shown.MessageID = m.EmailID
+			}
+			out = append(out, shown)
 		}
 	}
 	return out, nil

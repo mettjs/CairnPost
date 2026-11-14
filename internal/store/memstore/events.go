@@ -12,12 +12,7 @@ import (
 func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var m store.Message
-	for _, candidate := range s.messages {
-		if candidate.Driver == e.Driver && candidate.UpstreamID == e.UpstreamID && e.UpstreamID != "" {
-			m = candidate
-		}
-	}
+	m := s.about(e)
 	reason, suppresses := store.SuppressionFor(e.Kind, e.Permanent, e.Code)
 	// A lifted suppression comes back only for an email sent after the lift.
 	since := func(sent time.Time) func(time.Time) bool {
@@ -100,11 +95,36 @@ func (s *Store) Details(_ context.Context, messageID string, keep time.Duration)
 	out := map[string]string{}
 	for _, e := range s.events {
 		d, kept := s.details[e.ID]
-		if _, shown := d.shown(s.Now(), keep); kept && shown && e.MessageID == messageID {
+		if _, shown := d.shown(s.Now(), keep); kept && shown && s.messages[e.MessageID].EmailID == messageID {
 			out[e.ID] = string(d.raw)
 		}
 	}
 	return out, nil
+}
+
+// about is the row an event is about: of the address it names; of the
+// email's first, for one that names none or whose email went to one
+// address; none ("" id), for an address the email did not go to.
+func (s *Store) about(e store.Event) store.Message {
+	var first store.Message
+	if e.UpstreamID == "" {
+		return first
+	}
+	for _, m := range s.messages {
+		if m.Driver != e.Driver || m.UpstreamID != e.UpstreamID {
+			continue
+		}
+		if e.Recipient != "" && store.FoldASCII(m.Recipient) == store.FoldASCII(e.Recipient) {
+			return m
+		}
+		if m.ID == m.EmailID {
+			first = m
+		}
+	}
+	if e.Recipient != "" && first.ID != "" && len(s.rows(first.EmailID)) > 1 {
+		return store.Message{}
+	}
+	return first
 }
 
 // EventsOf implements store.Events.
@@ -113,7 +133,8 @@ func (s *Store) EventsOf(_ context.Context, messageID string) ([]store.Event, er
 	defer s.mu.Unlock()
 	var out []store.Event
 	for _, e := range s.events {
-		if e.MessageID == messageID {
+		if m := s.messages[e.MessageID]; m.EmailID == messageID {
+			e.Recipient = m.Recipient
 			out = append(out, e)
 		}
 	}
@@ -131,7 +152,7 @@ func (s *Store) EventsAfter(_ context.Context, after, domain string, limit int) 
 	for _, e := range s.events {
 		m := s.messages[e.MessageID]
 		if seen && (domain == "" || store.DomainOf(m.Sender) == domain) {
-			e.Sender, e.Recipient = m.Sender, m.Recipient
+			e.Sender, e.Recipient, e.MessageID = m.Sender, m.Recipient, m.EmailID
 			out = append(out, e)
 		}
 		if e.ID == after {

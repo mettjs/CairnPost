@@ -157,7 +157,7 @@ func TestTheOverviewSaysWhatWasNotSent(t *testing.T) {
 	r := newRig(t, func(d *console.Deps) { d.Events = healthy })
 	ctx := context.Background()
 	for i := range 3 {
-		c, err := r.s.Start(ctx, store.Start{KeyID: r.sendKey.ID, Sender: "app@example.com", Recipient: fmt.Sprintf("no-%d@example.org", i),
+		c, err := r.s.Start(ctx, store.Start{KeyID: r.sendKey.ID, Sender: "app@example.com", Recipients: store.To(fmt.Sprintf("no-%d@example.org", i)),
 			Driver: "fake", TTL: time.Hour, InDoubt: time.Minute})
 		if err != nil {
 			t.Fatal(err)

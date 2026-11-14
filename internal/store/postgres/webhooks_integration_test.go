@@ -288,7 +288,7 @@ func exec(t *testing.T, sql string, args ...any) {
 func sentFrom(t *testing.T, db *postgres.DB, k store.Key, from, up string) string {
 	t.Helper()
 	s := start(k, "", "")
-	s.Sender, s.Recipient = from, "to-"+up+"@example.org"
+	s.Sender, s.Recipients = from, store.To("to-"+up+"@example.org")
 	c, err := db.Start(context.Background(), s)
 	if err != nil || c.Outcome != store.Started {
 		t.Fatalf("the send did not start: %v %v", c.Outcome, err)

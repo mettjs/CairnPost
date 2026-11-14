@@ -45,9 +45,10 @@ type Pruning interface {
 	// Horizon is the store's own time, keep ago: the instant the other
 	// prunes of one pass are measured against, so they agree.
 	Horizon(ctx context.Context, keep time.Duration) (time.Time, error)
-	// PruneMessages deletes messages nothing has happened to since a time
-	// (sent, or an event recorded), with their events and the webhook
-	// deliveries owed for them. A message an Idempotency-Key still points
+	// PruneMessages deletes emails nothing has happened to since a time
+	// (sent, or an event recorded at any of their addresses), each whole,
+	// with its events and the webhook deliveries owed for it. limit and
+	// the answer count emails. One an Idempotency-Key still points
 	// at is left until the key is gone. A suppression one of them caused
 	// stays, no longer naming it.
 	PruneMessages(ctx context.Context, before time.Time, limit int) (int, error)

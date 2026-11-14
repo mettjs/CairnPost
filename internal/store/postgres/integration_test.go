@@ -53,7 +53,7 @@ func start(k store.Key, idem, fingerprint string) store.Start {
 	// The recipient is the key's own, and each test makes its own key: the
 	// tests share a database, and an address one of them suppresses must
 	// not be one another sends to.
-	return store.Start{KeyID: k.ID, Sender: "app@example.com", Recipient: "ana-" + k.ID + "@example.org", Driver: "test",
+	return store.Start{KeyID: k.ID, Sender: "app@example.com", Recipients: store.To("ana-" + k.ID + "@example.org"), Driver: "test",
 		IdemKey: idem, Fingerprint: []byte(fingerprint), TTL: time.Hour, InDoubt: time.Hour}
 }
 
@@ -198,7 +198,7 @@ func sent(t *testing.T, db *postgres.DB, k store.Key, upstreamID string) string 
 	// A recipient of this message's own: one test's complaint must not
 	// suppress the address another test sends to.
 	s := start(k, "", "")
-	s.Recipient = fmt.Sprintf("to-%x@example.org", sha256.Sum256([]byte(upstreamID)))
+	s.Recipients = store.To(fmt.Sprintf("to-%x@example.org", sha256.Sum256([]byte(upstreamID))))
 	c, err := db.Start(context.Background(), s)
 	if err != nil || c.Outcome != store.Started {
 		t.Fatalf("the send did not start: %v %v", c.Outcome, err)
@@ -334,7 +334,7 @@ func TestASuppressedAddressIsRefusedHoweverTheSendWouldStart(t *testing.T) {
 	from, to := "app@"+k.ID+".example.com", "gone-"+k.ID+"@example.org"
 	claim := func(idem, fingerprint string) store.Start {
 		s := start(k, idem, fingerprint)
-		s.Sender, s.Recipient = from, to
+		s.Sender, s.Recipients = from, store.To(to)
 		return s
 	}
 	outcome := func(why string, s store.Start, want store.Outcome) store.Claim {
@@ -363,7 +363,7 @@ func TestASuppressedAddressIsRefusedHoweverTheSendWouldStart(t *testing.T) {
 	}
 	outcome("without a key", claim("", ""), store.Suppressed)
 	outcome("under a new key", claim("new", "a"), store.Suppressed)
-	outcome("typed in capitals", func() store.Start { s := claim("", ""); s.Recipient = strings.ToUpper(to); return s }(), store.Suppressed)
+	outcome("typed in capitals", func() store.Start { s := claim("", ""); s.Recipients = store.To(strings.ToUpper(to)); return s }(), store.Suppressed)
 	if replay := outcome("what was sent before", claim("before", "a"), store.Replay); replay.ID != sentBefore.ID {
 		t.Fatalf("replayed %s", replay.ID)
 	}
@@ -407,7 +407,7 @@ func TestALiftIsRememberedAndAPolicyRefusalSuppressesNobody(t *testing.T) {
 	send := func(up string) string {
 		t.Helper()
 		s := start(k, "", "")
-		s.Sender, s.Recipient = "app@"+domain, to
+		s.Sender, s.Recipients = "app@"+domain, store.To(to)
 		c, err := db.Start(ctx, s)
 		if err != nil || c.Outcome != store.Started {
 			t.Fatalf("%s did not start: %v %v", up, c.Outcome, err)
@@ -501,7 +501,7 @@ func TestABounceWithNoRecordSuppressesByItsOwnAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := start(k, "", "")
-	s.Sender, s.Recipient = "app@"+domain, "other-"+k.ID+"@example.org"
+	s.Sender, s.Recipients = "app@"+domain, store.To("other-"+k.ID+"@example.org")
 	c, err := db.Start(ctx, s)
 	if err != nil || c.Outcome != store.Started {
 		t.Fatalf("%v %v", c.Outcome, err)

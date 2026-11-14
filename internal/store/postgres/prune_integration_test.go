@@ -74,7 +74,7 @@ func TestAnEmailsRecordIsPrunedAndItsSuppressionStays(t *testing.T) {
 	send := func(up, to string) string {
 		t.Helper()
 		s := start(k, "", "")
-		s.Sender, s.Recipient = "app@"+domain, to
+		s.Sender, s.Recipients = "app@"+domain, store.To(to)
 		c, err := db.Start(ctx, s)
 		if err != nil || c.Outcome != store.Started {
 			t.Fatalf("%s did not start: %v %v", up, c.Outcome, err)

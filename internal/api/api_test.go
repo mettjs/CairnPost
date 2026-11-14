@@ -157,8 +157,10 @@ func TestEveryRefusalHasItsStatus(t *testing.T) {
 		{why: "no key", body: good, code: 401, name: "missing_api_key"},
 		{why: "a wrong key", key: "cp_deadbeef_" + strings.Repeat("A", 43), body: good, code: 401, name: "invalid_api_key"},
 		{why: "not JSON", key: "send", body: "{", code: 422, name: "validation_error"},
-		{why: "an unknown field", key: "send", body: `{"from":"a@example.com","to":"b@example.org","subject":"s","text":"t","cc":"c@example.org"}`, code: 422, name: "validation_error"},
-		{why: "two recipients", key: "send", body: `{"from":"a@example.com","to":["b@example.org","c@example.org"],"subject":"s","text":"t"}`, code: 422, name: "validation_error"},
+		{why: "an unknown field", key: "send", body: `{"from":"a@example.com","to":"b@example.org","subject":"s","text":"t","tags":["x"]}`, code: 422, name: "validation_error"},
+		{why: "an address named twice", key: "send", body: `{"from":"a@example.com","to":["b@example.org"],"cc":"B@Example.org","subject":"s","text":"t"}`, code: 422, name: "validation_error"},
+		{why: "nobody to send to", key: "send", body: `{"from":"a@example.com","to":[],"bcc":"b@example.org","subject":"s","text":"t"}`, code: 422, name: "validation_error"},
+		{why: "what is no address among several", key: "send", body: `{"from":"a@example.com","to":["b@example.org","nobody"],"subject":"s","text":"t"}`, code: 422, name: "validation_error"},
 		{why: "too large", key: "send", body: `{"text":"` + strings.Repeat("x", 5000) + `"}`, code: 413, name: "request_too_large"},
 		{why: "refused for good", key: "send", body: good, driverErr: driver.ErrRejected, code: 422, name: "rejected_by_upstream"},
 		{why: "at the limit", key: "send", body: good, driverErr: &driver.Throttled{After: 90 * time.Second}, code: 429, name: "rate_limit_exceeded", retryAfter: "90"},
@@ -479,5 +481,39 @@ func TestHealthNeedsNoKey(t *testing.T) {
 	if rec.Code != 405 || rec.Header().Get("Allow") != "GET, HEAD" || !strings.Contains(rec.Body.String(), `"method_not_allowed"`) ||
 		!strings.Contains(rec.Body.String(), "It takes: GET, HEAD.") {
 		t.Fatalf("a wrong method: %d Allow %q %s", rec.Code, rec.Header().Get("Allow"), rec.Body.String())
+	}
+}
+
+// An email goes to several addresses under one id; what became of each
+// is answered with it, and a suppressed one is named by the send.
+func TestAnEmailToSeveralIsOneIdWithEachAddress(t *testing.T) {
+	r := newRig(t)
+	if code, _, _ := r.do("POST", "/suppressions", r.admin, "", `{"domain":"example.com","address":"gone@example.org"}`); code != 200 && code != 201 {
+		t.Fatalf("suppressing: %d", code)
+	}
+	code, _, sent := r.do("POST", "/emails", r.send, "", `{"from":"app@example.com","to":["Ana <ana@example.org>","gone@example.org"],
+		"cc":"bo@example.org","bcc":["cy@example.org"],"subject":"s","text":"t"}`)
+	id, _ := sent["id"].(string)
+	left, _ := sent["suppressed"].([]any)
+	if code != 200 || id == "" || len(left) != 1 || left[0] != "gone@example.org" {
+		t.Fatalf("the send: %d %v", code, sent)
+	}
+	if m := r.drv.held[len(r.drv.held)-1]; len(m.To) != 1 || m.To[0] != "ana@example.org" || len(m.Cc) != 1 || len(m.Bcc) != 1 {
+		t.Fatalf("the driver was handed %+v", m)
+	}
+	code, _, got := r.do("GET", "/emails/"+id, r.send, "", "")
+	all, _ := got["recipients"].([]any)
+	if code != 200 || got["to"] != "ana@example.org" || len(all) != 3 {
+		t.Fatalf("the email: %d %v", code, got)
+	}
+	for i, want := range [][2]string{{"ana@example.org", "to"}, {"bo@example.org", "cc"}, {"cy@example.org", "bcc"}} {
+		one, _ := all[i].(map[string]any)
+		if one["address"] != want[0] || one["kind"] != want[1] || one["state"] != "sent" {
+			t.Errorf("address %d: %v", i, one)
+		}
+	}
+	// A send to everyone answers no list of those left out.
+	if _, _, whole := r.do("POST", "/emails", r.send, "", good); whole["suppressed"] != nil {
+		t.Errorf("a send to all its addresses says some were left out: %v", whole)
 	}
 }

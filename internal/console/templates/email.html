@@ -1,16 +1,41 @@
 {{define "title"}}Email{{end}}
 {{define "main"}}
 <p class="back"><a href="{{.Root}}/emails{{with .Data.For}}?for={{.}}{{end}}">Emails</a></p>
-<h1 class="long">Email to {{.Data.Email.Recipient}}</h1>
+{{$several := gt (len .Data.Email.Recipients) 1}}
+<h1 class="long">Email to {{.Data.Email.Recipient}}{{if $several}} and {{minus (len .Data.Email.Recipients) 1}} more{{end}}</h1>
+{{if $several}}
+<p class="lede">{{range outcomes .Data.Email}}<span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{.N}} {{label .State}}</span> {{end}}Each address has its own outcome.</p>
+{{else}}
 <p class="lede"><span class="state state-{{tone .Data.Email.State}}">{{template "ico" (tone .Data.Email.State)}}{{label .Data.Email.State}}</span> {{meaning .Data.Email.State}}</p>
+{{end}}
 
 <dl class="facts">
-  <div><dt>To</dt><dd class="long">{{.Data.Email.Recipient}}</dd></div>
+  {{if not $several}}<div><dt>To</dt><dd class="long">{{.Data.Email.Recipient}}</dd></div>{{end}}
   <div><dt>From</dt><dd class="long">{{.Data.Email.Sender}}</dd></div>
   <div><dt>Sent</dt><dd><time datetime="{{stamp .Data.Email.CreatedAt}}">{{when $.Zone .Data.Email.CreatedAt}}</time></dd></div>
   <div><dt>Last heard of</dt><dd><time datetime="{{stamp .Data.Email.UpdatedAt}}">{{when $.Zone .Data.Email.UpdatedAt}}</time></dd></div>
   <div><dt>Mail provider</dt><dd>{{.Data.Email.Driver}}</dd></div>
 </dl>
+{{if $several}}
+<section aria-labelledby="went">
+  <h2 id="went">Who it went to</h2>
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="went">
+    <table>
+      <thead><tr><th>Address</th><th>As</th><th>State</th><th>Last heard of</th></tr></thead>
+      <tbody>
+      {{range .Data.Email.Recipients}}
+      <tr>
+        <td data-label="Address">{{.Address}}</td>
+        <td data-label="As">{{kind .Kind}}</td>
+        <td data-label="State"><span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{label .State}}</span> <span class="by">{{meaning .State}}</span></td>
+        <td data-label="Last heard of"><time datetime="{{stamp .UpdatedAt}}">{{when $.Zone .UpdatedAt}}</time></td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}}
 <details class="fold">
   <summary>Its names, for the API and the mail provider</summary>
   <dl class="facts">
@@ -31,6 +56,7 @@
       <time datetime="{{stamp .At}}">{{when $.Zone .At}}</time>
       <div>
         <span class="state state-{{tone (stateOf .Kind)}}">{{template "ico" (tone (stateOf .Kind))}}{{happened .Kind}}</span>{{if .Permanent}} <span class="tag">for good</span>{{end}}
+        {{if $several}}<span class="why">{{.Recipient}}</span>{{end}}
         {{if or .Code .Reason}}<span class="why">{{if .Code}}<code>{{.Code}}</code>{{end}} {{.Reason}}</span>{{end}}
         {{if .Said}}<pre class="said" tabindex="0">{{.Said}}</pre>{{end}}
       </div>

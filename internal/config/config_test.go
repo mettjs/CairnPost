@@ -21,7 +21,7 @@ func TestDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Addr != ":8080" || c.IdempotencyTTL != 24*time.Hour || c.InDoubtWindow != 2*time.Minute ||
-		c.SendTimeout != 10*time.Second || c.MaxBodyBytes != 1<<20 || c.CaptureKeep != 100 {
+		c.SendTimeout != 10*time.Second || c.MaxBodyBytes != 1<<20 || c.CaptureKeep != 100 || c.MaxRecipients != 50 {
 		t.Fatalf("defaults: %+v", c)
 	}
 }
@@ -182,7 +182,7 @@ func TestConsoleSettings(t *testing.T) {
 		{"CAIRNPOST_CONSOLE", "maybe"}, {"CAIRNPOST_CONSOLE_SESSION", "721h"}, {"CAIRNPOST_CONSOLE_SESSION", "500ms"},
 		{"CAIRNPOST_CONSOLE_PLAIN_HTTP", "yes please"}, {"CAIRNPOST_MAX_KEYS", "100001"}, {"CAIRNPOST_MAX_KEYS", "many"},
 		{"CAIRNPOST_DNS_TIMEOUT", "500ms"}, {"CAIRNPOST_DNS_TIMEOUT", "2m"}, {"CAIRNPOST_DNS_TIMEOUT", "soon"},
-		{"CAIRNPOST_CONSOLE_TIMEZONE", "Mars/Olympus"},
+		{"CAIRNPOST_CONSOLE_TIMEZONE", "Mars/Olympus"}, {"CAIRNPOST_MAX_RECIPIENTS", "0"}, {"CAIRNPOST_MAX_RECIPIENTS", "1001"},
 	} {
 		if _, err := Load(env(append(base, bad[0], bad[1])...)); err == nil || !strings.Contains(err.Error(), bad[0]) {
 			t.Errorf("%s=%s: %v", bad[0], bad[1], err)

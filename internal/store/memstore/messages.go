@@ -17,15 +17,22 @@ func (s *Store) Messages(_ context.Context, q store.MessageQuery) ([]store.Messa
 	if q.Before != "" && !strings.HasPrefix(q.Before, "msg-") {
 		return out, nil // an id no message could have
 	}
+	// An address or a state is of one address of an email: the email is
+	// listed if one of its addresses fits both.
+	fits := map[string]bool{}
+	for _, m := range s.messages {
+		if (q.Recipient == "" || store.FoldASCII(m.Recipient) == store.FoldASCII(q.Recipient)) && (q.State == "" || m.State == q.State) {
+			fits[m.EmailID] = true
+		}
+	}
 	for _, m := range s.messages {
 		switch {
-		case q.Domain != "" && store.DomainOf(m.Sender) != q.Domain,
-			q.Recipient != "" && store.FoldASCII(m.Recipient) != store.FoldASCII(q.Recipient),
-			q.State != "" && m.State != q.State,
+		case m.ID != m.EmailID, !fits[m.ID],
+			q.Domain != "" && store.DomainOf(m.Sender) != q.Domain,
 			q.Before != "" && m.ID >= q.Before:
 			continue
 		}
-		out = append(out, m)
+		out = append(out, s.email(m))
 	}
 	slices.SortFunc(out, func(a, b store.Message) int { return strings.Compare(b.ID, a.ID) })
 	if len(out) > q.Limit {

@@ -23,9 +23,9 @@ func TestMessagesAreListedNewestFirstAndNarrowed(t *testing.T) {
 	var ids []string
 	for i, sender := range []string{"app@" + domain, "app@" + strings.ToUpper(domain), "app@x" + domain, "a@b@" + domain} {
 		s := start(k, "", "")
-		s.Sender, s.Recipient = sender, to
+		s.Sender, s.Recipients = sender, store.To(to)
 		if i == 3 {
-			s.Recipient = "bo-" + tail + "@example.org"
+			s.Recipients = store.To("bo-" + tail + "@example.org")
 		}
 		claim, err := db.Start(ctx, s)
 		if err != nil {

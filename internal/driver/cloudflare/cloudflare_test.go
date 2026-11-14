@@ -62,7 +62,7 @@ func (s *stand) serve(t *testing.T) *Driver {
 	return d
 }
 
-var message = driver.Message{From: "app@example.com", FromName: "José", To: "ana@example.org",
+var message = driver.Message{From: "app@example.com", FromName: "José", To: []string{"ana@example.org"},
 	ReplyTo: "help@example.com", Subject: "Hello", Text: "Body", Headers: map[string]string{"X-Trace": "t1"}}
 
 const taken = `{"success":true,"errors":[],"result":{"message_id":"<abc@example.com>","delivered":[],
