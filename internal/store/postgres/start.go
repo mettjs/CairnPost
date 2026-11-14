@@ -24,10 +24,7 @@ func (db *DB) Start(ctx context.Context, s store.Start) (store.Claim, error) {
 	for try := 0; try < 3; try++ {
 		err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) (err error) {
 			if s.IdemKey == "" {
-				c = store.Claim{Outcome: store.Started}
-				if c.ID, c.Recipients, c.Dropped, err = insertMessage(ctx, tx, s); c.ID == "" {
-					c = store.Claim{Outcome: store.Suppressed}
-				}
+				c, err = place(ctx, tx, s)
 				return err
 			}
 			c, err = claim(ctx, tx, s)
@@ -42,6 +39,38 @@ func (db *DB) Start(ctx context.Context, s store.Start) (store.Claim, error) {
 		return c, nil
 	}
 	return store.Claim{}, errors.New("postgres: start a send: the idempotency key kept changing hands")
+}
+
+// place makes the record a request asks for: an email that waits, when
+// it is to be held, or a message that is sending. Its claim is Started
+// with the record's id, Suppressed or Full.
+func place(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
+	if s.Hold != nil {
+		id, err := hold(ctx, tx, s)
+		if id == "" {
+			return store.Claim{Outcome: store.Full}, err
+		}
+		return store.Claim{Outcome: store.Started, ID: id}, err
+	}
+	begin := insertMessage
+	if s.ID != "" {
+		begin = resume
+	}
+	id, kept, dropped, err := begin(ctx, tx, s)
+	if id == "" {
+		return store.Claim{Outcome: store.Suppressed}, err
+	}
+	return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}, err
+}
+
+// keyState is what a key is once its request is placed: an email that
+// waits is asked for and done with, one that is sending is in flight
+// until its answer comes.
+func keyState(s store.Start) string {
+	if s.Hold != nil {
+		return "done"
+	}
+	return "in_flight"
 }
 
 // claim decides what a request under an Idempotency-Key is, holding the
@@ -78,6 +107,9 @@ func claim(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
 		// Who was left out the first time is said again.
 		c := store.Claim{Outcome: store.Replay, ID: messageID}
 		err := tx.QueryRow(ctx, `SELECT left_out FROM messages WHERE id = $1::uuid`, messageID).Scan(&c.Dropped)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = nil // an email that waits: nobody was left out yet
+		}
 		return c, err
 	}
 	return store.Claim{Outcome: store.InFlight, RetryAfter: time.Duration(wait * float64(time.Second))}, nil
@@ -94,44 +126,40 @@ func takeOver(ctx context.Context, tx pgx.Tx, s store.Start, old string, inDoubt
 	if err := markUnknown(ctx, tx, true, old); err != nil {
 		return store.Claim{}, err
 	}
-	id, kept, dropped, err := insertMessage(ctx, tx, s)
-	if err != nil {
-		return store.Claim{}, err
+	made, err := place(ctx, tx, s)
+	if err != nil || made.Outcome == store.Full {
+		return made, err
 	}
-	if id == "" {
+	if made.Outcome == store.Suppressed {
 		_, err := tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE api_key_id = $1::uuid AND key = $2`, s.KeyID, s.IdemKey)
-		c := store.Claim{Outcome: store.Suppressed}
 		if inDoubt {
-			c.ID = old
+			made.ID = old
 		}
-		return c, err
+		return made, err
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE idempotency_keys
-		SET fingerprint = $3, message_id = $4::uuid, state = 'in_flight', created_at = now(), tried_at = now()
-		WHERE api_key_id = $1::uuid AND key = $2`, s.KeyID, s.IdemKey, s.Fingerprint, id)
-	return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}, err
+		SET fingerprint = $3, message_id = $4::uuid, state = $5, created_at = now(), tried_at = now()
+		WHERE api_key_id = $1::uuid AND key = $2`, s.KeyID, s.IdemKey, s.Fingerprint, made.ID, keyState(s))
+	return made, err
 }
 
 // claimNew takes a key nobody holds. If another request takes it first, the
 // insert waits for that request to commit and then inserts nothing.
 func claimNew(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
-	id, kept, dropped, err := insertMessage(ctx, tx, s)
-	if err != nil {
-		return store.Claim{}, err
-	}
-	if id == "" {
-		return store.Claim{Outcome: store.Suppressed}, nil
+	made, err := place(ctx, tx, s)
+	if err != nil || made.Outcome != store.Started {
+		return made, err
 	}
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO idempotency_keys (api_key_id, key, fingerprint, message_id, state)
-		VALUES ($1::uuid, $2, $3, $4::uuid, 'in_flight')
-		ON CONFLICT (api_key_id, key) DO NOTHING`, s.KeyID, s.IdemKey, s.Fingerprint, id)
+		VALUES ($1::uuid, $2, $3, $4::uuid, $5)
+		ON CONFLICT (api_key_id, key) DO NOTHING`, s.KeyID, s.IdemKey, s.Fingerprint, made.ID, keyState(s))
 	if err != nil {
 		return store.Claim{}, err
 	}
 	if tag.RowsAffected() == 0 {
-		return store.Claim{}, errLostRace // rolls back the message just inserted
+		return store.Claim{}, errLostRace // rolls back the record just made
 	}
-	return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}, nil
+	return made, nil
 }

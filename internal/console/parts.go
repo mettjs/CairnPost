@@ -29,6 +29,8 @@ func (c *console) parts() []part {
 			"Not being read. Mail still goes; bounces are not known until this recovers.", c.EventsOff),
 		stateOf("Webhooks", c.Sending, "Being sent.",
 			"Not being sent. They are kept and go out when this recovers.", "Off."),
+		stateOf("Scheduled emails", c.Scheduling, "Sent when their time comes.",
+			"Not being sent. They wait, and go out when this recovers.", "Off."),
 		stateOf("Pruning", c.Pruning, "Old records are being deleted on time.",
 			"Not running. Mail still goes; old records stay until this recovers.", "Off."),
 	}

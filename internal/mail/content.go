@@ -82,7 +82,13 @@ func (s *Service) contentOf(m driver.Message) func() []byte {
 // Content answers what a message said, while that is kept; nil when it
 // never was, is past its time, or content is not kept at all. Turning the
 // setting off hides at once what an earlier setting kept.
+//
+// What an email that waits to be sent says is kept until it is sent,
+// whatever the setting, and is answered here too.
 func (s *Service) Content(ctx context.Context, id string) (*Content, error) {
+	if held, err := s.heldContent(ctx, id); held != nil || err != nil {
+		return held, err
+	}
 	if s.opt.KeepContent == 0 {
 		return nil, nil
 	}

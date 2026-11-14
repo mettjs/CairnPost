@@ -24,6 +24,16 @@ func TestEveryStateHasWords(t *testing.T) {
 			t.Errorf("an event of kind %s is named %q", kind, happened(kind))
 		}
 	}
+	for _, state := range []string{store.StateScheduled, store.StateCancelled} {
+		if w := wordsOf(state); w.Label == state || w.Meaning == "" {
+			t.Errorf("%s: %+v", state, w)
+		}
+	}
+	for _, reason := range []string{store.HeldSuppressed, store.HeldKeyRevoked} {
+		if cancelledFor[reason] == "" {
+			t.Errorf("an email cancelled for %s has no words", reason)
+		}
+	}
 	if w := wordsOf("a state from later"); w.Label != "a state from later" || w.Tone != "off" {
 		t.Errorf("a state this console does not know: %+v", w)
 	}

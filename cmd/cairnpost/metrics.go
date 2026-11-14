@@ -23,7 +23,9 @@ type measured struct {
 	// parts report whether each part that runs beside the API is
 	// working; a part that is off is not in it.
 	parts map[string]func() bool
-	log   *slog.Logger
+	// waiting counts the emails that wait to be sent.
+	waiting func(ctx context.Context, domain string) (int, error)
+	log     *slog.Logger
 }
 
 // gaugeWait is how long one of the reads behind the numbers may take.
@@ -41,13 +43,13 @@ func (m measured) gauges(ctx context.Context, domain string) []metrics.Sample {
 		{Name: "cairnpost_build_info", Help: "The version running and the mail provider it sends through.", Kind: metrics.Gauge,
 			Labels: [][2]string{{"version", m.version}, {"driver", m.driver.Name()}}, Value: 1},
 	}
-	for _, part := range []string{"events", "webhooks", "pruning"} {
+	for _, part := range []string{"events", "webhooks", "pruning", "scheduled"} {
 		if working := m.parts[part]; working != nil {
 			out = append(out, metrics.Sample{Name: "cairnpost_part_up", Help: "Whether a part that runs beside the API is working.",
 				Kind: metrics.Gauge, Labels: [][2]string{{"part", part}}, Value: metrics.Up(working())})
 		}
 	}
-	reads := []func(context.Context, string) []metrics.Sample{m.emails, m.hooks, m.quota}
+	reads := []func(context.Context, string) []metrics.Sample{m.emails, m.hooks, m.quota, m.scheduled}
 	read := make([][]metrics.Sample, len(reads))
 	var wg sync.WaitGroup
 	for i, one := range reads {
@@ -80,6 +82,20 @@ func (m measured) emails(ctx context.Context, domain string) []metrics.Sample {
 			Kind: metrics.Gauge, Labels: [][2]string{{"state", state}}, Value: float64(in[state])})
 	}
 	return out
+}
+
+// scheduled is how many emails wait to be sent.
+func (m measured) scheduled(ctx context.Context, domain string) []metrics.Sample {
+	if m.waiting == nil {
+		return nil
+	}
+	n, err := m.waiting(ctx, domain)
+	if err != nil {
+		m.log.Error("metrics: the emails waiting to be sent could not be counted", "error", err)
+		return nil
+	}
+	return []metrics.Sample{{Name: "cairnpost_emails_scheduled", Help: "Emails asked for ahead of time that wait to be sent.",
+		Kind: metrics.Gauge, Value: float64(n)}}
 }
 
 // hooks is how many webhook endpoints stand in each state, and how many

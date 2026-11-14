@@ -41,6 +41,9 @@ type Deps struct {
 	// Pruning reports whether the last pass of the pruner finished; nil
 	// when nothing is pruned.
 	Pruning func() bool
+	// Scheduling reports whether the emails that wait to be sent can
+	// be read, and so sent; nil when none are sent from here.
+	Scheduling func() bool
 	// Requests counts what the API answers, and Gauges answers how the
 	// server stands in numbers, both for GET /metrics; nil for neither.
 	Requests *metrics.Requests
@@ -68,6 +71,8 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST /emails", a.auth(false, a.sendEmail))
 	mux.Handle("POST /emails/batch", a.auth(false, a.sendBatch))
 	mux.Handle("GET /emails/{id}", a.auth(false, a.getEmail))
+	mux.Handle("PATCH /emails/{id}", a.auth(false, a.rescheduleEmail))
+	mux.Handle("POST /emails/{id}/cancel", a.auth(false, a.cancelEmail))
 	mux.Handle("GET /limits", a.auth(false, a.limits))
 	mux.Handle("GET /metrics", a.auth(true, a.metrics))
 	mux.Handle("GET /suppressions", a.auth(true, a.listSuppressions))
@@ -176,11 +181,17 @@ func (a *app) logged(next http.Handler) http.Handler {
 func (a *app) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version, "events": "off", "webhooks": "off", "pruning": "off"}
+	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version, "events": "off", "webhooks": "off", "pruning": "off", "scheduled": "off"}
 	if a.Sending != nil {
 		body["webhooks"] = "sending"
 		if !a.Sending() {
 			body["webhooks"] = "failing"
+		}
+	}
+	if a.Scheduling != nil {
+		body["scheduled"] = "sending"
+		if !a.Scheduling() {
+			body["scheduled"] = "failing"
 		}
 	}
 	if a.Pruning != nil {

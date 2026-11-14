@@ -3,6 +3,7 @@ package console
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -23,6 +24,10 @@ type emailView struct {
 	// SaidUnread says what receiving servers said may be kept but could
 	// not be read.
 	SaidUnread bool
+	// Waits says it is an email asked for ahead of time that still
+	// waits to be sent; Why, for one cancelled by nobody's asking, why.
+	Waits bool
+	Why   string
 	// For is the handle of the address the list it was opened from was
 	// narrowed to, "" for none: the way back leads to that list.
 	For string
@@ -48,7 +53,7 @@ func (c *console) emailPage(w http.ResponseWriter, r *http.Request) {
 		c.fail(w, r, http.StatusServiceUnavailable, "The email could not be read. Try again shortly.")
 		return
 	}
-	v := emailView{Email: m}
+	v := emailView{Email: m, Waits: m.State == store.StateScheduled, Why: cancelledFor[m.Reason]}
 	// What it said is never logged, and neither is why it was not read
 	// beyond the store's own error.
 	if v.Content, err = c.Mail.Content(r.Context(), m.ID); err != nil {
@@ -73,4 +78,43 @@ func (c *console) emailPage(w http.ResponseWriter, r *http.Request) {
 	}
 	v.For = handleOf(r)
 	c.render(w, r, http.StatusOK, "email", v)
+}
+
+// cancelPage asks before an email that waits is cancelled: it cannot be
+// undone.
+func (c *console) cancelPage(w http.ResponseWriter, r *http.Request) {
+	m, _, err := c.Mail.MessageFor(r.Context(), who(r), r.PathValue("id"))
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		c.fail(w, r, http.StatusNotFound, "There is no such email. Its id may be wrong, or its record older than this server keeps.")
+	case err != nil:
+		c.Log.Error("console: an email could not be read", "error", err)
+		c.fail(w, r, http.StatusServiceUnavailable, "The email could not be read. Try again shortly.")
+	case m.State != store.StateScheduled:
+		c.flash(w, "email-not-waiting")
+		http.Redirect(w, r, at("/emails/"+url.PathEscape(m.ID), nil), http.StatusSeeOther)
+	default:
+		c.render(w, r, http.StatusOK, "cancel", m)
+	}
+}
+
+// cancelEmail cancels an email that waits to be sent.
+func (c *console) cancelEmail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	err := c.Mail.Cancel(r.Context(), who(r), id)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		c.fail(w, r, http.StatusNotFound, "There is no such email. Its id may be wrong, or its record older than this server keeps.")
+		return
+	case errors.Is(err, mail.ErrNotScheduled):
+		c.flash(w, "email-not-waiting")
+	case err != nil:
+		c.Log.Error("console: an email could not be cancelled", "error", err)
+		c.fail(w, r, http.StatusServiceUnavailable, "The email could not be cancelled. Try again shortly.")
+		return
+	default:
+		c.Log.Info("console: a waiting email was cancelled", "by", who(r).Prefix, "message", id)
+		c.flash(w, "email-cancelled")
+	}
+	http.Redirect(w, r, at("/emails/"+url.PathEscape(id), nil), http.StatusSeeOther)
 }

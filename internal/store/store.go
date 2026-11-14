@@ -110,6 +110,11 @@ type Message struct {
 	State      string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	// SendAt is set for an email that waits to be sent, or was cancelled
+	// while it did: it is no message yet, and is answered as one with
+	// StateScheduled or StateCancelled. Reason is Held's.
+	SendAt time.Time
+	Reason string
 }
 
 // Outcome is what Start found under an Idempotency-Key.
@@ -132,6 +137,9 @@ const (
 	// request already sent is still a Replay. If the key's earlier try was
 	// left in doubt, the claim carries that try's message id.
 	Suppressed
+	// Full: the email was to wait, and the emails that wait already
+	// hold as much as they may.
+	Full
 )
 
 // Claim is Start's answer.
@@ -151,6 +159,13 @@ type Claim struct {
 
 // Start is a send about to be made.
 type Start struct {
+	// ID is the id the email was given when it was put to wait, "" for
+	// an email sent as it is asked for. With it, a try that failed
+	// earlier is begun again on the same record.
+	ID string
+	// Hold, when set, keeps the email to be sent later: nothing is
+	// started, and the claim's ID is the id it waits under.
+	Hold   *Hold
 	KeyID  string
 	Sender string
 	// Recipients is every address the email is to go to, the first "to"
@@ -185,6 +200,9 @@ type Mail interface {
 	// Failed marks a message the upstream certainly did not take, and frees
 	// its key so the next try sends at once.
 	Failed(ctx context.Context, id string) error
+	// Unsent marks a message the upstream did not take this time, and
+	// leaves its key as it is: the send will be tried again.
+	Unsent(ctx context.Context, id string) error
 	// Message answers an email by its id; ErrNotFound for an id no
 	// email has.
 	Message(ctx context.Context, id string) (Message, error)
@@ -206,6 +224,7 @@ type Store interface {
 	Suppressions
 	Webhooks
 	Pruning
+	Schedule
 	Sessions
 	Domains
 	Counts

@@ -2,6 +2,7 @@ package mail
 
 import (
 	"context"
+	"errors"
 	netmail "net/mail"
 	"slices"
 
@@ -30,6 +31,15 @@ func ReadsContent(key store.Key) bool { return key.Scope == store.ScopeAdmin }
 // for none, and for one the key may not read, which is not told apart.
 func (s *Service) MessageFor(ctx context.Context, key store.Key, id string) (store.Message, []store.Event, error) {
 	m, events, err := s.events.Record(ctx, id)
+	// An email that waits is no message yet; one whose try the provider
+	// did not take is a failed one, and still waits for the next.
+	if errors.Is(err, store.ErrNotFound) || err == nil && m.State == store.StateFailed {
+		if h, herr := s.held.Held(ctx, id); herr == nil {
+			m, events, err = asMessage(h), nil, nil
+		} else if !errors.Is(herr, store.ErrNotFound) {
+			return store.Message{}, nil, herr
+		}
+	}
 	if err != nil {
 		return store.Message{}, nil, err
 	}

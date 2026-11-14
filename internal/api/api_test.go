@@ -60,7 +60,18 @@ type rig struct {
 	t           *testing.T
 	h           http.Handler
 	drv         *fake
+	keys        *keys.Service
 	send, admin string
+}
+
+// otherSendKey is a second key that may only send.
+func otherSendKey(t *testing.T, r *rig) string {
+	t.Helper()
+	full, _, err := r.keys.Create(context.Background(), "another app", store.ScopeSend, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return full
 }
 
 // newRig builds the API over a store whose clock stands still, so a wait
@@ -107,7 +118,7 @@ func newRigBuilt(t *testing.T, s store.Store, adjust func(*api.Deps)) *rig {
 		},
 	}
 	adjust(&deps)
-	return &rig{t: t, h: api.New(deps), drv: drv, send: send, admin: admin}
+	return &rig{t: t, h: api.New(deps), drv: drv, keys: ks, send: send, admin: admin}
 }
 
 const good = `{"from":"App <app@example.com>","to":"ana@example.org","subject":"Hello","text":"Body text"}`
@@ -489,8 +500,8 @@ func TestHealthNeedsNoKey(t *testing.T) {
 	req := httptest.NewRequest("PUT", "/emails/abc", nil)
 	rec := httptest.NewRecorder()
 	r.h.ServeHTTP(rec, req)
-	if rec.Code != 405 || rec.Header().Get("Allow") != "GET, HEAD" || !strings.Contains(rec.Body.String(), `"method_not_allowed"`) ||
-		!strings.Contains(rec.Body.String(), "It takes: GET, HEAD.") {
+	if rec.Code != 405 || rec.Header().Get("Allow") != "GET, HEAD, PATCH" || !strings.Contains(rec.Body.String(), `"method_not_allowed"`) ||
+		!strings.Contains(rec.Body.String(), "It takes: GET, HEAD, PATCH.") {
 		t.Fatalf("a wrong method: %d Allow %q %s", rec.Code, rec.Header().Get("Allow"), rec.Body.String())
 	}
 }

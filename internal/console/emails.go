@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"time"
 
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store"
@@ -30,11 +31,50 @@ type emailsView struct {
 	Paged         bool
 	// Forgotten says the page named an address that is no longer kept.
 	Forgotten bool
+	// Tabs are the page's parts: the emails on record, and those that
+	// wait to be sent. Tab is the one shown, "" for the first.
+	Tabs tabs
+	Tab  string
+	// Waiting are the emails that wait to be sent, soonest first; More
+	// says there are more of them than are shown.
+	Waiting []store.Held
+	More    bool
 }
 
 func (c *console) emailsPage(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	if tabOf(r, "", "scheduled") != "" {
+		c.scheduledShown(w, r)
+		return
+	}
 	c.emailsShown(w, r, http.StatusOK, emailsView{State: q.Get("state")}, q.Get("before"))
+}
+
+// emailTabs are the parts of the emails page, the second with how many
+// emails wait. A count that cannot be read is left unsaid.
+func (c *console) emailTabs(r *http.Request, on, handle string) tabs {
+	n, err := c.Mail.Waiting(r.Context(), who(r).Domain)
+	if err != nil {
+		c.Log.Error("console: the emails waiting to be sent could not be counted", "error", err)
+	}
+	return tabsOf("Emails", "/emails", narrowedTo(url.Values{}, handle), on,
+		tab{Label: "On record"}, tab{Key: "scheduled", Label: "Scheduled", N: n})
+}
+
+// scheduledShown is the part of the page with the emails that wait to
+// be sent, soonest first. It reads no email on record.
+func (c *console) scheduledShown(w http.ResponseWriter, r *http.Request) {
+	v := emailsView{Tab: "scheduled", For: handleOf(r)}
+	list, err := c.Mail.Scheduled(r.Context(), who(r), time.Time{}, shownEmails+1)
+	if err != nil {
+		c.Log.Error("console: the emails waiting to be sent could not be read", "error", err)
+		v.Unread = true
+	}
+	if v.More = len(list) > shownEmails; v.More {
+		list = list[:shownEmails]
+	}
+	v.Waiting, v.Tabs = list, c.emailTabs(r, v.Tab, v.For)
+	c.render(w, r, http.StatusOK, "emails", v)
 }
 
 // emailsShown is the page with the emails the signed-in key may read,
@@ -64,6 +104,7 @@ func (c *console) emailsShown(w http.ResponseWriter, r *http.Request, code int, 
 		v.Older = emailsAt(v.State, list[shownEmails-1].ID, v.For)
 	}
 	v.Emails, v.Newest, v.Chips = list, emailsAt(v.State, "", v.For), emailChips(v.State, v.For)
+	v.Tabs = c.emailTabs(r, "", v.For)
 	c.render(w, r, code, "emails", v)
 }
 

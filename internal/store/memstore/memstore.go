@@ -41,6 +41,7 @@ type Store struct {
 	endpoints  []*store.Endpoint
 	deliveries []*delivery
 	counts     map[bucket]map[string]int
+	held       map[string]*held
 }
 
 // New returns an empty store on the wall clock.
@@ -48,7 +49,7 @@ func New() *Store {
 	return &Store{Now: time.Now, keys: map[string]store.Key{},
 		messages: map[string]store.Message{}, idems: map[string]*idem{},
 		suppressed: map[string]*suppression{}, contents: map[string]content{}, details: map[string]content{}, sessions: map[string]session{},
-		counts: map[bucket]map[string]int{}}
+		counts: map[bucket]map[string]int{}, held: map[string]*held{}}
 }
 
 var _ store.Store = (*Store)(nil)
@@ -171,8 +172,30 @@ func (s *Store) newMessage(st store.Start) (string, []store.Addressee, []string)
 	kept, dropped := store.Addressed(st.Recipients, func(a store.Addressee) bool {
 		return s.inForce(store.SuppressionKey(st.Sender, a.Address))
 	})
+	if tried := s.rows(st.ID); st.ID != "" && len(tried) > 0 {
+		// A try the provider did not take, begun again on its rows.
+		if len(kept) == 0 {
+			return "", nil, dropped
+		}
+		for _, id := range tried {
+			m := s.messages[id]
+			if i := slices.IndexFunc(kept, func(a store.Addressee) bool { return a.Address == m.Recipient }); i >= 0 && m.State == store.StateFailed {
+				s.count(m, m.State, store.StateSending)
+				m.State, m.Kind, m.UpdatedAt = store.StateSending, kept[i].Kind, now
+			}
+			if id == st.ID {
+				m.LeftOut = dropped
+			}
+			s.messages[id] = m
+		}
+		return st.ID, kept, dropped
+	}
 	for _, r := range kept {
-		m := store.Message{ID: s.next("msg"), KeyID: st.KeyID, Sender: st.Sender, Recipient: r.Address, Kind: r.Kind,
+		id := s.next("msg")
+		if email == "" && st.ID != "" {
+			id = st.ID
+		}
+		m := store.Message{ID: id, KeyID: st.KeyID, Sender: st.Sender, Recipient: r.Address, Kind: r.Kind,
 			Driver: st.Driver, State: store.StateSending, CreatedAt: now, UpdatedAt: now}
 		if email == "" {
 			email, m.LeftOut = m.ID, dropped
@@ -267,12 +290,15 @@ func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 			old = row.messageID
 		}
 		c := s.start(st)
-		if c.Outcome == store.Suppressed {
+		switch c.Outcome {
+		case store.Suppressed:
 			delete(s.idems, slot)
 			c.ID = old
 			return c, nil
+		case store.Full:
+			return c, nil
 		}
-		s.idems[slot] = &idem{fingerprint: st.Fingerprint, messageID: c.ID, created: now, tried: now}
+		s.idems[slot] = &idem{fingerprint: st.Fingerprint, messageID: c.ID, done: st.Hold != nil, created: now, tried: now}
 		return c, nil
 	case row.done && !bytes.Equal(row.fingerprint, st.Fingerprint):
 		return store.Claim{Outcome: store.Mismatch}, nil
@@ -286,6 +312,9 @@ func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 // start records an email as sending, unless every address of it is
 // suppressed.
 func (s *Store) start(st store.Start) store.Claim {
+	if st.Hold != nil {
+		return s.hold(st)
+	}
 	id, kept, dropped := s.newMessage(st)
 	if id == "" {
 		return store.Claim{Outcome: store.Suppressed}
@@ -305,12 +334,25 @@ func (s *Store) Lost(_ context.Context, id string) error {
 func (s *Store) Sent(_ context.Context, id, upstreamID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.settle(id, store.StateSent, upstreamID, "")
+	// An address still failed was left out of the try that was taken.
+	for _, row := range s.rows(id) {
+		if s.messages[row].State != store.StateFailed {
+			s.setState(row, store.StateSent, upstreamID)
+		}
+	}
 	for _, row := range s.idems {
 		if row.messageID == id {
 			row.done = true
 		}
 	}
+	return nil
+}
+
+// Unsent implements store.Mail.
+func (s *Store) Unsent(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settle(id, store.StateFailed, "", "")
 	return nil
 }
 

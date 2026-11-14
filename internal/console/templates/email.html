@@ -1,35 +1,43 @@
 {{define "title"}}Email{{end}}
 {{define "main"}}
-<p class="back"><a href="{{.Root}}/emails{{with .Data.For}}?for={{.}}{{end}}">Emails</a></p>
+<p class="back">{{if .Data.Waits}}<a href="{{.Root}}/emails?tab=scheduled">Scheduled emails</a>{{else}}<a href="{{.Root}}/emails{{with .Data.For}}?for={{.}}{{end}}">Emails</a>{{end}}</p>
 {{$several := gt (len .Data.Email.Recipients) 1}}
 <h1 class="long">Email to {{.Data.Email.Recipient}}{{if $several}} and {{minus (len .Data.Email.Recipients) 1}} more{{end}}</h1>
-{{if $several}}
+{{if and $several .Data.Email.SendAt.IsZero}}
 <p class="lede">{{range outcomes .Data.Email}}<span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{.N}} {{label .State}}</span> {{end}}Each address has its own outcome.</p>
 {{else}}
-<p class="lede"><span class="state state-{{tone .Data.Email.State}}">{{template "ico" (tone .Data.Email.State)}}{{label .Data.Email.State}}</span> {{meaning .Data.Email.State}}</p>
+<p class="lede"><span class="state state-{{tone .Data.Email.State}}">{{template "ico" (tone .Data.Email.State)}}{{label .Data.Email.State}}</span> {{meaning .Data.Email.State}}{{with .Data.Why}} {{.}}{{end}}</p>
 {{end}}
+{{$held := not .Data.Email.SendAt.IsZero}}
+{{if .Data.Waits}}<p>It can still be stopped. <a class="danger" href="{{.Root}}/emails/{{.Data.Email.ID}}/cancel">Cancel this email</a></p>{{end}}
 
 <dl class="facts">
   {{if not $several}}<div><dt>To</dt><dd class="long">{{.Data.Email.Recipient}}</dd></div>{{end}}
   <div><dt>From</dt><dd class="long">{{.Data.Email.Sender}}</dd></div>
+  {{if $held}}
+  <div><dt>{{if .Data.Waits}}Goes out{{else}}Was to go out{{end}}</dt><dd><time datetime="{{stamp .Data.Email.SendAt}}">{{when $.Zone .Data.Email.SendAt}}</time></dd></div>
+  <div><dt>Asked for</dt><dd><time datetime="{{stamp .Data.Email.CreatedAt}}">{{when $.Zone .Data.Email.CreatedAt}}</time></dd></div>
+  {{if not .Data.Waits}}<div><dt>Cancelled</dt><dd><time datetime="{{stamp .Data.Email.UpdatedAt}}">{{when $.Zone .Data.Email.UpdatedAt}}</time></dd></div>{{end}}
+  {{else}}
   <div><dt>Sent</dt><dd><time datetime="{{stamp .Data.Email.CreatedAt}}">{{when $.Zone .Data.Email.CreatedAt}}</time></dd></div>
   <div><dt>Last heard of</dt><dd><time datetime="{{stamp .Data.Email.Heard}}">{{when $.Zone .Data.Email.Heard}}</time></dd></div>
   <div><dt>Mail provider</dt><dd>{{.Data.Email.Driver}}</dd></div>
+  {{end}}
   {{with .Data.Email.LeftOut}}<div><dt>Not sent to</dt><dd class="long">{{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}<br><span class="by">On the suppression list when the email was sent.</span></dd></div>{{end}}
 </dl>
 {{if $several}}
 <section aria-labelledby="went">
-  <h2 id="went">Who it went to</h2>
+  <h2 id="went">{{if .Data.Waits}}Who it goes to{{else if $held}}Who it was to go to{{else}}Who it went to{{end}}</h2>
   <div class="scroll" tabindex="0" role="region" aria-labelledby="went">
     <table>
-      <thead><tr><th>Address</th><th>As</th><th>State</th><th>Last heard of</th></tr></thead>
+      <thead><tr><th>Address</th><th>As</th>{{if not $held}}<th>State</th><th>Last heard of</th>{{end}}</tr></thead>
       <tbody>
       {{range .Data.Email.Recipients}}
       <tr>
         <td data-label="Address">{{.Address}}</td>
         <td data-label="As">{{kind .Kind}}</td>
-        <td data-label="State"><span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{label .State}}</span> <span class="by">{{meaning .State}}</span></td>
-        <td data-label="Last heard of"><time datetime="{{stamp .UpdatedAt}}">{{when $.Zone .UpdatedAt}}</time></td>
+        {{if not $held}}<td data-label="State"><span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{label .State}}</span> <span class="by">{{meaning .State}}</span></td>
+        <td data-label="Last heard of"><time datetime="{{stamp .UpdatedAt}}">{{when $.Zone .UpdatedAt}}</time></td>{{end}}
       </tr>
       {{end}}
       </tbody>
@@ -45,6 +53,7 @@
   </dl>
 </details>
 
+{{if not $held}}
 <section aria-labelledby="happened">
   <h2 id="happened">What happened to it</h2>
   {{if not .Data.Events}}
@@ -66,16 +75,17 @@
   </ol>
   {{end}}
 </section>
+{{end}}
 
 <section aria-labelledby="said">
-  <h2 id="said">What it said</h2>
+  <h2 id="said">{{if .Data.Waits}}What it says{{else}}What it said{{end}}</h2>
   {{if .Data.Unread}}
   <p class="problem" role="alert">What this email said could not be read. Reload the page to try again.</p>
   {{else if not .Data.Content}}
-  <p class="empty">Nothing this email said is kept. A server keeps what emails say only while <code>CAIRNPOST_CONTENT_RETENTION</code> is set, and only for that long.</p>
+  <p class="empty">{{if $held}}What this email said was deleted when it was cancelled.{{else}}Nothing this email said is kept. A server keeps what emails say only while <code>CAIRNPOST_CONTENT_RETENTION</code> is set, and only for that long.{{end}}</p>
   {{else}}
   {{with .Data.Content}}
-  <p class="hint">Kept until <time datetime="{{stamp .KeptUntil}}">{{when $.Zone .KeptUntil}}</time>, then deleted. Shown as it was written, not as a mail program would draw it.</p>
+  <p class="hint">{{if $.Data.Waits}}Kept until the email is sent. After that it is kept only if this server is set to keep what emails say.{{else}}Kept until <time datetime="{{stamp .KeptUntil}}">{{when $.Zone .KeptUntil}}</time>, then deleted.{{end}} Shown as it was written, not as a mail program would draw it.</p>
   <dl class="facts">
     <div><dt>Subject</dt><dd class="long">{{.Subject}}</dd></div>
     {{if .FromName}}<div><dt>Sender's name</dt><dd class="long">{{.FromName}}</dd></div>{{end}}
@@ -86,7 +96,7 @@
     {{if .HTML}}<div><dt>HTML, as source</dt><dd><pre class="said" tabindex="0">{{.HTML}}</pre></dd></div>{{end}}
     {{if .Attachments}}<div><dt>Files</dt><dd><ul class="files">{{range .Attachments}}
       <li><span class="long">{{.Filename}}</span><span class="by long">{{.ContentType}}, {{size .Size}}{{if .ContentID}}, shown in the HTML as {{.ContentID}}{{end}}</span></li>{{end}}
-    </ul><span class="by">What a file held is never kept.</span></dd></div>{{end}}
+    </ul><span class="by">{{if $.Data.Waits}}The files are held until the email is sent, then deleted.{{else}}What a file held is never kept.{{end}}</span></dd></div>{{end}}
   </dl>
   {{end}}
   {{end}}

@@ -14,9 +14,10 @@ import (
 // batchItem is what became of one email of a batch: the email's id, or
 // why it was not sent. An error can carry an id too, as a send's does.
 type batchItem struct {
-	ID         string       `json:"id,omitempty"`
-	Suppressed []string     `json:"suppressed,omitempty"`
-	Error      *itemProblem `json:"error,omitempty"`
+	ID          string       `json:"id,omitempty"`
+	Suppressed  []string     `json:"suppressed,omitempty"`
+	ScheduledAt *time.Time   `json:"scheduled_at,omitempty"`
+	Error       *itemProblem `json:"error,omitempty"`
 }
 
 // itemProblem is why one email of a batch was not sent: the answer it
@@ -45,7 +46,7 @@ func (a *app) sendBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	shape := "The body must be a JSON list of emails, each with from, to, subject and html or text; " +
-		"cc, bcc, reply_to, headers and attachments are optional. No other field is supported."
+		"cc, bcc, reply_to, headers, attachments and scheduled_at are optional. No other field is supported."
 	// Read one email after the other, and no more of them than a batch
 	// may hold: a list of a million empty emails is small to send and
 	// large to hold.
@@ -101,7 +102,8 @@ func (a *app) sendBatch(w http.ResponseWriter, r *http.Request) {
 	items, code, longest := make([]batchItem, len(done)), http.StatusOK, 0
 	for i, d := range done {
 		if d.Err == nil {
-			items[i] = batchItem{ID: d.ID, Suppressed: d.Suppressed}
+			sent := sentOf(d.Receipt)
+			items[i] = batchItem{ID: sent.ID, Suppressed: sent.Suppressed, ScheduledAt: sent.ScheduledAt}
 			continue
 		}
 		p, wait := a.problemOf(d.ID, d.Err)

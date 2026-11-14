@@ -27,6 +27,7 @@ func sendCommand(ctx context.Context, args []string) error {
 	text := fs.String("text", "", "the plain-text body")
 	html := fs.String("html", "", "the HTML body")
 	idem := fs.String("idempotency-key", "", "a key that makes sending this twice send it once")
+	at := fs.String("at", "", "when to send it, such as 2030-01-31T09:00:00Z; left out, it is sent now")
 	var attach paths
 	fs.Var(&attach, "attach", "a file to send with it; give the flag once for each file")
 	if err := parse(fs, args); err != nil {
@@ -49,6 +50,9 @@ func sendCommand(ctx context.Context, args []string) error {
 	if files != nil {
 		fields["attachments"] = files
 	}
+	if *at != "" {
+		fields["scheduled_at"] = *at
+	}
 	body, _ := json.Marshal(fields)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(*url, "/")+"/emails", bytes.NewReader(body))
 	if err != nil {
@@ -68,6 +72,7 @@ func sendCommand(ctx context.Context, args []string) error {
 	var answer struct {
 		ID, Name, Message string
 		Suppressed        []string
+		ScheduledAt       string `json:"scheduled_at"`
 	}
 	_ = json.Unmarshal(raw, &answer)
 	if res.StatusCode != http.StatusOK {
@@ -77,6 +82,9 @@ func sendCommand(ctx context.Context, args []string) error {
 		return fmt.Errorf("%s (%d %s)", answer.Message, res.StatusCode, answer.Name)
 	}
 	fmt.Println(answer.ID)
+	if answer.ScheduledAt != "" {
+		fmt.Fprintln(os.Stderr, "not sent yet: it waits to be sent at "+answer.ScheduledAt)
+	}
 	if len(answer.Suppressed) > 0 {
 		fmt.Fprintln(os.Stderr, "not sent to, being suppressed: "+strings.Join(answer.Suppressed, ", "))
 	}

@@ -52,6 +52,10 @@ type Pruning interface {
 	// at is left until the key is gone. A suppression one of them caused
 	// stays, no longer naming it.
 	PruneMessages(ctx context.Context, before time.Time, limit int) (int, error)
+	// PruneCancelled deletes the emails that were to be sent later and
+	// were cancelled at or before a time: only that they were is left
+	// of them by then.
+	PruneCancelled(ctx context.Context, before time.Time, limit int) (int, error)
 	// PruneLifted deletes suppressions lifted at or before a time. A lifted
 	// row is what stops a late event about an email sent before the lift
 	// from suppressing again, so none goes while a message made at or

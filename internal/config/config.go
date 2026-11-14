@@ -43,6 +43,8 @@ type Config struct {
 	MaxBatch      int
 	BatchParallel int
 	BatchTimeout  time.Duration
+	// Schedule is how emails asked for ahead of time are kept and sent.
+	Schedule Schedule
 	// MaxAttachments is CAIRNPOST_MAX_ATTACHMENTS: how many files one
 	// email may carry, 0 for none. MaxAttachmentBytes is
 	// CAIRNPOST_MAX_ATTACHMENT_BYTES: how large they may be in all.
@@ -229,6 +231,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if c.BatchTimeout > 10*time.Minute {
 		return c, fmt.Errorf("config: CAIRNPOST_BATCH_TIMEOUT must be at most 10m (got %s)", c.BatchTimeout)
+	}
+	if c.Schedule, err = schedule(getenv); err != nil {
+		return c, err
 	}
 	// 0 is a setting here, "no files", so it is read apart from the
 	// numbers that must be positive.

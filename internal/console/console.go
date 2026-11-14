@@ -43,6 +43,9 @@ type Deps struct {
 	// Events, Sending and Pruning report whether delivery events are read,
 	// webhooks sent and old records pruned; nil for one that is off.
 	Events, Sending, Pruning func() bool
+	// Scheduling reports whether the emails that wait to be sent can be
+	// read, and so sent; nil where none are sent from.
+	Scheduling func() bool
 	// EventsOff says, where delivery events are not read, why and what
 	// follows from it: that differs by driver.
 	EventsOff string

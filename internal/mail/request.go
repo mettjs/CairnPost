@@ -5,6 +5,7 @@ import (
 	netmail "net/mail"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/mettjs/cairnpost/internal/address"
@@ -26,6 +27,8 @@ type Request struct {
 	Attachments []Attachment
 	// IdemKey is the Idempotency-Key header, "" for none.
 	IdemKey string
+	// ScheduledAt is when to send it; zero for now.
+	ScheduledAt time.Time
 }
 
 // Invalid is a request that can never be sent as it is: the caller must
@@ -92,6 +95,8 @@ var reserved = map[string]bool{
 type checked struct {
 	msg    driver.Message
 	domain string
+	// at is when to send it; zero for now.
+	at time.Time
 }
 
 // addressees are a message's addresses in the order they are kept: "to",
@@ -209,9 +214,26 @@ func check(r Request, opt Options) (checked, error) {
 	if err != nil {
 		return checked{}, err
 	}
+	if at := r.ScheduledAt; !at.IsZero() {
+		switch now := opt.Now(); {
+		case !at.After(now):
+			return checked{}, &Invalid{"scheduled_at", `"scheduled_at" must be a time to come. Leave it out to send now.`}
+		case at.Sub(now) > opt.ScheduleAhead:
+			return checked{}, &Invalid{"scheduled_at", fmt.Sprintf(`"scheduled_at" may be at most %s from now.`, span(opt.ScheduleAhead))}
+		}
+	}
 	return checked{
 		msg: driver.Message{From: address.Wire(from), FromName: from.Name, To: to, Cc: cc, Bcc: bcc, ReplyTo: reply,
 			Subject: r.Subject, HTML: r.HTML, Text: r.Text, Headers: r.Headers, Attachments: files},
-		domain: store.DomainOf(from.Address),
+		domain: store.DomainOf(from.Address), at: r.ScheduledAt,
 	}, nil
+}
+
+// span says a length of time in days, or in hours when it is not whole
+// days.
+func span(d time.Duration) string {
+	if d%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%d days", d/(24*time.Hour))
+	}
+	return fmt.Sprintf("%d hours", d/time.Hour)
 }
