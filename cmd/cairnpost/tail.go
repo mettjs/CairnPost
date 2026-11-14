@@ -41,75 +41,45 @@ func tailCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	defer db.Close()
-	return tail(ctx, db, os.Stdout, of, *last, *every, *once)
+	return tail(ctx, db, os.Stdout, os.Stderr, of, *last, *every, *once)
 }
 
-// tailPage is how many new events one look reads.
-const tailPage = 200
+// How tail reads: tailPage events a read; tailBack is how far before
+// the newest event it looks again, for one that came into view late;
+// after tailTries looks in a row that failed it gives up.
+const (
+	tailPage  = 200
+	tailBack  = 10 * time.Second
+	tailTries = 10
+)
 
 // tail writes the last events and then each new one. A look that fails
-// is said and tried again: a database away for a moment does not end it.
-func tail(ctx context.Context, events store.Events, w io.Writer, domain string, last int, every time.Duration, once bool) error {
-	after := ""
-	if last > 0 {
-		shown, err := events.EventsAfter(ctx, "", domain, last)
-		if err != nil {
-			return err
-		}
-		after = told(w, shown, after)
-	}
-	if after == "" {
-		// Nothing shown: follow from the newest event there is.
-		newest, err := events.EventsAfter(ctx, "", domain, 1)
-		if err != nil {
-			return err
-		}
-		if len(newest) == 1 {
-			after = newest[0].ID
-		}
-	}
-	if once {
-		return nil
+// is said on errw and tried again: a database away for a moment does
+// not end it, one that stays away does.
+func tail(ctx context.Context, events store.Events, w, errw io.Writer, domain string, last int, every time.Duration, once bool) error {
+	f := &follower{events: events, w: w, domain: domain}
+	if err := f.begin(ctx, last); err != nil || once {
+		return err
 	}
 	tick := time.NewTicker(every)
 	defer tick.Stop()
-	for {
+	for failed := 0; ; {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-tick.C:
 		}
-		// With none recorded yet, the first that comes is the last one.
-		var (
-			page []store.Event
-			err  error
-		)
-		if after == "" {
-			page, err = events.EventsAfter(ctx, "", domain, tailPage)
-		} else {
-			page, err = events.EventsAfter(ctx, after, domain, tailPage)
+		err := f.look(ctx)
+		switch {
+		case err == nil:
+			failed = 0
+		case ctx.Err() != nil:
+			return nil
+		case failed+1 == tailTries:
+			return fmt.Errorf("the events could not be read %d times in a row: %w", tailTries, err)
+		default:
+			failed++
+			fmt.Fprintf(errw, "cairnpost: the events could not be read (%v); trying again\n", err)
 		}
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			fmt.Fprintln(os.Stderr, "cairnpost: the events could not be read; trying again")
-			continue
-		}
-		after = told(w, page, after)
 	}
-}
-
-// told writes events, one a line, and answers the last one's id, or the
-// one before if there were none.
-func told(w io.Writer, events []store.Event, after string) string {
-	for _, e := range events {
-		what := e.Kind
-		if e.Kind == store.EventBounced && e.Permanent {
-			what += " for good"
-		}
-		fmt.Fprintf(w, "%s  %-18s %-7s %s  from %s  email %s\n", e.At.UTC().Format("2006-01-02 15:04:05Z"), what, e.Code, e.Recipient, e.Sender, e.MessageID)
-		after = e.ID
-	}
-	return after
 }

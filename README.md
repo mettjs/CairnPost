@@ -487,7 +487,8 @@ cairnpost version               print the version
 `keys`, `suppressions`, `webhooks`, `tail` and `migrate` work on the database directly, so they run where the
 server runs. `tail` shows the last delivery events and then each new one
 (`-domain` for one sending domain's, `-last` for how many to begin with,
-`-once` to stop after them). `send` takes `-to`, `-cc` and `-bcc`, each
+`-once` to stop after them); it ends by itself if the database stays
+away. `send` takes `-to`, `-cc` and `-bcc`, each
 one address or several with commas between. A key has a scope, `send` or `admin`, and may be bound to one
 sending domain with `--domain`.
 

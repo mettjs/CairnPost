@@ -58,10 +58,13 @@ type Event struct {
 	// sending domain's suppression list. It is set by RecordEvent and
 	// answered with a delivery to be tried (Webhooks.TakeDeliveries).
 	Suppressed bool
-	// Sender and Recipient are the email's addresses as the event gives
-	// them, "" when it does not. They are used only when no message has the
-	// event's upstream id, to suppress an address that bounced for good
-	// all the same; they are never kept with the event.
+	// Sender and Recipient are, on an event handed to RecordEvent, the
+	// email's addresses as the event gives them, "" when it does not:
+	// Recipient says which address of the email it is about, and both
+	// serve, when no message has the event's upstream id, to suppress an
+	// address that bounced for good all the same. They are never kept
+	// with the event. On an event read back they are the addresses of
+	// the email it was recorded for.
 	Sender, Recipient string
 }
 
@@ -116,7 +119,12 @@ type Events interface {
 	// first, each with its email's addresses (Sender, Recipient): those
 	// recorded after the event after names, or, for "", the last limit
 	// of them. Of one sending domain, or of all ("").
-	EventsAfter(ctx context.Context, after, domain string, limit int) ([]Event, error)
+	//
+	// An event can come into view a moment after one recorded later
+	// than it. Whoever follows the events therefore asks again for the
+	// ones up to back before after as well, and passes over those it
+	// has seen.
+	EventsAfter(ctx context.Context, after string, back time.Duration, domain string, limit int) ([]Event, error)
 	// Record is an email and its events as they stood at one moment;
 	// ErrNotFound for an id no message has.
 	Record(ctx context.Context, messageID string) (Message, []Event, error)

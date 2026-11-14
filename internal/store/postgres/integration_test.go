@@ -564,26 +564,30 @@ func TestEventsAreReadInTheOrderTheyWereRecorded(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	last, err := db.EventsAfter(ctx, "", domain, 2)
+	last, err := db.EventsAfter(ctx, "", 0, domain, 2)
 	if err != nil || len(last) != 2 || last[0].MessageID != ids[1] || last[1].MessageID != ids[2] ||
 		last[1].Sender != "app@"+domain || last[1].Recipient == "" || last[1].Kind != store.EventBounced {
 		t.Fatalf("the last two: %+v %v", last, err)
 	}
-	all, _ := db.EventsAfter(ctx, "", domain, 10)
-	after, err := db.EventsAfter(ctx, all[0].ID, domain, 10)
+	all, _ := db.EventsAfter(ctx, "", 0, domain, 10)
+	after, err := db.EventsAfter(ctx, all[0].ID, 0, domain, 10)
 	if err != nil || len(all) != 3 || len(after) != 2 || after[0].ID != all[1].ID {
 		t.Fatalf("after the first: %+v %v", after, err)
 	}
-	if none, err := db.EventsAfter(ctx, all[2].ID, domain, 10); err != nil || len(none) != 0 {
+	if none, err := db.EventsAfter(ctx, all[2].ID, 0, domain, 10); err != nil || len(none) != 0 {
 		t.Fatalf("after the last: %+v %v", none, err)
 	}
-	if other, err := db.EventsAfter(ctx, "", "nothing."+domain, 10); err != nil || len(other) != 0 {
+	// Looking back from the last one answers the ones before it again.
+	if again, err := db.EventsAfter(ctx, all[2].ID, time.Minute, domain, 10); err != nil || len(again) != 3 || again[0].ID != all[0].ID {
+		t.Fatalf("looking back: %+v %v", again, err)
+	}
+	if other, err := db.EventsAfter(ctx, "", 0, "nothing."+domain, 10); err != nil || len(other) != 0 {
 		t.Fatalf("another domain's: %+v %v", other, err)
 	}
-	if every, err := db.EventsAfter(ctx, all[0].ID, "", 2); err != nil || len(every) != 2 {
+	if every, err := db.EventsAfter(ctx, all[0].ID, 0, "", 2); err != nil || len(every) != 2 {
 		t.Fatalf("of every domain: %+v %v", every, err)
 	}
-	if odd, err := db.EventsAfter(ctx, "not an id", domain, 10); err != nil || len(odd) != 0 {
+	if odd, err := db.EventsAfter(ctx, "not an id", 0, domain, 10); err != nil || len(odd) != 0 {
 		t.Fatalf("after what is no id: %+v %v", odd, err)
 	}
 }

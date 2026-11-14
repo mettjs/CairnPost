@@ -143,8 +143,9 @@ func (s *Store) EventsOf(_ context.Context, messageID string) ([]store.Event, er
 }
 
 // EventsAfter implements store.Events: events are kept in the order
-// they were recorded.
-func (s *Store) EventsAfter(_ context.Context, after, domain string, limit int) ([]store.Event, error) {
+// they were recorded, and none comes into view late, so there is
+// nothing to look back for.
+func (s *Store) EventsAfter(_ context.Context, after string, _ time.Duration, domain string, limit int) ([]store.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []store.Event

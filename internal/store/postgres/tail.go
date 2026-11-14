@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -12,12 +14,12 @@ import (
 
 // EventsAfter implements store.Events. An event's id is made when it is
 // recorded and ids are in time order, so "after" is "with a greater id".
-func (db *DB) EventsAfter(ctx context.Context, after, domain string, limit int) ([]store.Event, error) {
+func (db *DB) EventsAfter(ctx context.Context, after string, back time.Duration, domain string, limit int) ([]store.Event, error) {
 	const columns = `e.id::text, m.email_id::text, e.driver, e.kind, e.permanent, coalesce(e.code, ''),
 		coalesce(e.reason, ''), e.occurred_at, m.sender, m.recipient`
 	query, args, newest := `
 		SELECT `+columns+` FROM events e JOIN messages m ON m.id = e.message_id
-		WHERE e.id > $1::uuid AND ($2 = '' OR m.sender_domain = $2) ORDER BY e.id LIMIT $3`, []any{after, domain, limit}, false
+		WHERE e.id > $1::uuid AND ($2 = '' OR m.sender_domain = $2) ORDER BY e.id LIMIT $3`, []any{earlier(after, back), domain, limit}, false
 	switch {
 	case after == "":
 		// The last of them, read newest first and turned round.
@@ -43,4 +45,19 @@ func (db *DB) EventsAfter(ctx context.Context, after, domain string, limit int) 
 		slices.Reverse(out)
 	}
 	return out, nil
+}
+
+// earlier is the lowest id an event recorded by before id could have:
+// an id begins with the millisecond it was made in. An id that is not
+// of that form is answered as it is.
+func earlier(id string, by time.Duration) string {
+	if by <= 0 || !uuidShape.MatchString(id) {
+		return id
+	}
+	ms, err := strconv.ParseInt(id[:8]+id[9:13], 16, 64)
+	if err != nil {
+		return id
+	}
+	ms = max(ms-by.Milliseconds(), 0)
+	return fmt.Sprintf("%08x-%04x-7000-8000-000000000000", ms>>16, ms&0xffff)
 }
