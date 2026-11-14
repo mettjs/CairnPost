@@ -182,8 +182,7 @@ func (db *DB) ResumeEndpoint(ctx context.Context, id string) (store.Endpoint, bo
 		if _, err := tx.Exec(ctx, `
 			UPDATE webhook_deliveries d SET state = 'pending', next_at = now()
 			FROM webhook_endpoints e
-			WHERE e.id = $1::uuid AND e.paused_at IS NOT NULL AND d.endpoint_id = e.id
-			  AND d.state = 'failed' AND d.attempted_at >= e.failing_since`, id); err != nil {
+			WHERE e.id = $1::uuid AND d.endpoint_id = e.id AND `+givenUp, id); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `SELECT paused_at IS NOT NULL FROM webhook_endpoints WHERE id = $1::uuid`, id).Scan(&resumed); err != nil {

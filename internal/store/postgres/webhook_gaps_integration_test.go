@@ -63,6 +63,10 @@ func TestAnEndpointIsPausedAfterFailingAndResumedWithWhatItMissed(t *testing.T) 
 	if miss(given[0], true) {
 		t.Fatal("paused by a webhook given up on the first day")
 	}
+	// Given up by an endpoint that is not paused, it is owed no more.
+	if owed, err := db.Owed(ctx, []string{e.ID}, 100); err != nil || len(owed) != 0 {
+		t.Fatalf("owed after a webhook was given up: %v %v", owed, err)
+	}
 	if err := db.EndpointAnswered(ctx, e.ID); err != nil || read().FailingSince != nil {
 		t.Fatalf("after a test was answered: %+v %v", read().FailingSince, err)
 	}
@@ -107,6 +111,17 @@ func TestAnEndpointIsPausedAfterFailingAndResumedWithWhatItMissed(t *testing.T) 
 		t.Fatalf("a change resumed it: %+v %v", got, err)
 	}
 
+	// What it is said to be owed is what resuming it sends: the two that
+	// wait and the one given up while it failed, not the one it took.
+	owed, err := db.Owed(ctx, []string{e.ID, "nothing"}, 100)
+	if err != nil || len(owed) != 1 || owed[e.ID] != 3 {
+		t.Fatalf("a paused endpoint is said to be owed %v, want 3: %v", owed, err)
+	}
+
+	if capped, err := db.Owed(ctx, []string{e.ID}, 2); err != nil || capped[e.ID] != 2 {
+		t.Fatalf("counting to 2 at most said %v: %v", capped, err)
+	}
+
 	// Resumed: nothing is failing, and the one given up is owed again.
 	got, resumed, err := db.ResumeEndpoint(ctx, e.ID)
 	if err != nil || !resumed || got.PausedAt != nil || got.FailingSince != nil {
@@ -115,8 +130,11 @@ func TestAnEndpointIsPausedAfterFailingAndResumedWithWhatItMissed(t *testing.T) 
 	if list, _ := db.ListDeliveries(ctx, e.ID, store.DeliveryFailed, "", 10); len(list) != 0 {
 		t.Fatalf("still given up after resuming: %+v", list)
 	}
+	if after, err := db.Owed(ctx, []string{e.ID}, 100); err != nil || after[e.ID] != owed[e.ID] {
+		t.Fatalf("owed %v once resumed, %v before: %v", after, owed, err)
+	}
 	exec(t, `UPDATE webhook_deliveries SET next_at = now() - interval '1 second' WHERE endpoint_id = $1::uuid AND state = 'pending'`, e.ID)
-	if got := take(t, db, 10, e); len(got) != 3 {
+	if got := take(t, db, 10, e); len(got) != owed[e.ID] {
 		t.Fatalf("%d taken after resuming, want the three it is owed", len(got))
 	}
 	if _, resumed, err := db.ResumeEndpoint(ctx, e.ID); err != nil || resumed {
