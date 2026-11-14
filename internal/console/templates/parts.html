@@ -1,6 +1,12 @@
 {{/* Pieces more than one page draws: the shape that goes with a tone (ok, failing, wait, anything else is off), a bar of how much, a chart. */}}
 {{define "ico"}}{{if eq . "ok"}}<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path class="cut" d="M4.6 8.3l2.2 2.2 4.6-4.9"/></svg>{{else if eq . "failing"}}<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.2l7.2 13H.8z"/><path class="cut" d="M8 6v4M8 12v.4"/></svg>{{else if eq . "wait"}}<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13"/><path class="cut" d="M8 4.5v4M8 11v.4"/></svg>{{else}}<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><circle class="ring" cx="8" cy="8" r="6.2"/></svg>{{end}}{{end}}
-{{define "cairn"}}<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="13.5" width="16" height="4.5" rx="2.2"/><rect x="4.5" y="7.6" width="11" height="4.4" rx="2.2"/><rect x="7" y="2" width="6" height="4.2" rx="2.1"/></svg>{{end}}
+{{define "cairn"}}<svg viewBox="0 0 60 60" aria-hidden="true"><rect x="6" y="40.5" width="48" height="13.5" rx="6.6"/><rect x="13.5" y="22.8" width="33" height="13.2" rx="6.6"/><rect class="top" x="19.5" y="5" width="21" height="13.6" rx="2.6"/><path class="flap" d="M21.6 7.4l8.4 6.2 8.4-6.2"/></svg>{{end}}
+
+{{/* The parts of a page, as links: the one shown is marked. */}}
+{{define "subtabs"}}<nav class="subtabs" aria-label="{{.Label}}">{{range .Parts}}<a href="{{.URL}}"{{if .On}} aria-current="page"{{end}}>{{.Label}}{{with .N}} <span class="n">{{.}}</span>{{end}}</a>{{end}}</nav>{{end}}
+
+{{/* The ways to narrow a list, as links: the one in force is marked. */}}
+{{define "chips"}}<ul class="chips">{{range .}}<li><a href="{{.URL}}"{{if .On}} aria-current="true"{{end}}>{{.Label}}</a></li>{{end}}</ul>{{end}}
 
 {{define "track"}}<svg class="track{{if .High}} high{{end}}{{if .Wide}} wide{{end}}" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="rest" width="100" height="8"/><rect class="fill" width="{{.Fill}}" height="8"/></svg>{{end}}
 

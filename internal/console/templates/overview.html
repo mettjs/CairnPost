@@ -21,6 +21,7 @@
   {{if .Data.Unread}}
   <p class="problem" role="alert">The numbers could not be read. Reload the page to try again.</p>
   {{else}}
+  <div class="figures">
   <dl class="kpis">
     {{range .Data.Figures}}
     <div class="kpi kpi-{{.Key}}">
@@ -30,6 +31,8 @@
     </div>
     {{end}}
   </dl>
+  {{with .Data.Waiting}}<p class="note rest">{{.}} of those sent {{if eq . "1"}}has{{else}}have{{end}} no outcome yet: the mail provider took {{if eq . "1"}}it{{else}}them{{end}}, and no receiving server has answered. Those marked as spam arrived first, so they are among the delivered.</p>{{end}}
+  </div>
 
   <section class="sent" aria-labelledby="sent">
     <h2 id="sent">Sent</h2>
@@ -49,7 +52,7 @@
         </table>
       </div>
     </details>
-    <p class="note">Hours and days are in UTC. An email is counted where it was sent, whenever its outcome came.</p>
+    <p class="note">Hours and days are in {{.Data.Zone}}. An email is counted where it was sent, whenever its outcome came.</p>
     {{end}}
   </section>
 
@@ -88,7 +91,7 @@
       <li>
         <span class="state state-{{.Tone}}">{{template "ico" .Tone}}{{.Label}}</span>
         <span class="where"><a class="long" href="{{$.Root}}/webhooks/{{.ID}}">{{.URL}}</a><span class="says">{{.Says}}</span></span>
-        <span class="act">{{if .Paused}}<form method="post" action="{{$.Root}}/webhooks/{{.ID}}/resume"><button type="submit">Resume</button></form>{{end}}</span>
+        <span class="act">{{with .Owed}}<span class="owed"><b>{{.}}</b> owed</span>{{end}}{{if .Paused}}<form method="post" action="{{$.Root}}/webhooks/{{.ID}}/resume"><button type="submit">Resume</button></form>{{end}}</span>
       </li>
       {{end}}
     </ul>
@@ -98,7 +101,7 @@
     {{else if .Data.Off}}
     <p class="empty"><span class="state state-off">{{template "ico" "off"}}No endpoint is on.</span> {{template "others" .Data}} No application is being told what becomes of emails. <a href="{{.Root}}/webhooks">All webhooks</a></p>
     {{else}}
-    <p class="empty">No application is told what becomes of emails yet. <a href="{{.Root}}/webhooks#new">Make an endpoint</a></p>
+    <p class="empty">No application is told what becomes of emails yet. <a href="{{.Root}}/webhooks?tab=new">Make an endpoint</a></p>
     {{end}}
   </section>
 

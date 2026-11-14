@@ -91,7 +91,9 @@ code {
   overflow-wrap: anywhere;
 }
 
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Where the keyboard is: a dark ring with the highlight inside it, so it
+   shows on any ground. */
+:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; box-shadow: 0 0 0 2px var(--hi); }
 
 .sr {
   position: absolute; width: 1px; height: 1px; overflow: hidden;
@@ -114,7 +116,9 @@ code {
   font: 700 14px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--on-band); text-decoration: none;
 }
-.mark svg { width: 18px; height: 18px; fill: var(--hi); }
+.mark svg { width: 22px; height: 22px; fill: var(--on-band); }
+.mark .top { fill: var(--hi); }
+.mark .flap { fill: none; stroke: var(--band); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
 .pulse { display: flex; align-items: center; gap: 0.45rem; margin: 0; font-size: 14px; color: var(--on-band); }
 .pulse a { color: inherit; font-weight: 400; text-decoration: none; }
@@ -125,8 +129,7 @@ code {
 
 .who { display: flex; align-items: center; gap: 0.75rem; margin: 0 0 0 auto; }
 .who-name { color: var(--band-soft); font-size: 13px; white-space: nowrap; }
-.who-name code { background: none; padding: 0; color: inherit; }
-.who button.quiet { color: var(--on-band); background: transparent; border-color: var(--band-soft); min-height: 2rem; padding: 0.25rem 0.75rem; font-size: 14px; }
+.who button.quiet { color: var(--on-band); background: transparent; border-color: var(--band-soft); height: 2rem; padding: 0 0.75rem; font-size: 14px; }
 .who button.quiet:hover { background: transparent; border-color: var(--on-band); }
 
 .tabs { display: flex; flex-wrap: wrap; border-bottom: 2px solid var(--rule); }
@@ -150,7 +153,8 @@ h2 {
 
 .lede { color: var(--soft); font-size: 1.05rem; max-width: 65ch; margin: 0 0 2.25rem; }
 .narrow { max-width: 38rem; }
-.empty { color: var(--soft); padding: 1.5rem 0; margin: 0; }
+.empty { color: var(--soft); background: var(--sunk); padding: 1.75rem 1.5rem; margin: 0; max-width: none; }
+.empty b { color: var(--text); display: block; margin-bottom: 0.2rem; }
 
 .notice, .problem { padding: 0.85rem 1rem; max-width: 70ch; border-left: 4px solid; }
 .notice { background: var(--note-soft); border-color: var(--accent); margin: 0 0 2rem; }
@@ -161,22 +165,23 @@ main > .problem { margin: 0 0 2rem; }
 /* Forms: the label above, the hint below. */
 
 .field { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1.25rem; }
-label, legend { font-weight: 600; font-size: 0.9rem; }
+label, legend { font-weight: 600; font-size: 0.9rem; line-height: 1.4; }
 .hint { color: var(--soft); font-size: 0.875rem; margin: 0; }
 
-input, select {
+input {
   font: inherit; color: var(--text); background: var(--raised);
   border: 1px solid var(--muted); border-radius: var(--radius);
-  padding: 0.6rem 0.75rem; min-height: 2.75rem; width: 100%;
+  padding: 0.6rem 0.75rem; height: 2.75rem; width: 100%;
 }
-input:hover, select:hover { border-color: var(--text); }
+input:hover { border-color: var(--text); }
+input::placeholder { color: var(--muted); opacity: 1; }
 input[readonly] { background: var(--sunk); color: var(--soft); }
 
 button {
   font: inherit; font-weight: 600; cursor: pointer;
   color: var(--page); background: var(--text);
   border: 1px solid var(--text); border-radius: var(--radius);
-  padding: 0.6rem 1.1rem; min-height: 2.75rem; white-space: nowrap;
+  padding: 0 1.1rem; height: 2.75rem; white-space: nowrap;
 }
 button:hover { background: var(--soft); border-color: var(--soft); }
 button:active { transform: translateY(1px); }
@@ -184,7 +189,7 @@ button.quiet { color: var(--text); background: transparent; border-color: var(--
 button.quiet:hover { background: var(--sunk); border-color: var(--text); }
 /* A button in a row of a list: it reads as the links beside it. */
 button.link {
-  color: var(--text); background: none; border: 0; padding: 0; min-height: 0;
+  color: var(--text); background: none; border: 0; padding: 0; height: auto;
   font-weight: 550; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
 }
 button.link:hover { background: none; text-decoration-thickness: 2px; }
@@ -196,7 +201,8 @@ form.row {
   display: grid; gap: 0 1.25rem; align-items: start;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr) auto;
 }
-form.row button { margin-top: 1.75rem; }
+/* A button in a row of fields sits on the fields' line, under the labels. */
+form.row button { margin-top: calc(0.9rem * 1.4 + 0.4rem); }
 
 .actions { display: flex; align-items: center; gap: 1.5rem; margin-top: 2rem; }
 
@@ -204,15 +210,21 @@ form.row button { margin-top: 1.75rem; }
 fieldset.field { border: 0; padding: 0; margin: 0 0 1.25rem; min-width: 0; }
 legend { padding: 0; margin-bottom: 0.4rem; }
 .choice { display: flex; align-items: center; gap: 0.6rem; font-weight: 400; font-size: 1rem; padding: 0.3rem 0; }
-.choice input { width: 1.1rem; height: 1.1rem; min-height: 0; margin: 0; accent-color: var(--text); }
+.choice input {
+  appearance: none; -webkit-appearance: none; flex: none; cursor: pointer;
+  width: 1.2rem; height: 1.2rem; margin: 0; padding: 0;
+  border: 1.5px solid var(--text); border-radius: var(--radius); background: var(--raised);
+}
+.choice input[type="radio"] { border-radius: 50%; }
+/* Chosen: filled, with a rim of the page left inside the border. */
+.choice input:checked { background: var(--text); box-shadow: inset 0 0 0 3px var(--raised); }
+.choice input:checked:focus-visible { box-shadow: inset 0 0 0 3px var(--raised), 0 0 0 2px var(--hi); }
+.choice:hover input { border-width: 2px; }
 .choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0 1rem; margin: 0.25rem 0 0 1.7rem; }
 
 /* What can be done to the thing a page is about, in a row. */
 .row-actions { margin: 0 0 2rem; flex-wrap: wrap; gap: 0.75rem 1rem; }
 .row-actions form { margin: 0; }
-form.narrowing { display: flex; align-items: center; gap: 0.75rem; margin: 0 0 1.25rem; }
-form.narrowing select { width: auto; }
-form.narrowing input { max-width: 24rem; }
 .once .after { margin: 1rem 0 0; }
 
 /* A secret shown once. */
@@ -236,9 +248,11 @@ thead th {
   box-shadow: inset 0 -1px 0 var(--rule);
 }
 tbody tr + tr td { border-top: 1px solid var(--line); }
+tbody tr:hover td { background: var(--sunk); }
+td:first-child, th:first-child { padding-left: 0.75rem; }
 td:first-child { white-space: normal; overflow-wrap: anywhere; }
-td:last-child, th:last-child { padding-right: 0; }
-td.act { text-align: right; padding-right: 0; }
+td:last-child, th:last-child { padding-right: 0.75rem; }
+td.act { text-align: right; }
 tr.gone td { color: var(--soft); }
 .by { display: block; color: var(--soft); font-size: 0.85rem; font-weight: 400; }
 
@@ -306,6 +320,65 @@ dd { margin: 0; }
 .signin h1 { margin-bottom: 0.4rem; }
 .signin button { width: 100%; }
 
+/* The parts of a page: one is shown, the others are a link away. */
+
+.subtabs { display: flex; flex-wrap: wrap; gap: 0 2rem; margin: 0 0 2.25rem; border-bottom: 1px solid var(--line); }
+.subtabs a {
+  padding: 0.7rem 0; margin-bottom: -1px; border-bottom: 3px solid transparent;
+  color: var(--soft); font-weight: 550; text-decoration: none; white-space: nowrap;
+}
+.subtabs a:hover { color: var(--text); border-color: var(--muted); }
+.subtabs a[aria-current="page"] { color: var(--text); font-weight: 700; border-color: var(--rule); }
+.n { font: 600 0.75rem var(--mono); color: var(--soft); background: var(--sunk); padding: 0.1rem 0.4rem; margin-left: 0.35rem; border-radius: var(--radius); }
+
+/* A section that follows the parts needs no rule of its own. */
+h2.plain { margin-top: 2.5rem; padding-top: 0; border-top: 0; }
+
+/* Narrowing a list: the states as links, and what to look for. */
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem 2rem; margin: 0 0 1.5rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; margin: 0; padding: 0; }
+.chips a {
+  display: block; padding: 0.3rem 0.7rem; border: 1px solid var(--line);
+  font-size: 0.875rem; font-weight: 550; color: var(--soft); text-decoration: none; white-space: nowrap;
+}
+.chips a:hover { color: var(--text); border-color: var(--text); }
+.chips a[aria-current="true"] { background: var(--text); border-color: var(--text); color: var(--page); }
+.search { display: flex; gap: 0.5rem; margin: 0; flex: 0 1 26rem; }
+.search input { min-width: 0; }
+
+/* One of a few, as a row of buttons. */
+.seg { display: flex; flex-wrap: wrap; }
+.seg label { position: relative; margin: 0 -1px -1px 0; font-weight: 550; font-size: 0.95rem; }
+.seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.seg span { display: flex; align-items: center; height: 2.75rem; padding: 0 0.9rem; border: 1px solid var(--muted); background: var(--raised); color: var(--soft); }
+.seg label:hover span { color: var(--text); border-color: var(--text); position: relative; }
+.seg input:checked + span { background: var(--text); border-color: var(--text); color: var(--page); position: relative; }
+.seg input:focus-visible + span { outline: 2px solid var(--text); outline-offset: 2px; box-shadow: 0 0 0 2px var(--hi); position: relative; z-index: 1; }
+
+/* A form of its own: one field under the other. */
+form.stack { max-width: 40rem; }
+form.stack button { margin-top: 0.5rem; }
+form.tight { margin-bottom: 0.5rem; }
+
+/* What few need, folded away. */
+details.fold { margin: 1.25rem 0 0; }
+details.fold summary, details.astable summary { cursor: pointer; list-style: none; color: var(--soft); font-size: 0.9rem; font-weight: 550; }
+details.fold summary::-webkit-details-marker, details.astable summary::-webkit-details-marker { display: none; }
+details.fold summary::before, details.astable summary::before { content: "+"; display: inline-block; width: 1.1rem; font: 700 1rem var(--mono); color: var(--text); }
+details.fold[open] summary::before, details.astable[open] summary::before { content: "\2212"; }
+details.fold summary:hover, details.astable summary:hover { color: var(--text); }
+details.fold .facts { margin-top: 0.75rem; border-top: 1px solid var(--line); }
+
+a.danger { color: var(--bad); white-space: nowrap; }
+
+/* Where the system sets the colours, what is chosen is still told apart. */
+@media (forced-colors: active) {
+  .choice input:checked { background: Highlight; border-color: Highlight; }
+  .seg input:checked + span, .chips a[aria-current="true"] { forced-color-adjust: none; background: Highlight; border-color: Highlight; color: HighlightText; }
+  .subtabs a[aria-current="page"] { border-color: Highlight; }
+}
+
 /* A phone: one column. The pages wrap onto more lines, so the one being
    read is never scrolled out of sight. */
 
@@ -323,7 +396,10 @@ dd { margin: 0; }
   .facts > div { grid-template-columns: 1fr; gap: 0.15rem; }
   .events li { grid-template-columns: 1fr; gap: 0.2rem; }
   .records li { grid-template-columns: 1fr; gap: 0.4rem; }
-  form.narrowing { flex-wrap: wrap; }
+    .subtabs { gap: 0 1.4rem; }
+  .search { flex-basis: 100%; }
+  tbody tr:hover td { background: none; }
+  td:first-child, td:last-child { padding-inline: 0; }
   .secret { flex-direction: column; align-items: stretch; }
 
   /* A table becomes a list: each row a block, each cell named. */

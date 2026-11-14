@@ -20,6 +20,9 @@ type webhooksView struct {
 	Problem    string
 	Form       hookForm
 	Unread     bool
+	// Tab is the part shown: "" the list, "new" the form.
+	Tab  string
+	Tabs tabs
 }
 
 // hookForm is an endpoint as a form holds it.
@@ -79,6 +82,14 @@ func (c *console) webhooksShown(w http.ResponseWriter, r *http.Request, code int
 		c.Log.Error("console: the webhook endpoints could not be read", "error", err)
 		v.Unread = true
 	}
+	forced := ""
+	if v.Problem != "" {
+		forced = "new"
+	}
+	if v.Tab = tabOf(r, forced, "new"); v.Made != nil {
+		v.Tab = "" // an endpoint just made is shown above the list
+	}
+	v.Tabs = tabsOf("Webhooks", "/webhooks", nil, v.Tab, tab{Label: "Endpoints", N: len(list)}, tab{Key: "new", Label: "New endpoint"})
 	if v.Endpoints = list; v.Form.Types == nil {
 		v.Form.All, v.Form.Types = true, choices(nil)
 	}

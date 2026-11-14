@@ -35,7 +35,7 @@ type quotaView struct {
 
 // quota is the provider's allowance; nil for a provider that has none
 // to tell. How often the provider is really asked is its driver's rule.
-func (c *console) quota(ctx context.Context) *quotaView {
+func (c *console) quota(ctx context.Context, zone *time.Location) *quotaView {
 	if c.Quota == nil {
 		return nil
 	}
@@ -50,10 +50,10 @@ func (c *console) quota(ctx context.Context) *quotaView {
 		}
 		return &quotaView{Unread: true}
 	}
-	return quotaShown(q)
+	return quotaShown(q, zone)
 }
 
-func quotaShown(q Quota) *quotaView {
+func quotaShown(q Quota, zone *time.Location) *quotaView {
 	v := &quotaView{Used: count(q.Used), Limit: count(q.Limit), Left: count(max(q.Limit-q.Used, 0)), Per: q.Per,
 		Over: q.Over || (q.Limit > 0 && q.Used >= q.Limit), Wide: true}
 	if q.Limit > 0 {
@@ -61,7 +61,7 @@ func quotaShown(q Quota) *quotaView {
 	}
 	v.High = v.Over
 	if !q.ResetsAt.IsZero() {
-		v.Resets = "at " + when(q.ResetsAt)
+		v.Resets = "at " + when(q.ResetsAt.In(zone))
 	}
 	return v
 }

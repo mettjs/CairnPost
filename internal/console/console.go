@@ -56,12 +56,17 @@ type Deps struct {
 	// PauseAfter is how long a webhook endpoint may fail every try
 	// before it is paused, 0 for never: the pages say so.
 	PauseAfter time.Duration
-	Log        *slog.Logger
+	// Zone is the time zone times are said in for a browser that has
+	// not said its own; nil is UTC.
+	Zone *time.Location
+	Log  *slog.Logger
 }
 
 type console struct {
 	Deps
 	pages pages
+	// zones are the time zones browsers have named, loaded.
+	zones zones
 	// assets is a word that changes when the stylesheet or the script
 	// does, put in their URLs so a browser never runs old ones.
 	assets string
@@ -69,6 +74,9 @@ type console struct {
 
 // New returns the console's handler, to be mounted at Root.
 func New(d Deps) http.Handler {
+	if d.Zone == nil {
+		d.Zone = time.UTC
+	}
 	c := &console{Deps: d, pages: parse(), assets: assetsVersion()}
 	mux := c.routes()
 	// A change is a POST, and a POST from another site is refused before

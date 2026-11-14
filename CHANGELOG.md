@@ -74,8 +74,15 @@ Every change a user of CairnPost can notice is written here. The format is
   hours, 7 days or 30 days and what became of it, as numbers and charts
   drawn by the server; each sending domain's bounce rate, marked at
   `CAIRNPOST_BOUNCE_WARN` percent (5); the mail provider's allowance; the
-  webhook endpoints that are failing or paused; and whether each part of
-  the server is working, which every page says at its top.
+  webhook endpoints that are failing or paused, with how many webhooks
+  each is owed; and whether each part of the server is working, which
+  every page says at its top.
+- The console says times in the time zone of the browser that asks, and
+  cuts the first page's hours and days in it. Without scripts it is the
+  server's own (`TZ`), or `CAIRNPOST_CONSOLE_TIMEZONE`.
+- The console's pages are in parts, each with its own address: the list
+  of a page first, its forms a tab away. A list is narrowed to a state by
+  links above it.
 - The console lists the emails on record, newest first, narrowed to a
   state or a recipient, and shows what happened to each and, where content
   is kept, what it said. A recipient looked for is never in a page's

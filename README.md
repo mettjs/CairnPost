@@ -337,7 +337,7 @@ manage the suppression list and the webhook endpoints, check each sending
 domain's DNS, and list, make and revoke API keys. A new key is shown once,
 on the page that made it.
 
-- The first page counts an email in the hour or day it was sent (UTC),
+- The first page counts an email in the hour or day it was sent,
   whenever its outcome came, and compares the period, up to its last
   whole hour, with the same stretch one period earlier. Emails the mail
   provider refused, or gave no answer about, are said apart.
@@ -349,8 +349,17 @@ on the page that made it.
   (5) or more of its emails in the period bounced, once it sent at least
   50: fewer are not a rate. The page also shows the mail provider's
   allowance, asked for at most once a minute, the webhook endpoints that
-  are failing or paused, and whether each part of the server is working,
-  which every page says in one line at the top.
+  are failing or paused with how many webhooks each is owed, and whether
+  each part of the server is working, which every page says in one line
+  at the top.
+- Times are said in the time zone of the browser that asks, and the
+  first page's hours and days are that zone's. A browser that runs no
+  scripts gets the server's own zone, which `TZ` sets, or
+  `CAIRNPOST_CONSOLE_TIMEZONE` for the console alone; in a container
+  with neither that is UTC. The image carries the time zones itself.
+  The API and the commands say UTC whatever this is. Emails are counted
+  by the hour of UTC, so in a zone half an hour off a day's edge on the
+  first page is up to an hour off.
 
 - A sign-in lasts `CAIRNPOST_CONSOLE_SESSION` (12 hours), ends when you
   sign out, and ends at once if the key is revoked. Make the setting
@@ -466,6 +475,7 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_CONSOLE` | `on` | Serve the console at `/console`. `off` leaves it out. |
 | `CAIRNPOST_CONSOLE_SESSION` | `12h` | How long a sign-in to the console lasts: a minute at least, 30 days at most. |
 | `CAIRNPOST_BOUNCE_WARN` | `5` | The share of a sending domain's emails, in percent, that bounced at which the console's first page marks the domain. `off` marks none. |
+| `CAIRNPOST_CONSOLE_TIMEZONE` | the system's | The time zone the console says times in for a browser that does not say its own, by name (`Europe/Berlin`, `UTC`). Unset, the system's own, which `TZ` sets. |
 | `CAIRNPOST_CONSOLE_PLAIN_HTTP` | `off` | Let the console's session cookie travel without TLS, for a console opened over plain http in development. |
 | `CAIRNPOST_MAX_KEYS` | `200` | How many keys that are not revoked one sending domain may have, and how many the keys bound to no domain may be. |
 | `CAIRNPOST_WEBHOOK_TIMEOUT` | `10s` | The most one try at delivering a webhook may take. |

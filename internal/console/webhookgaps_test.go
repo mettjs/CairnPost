@@ -18,7 +18,7 @@ func TestASigningSecretIsChangedAfterAsking(t *testing.T) {
 	b, l := r.signedIn(r.admin), listen(t)
 	id := r.made(b, url.Values{"url": {l.URL + "/hook?token=" + token}})
 	at := "/webhooks/" + id
-	if page := b.do("GET", at, nil).Body.String(); !strings.Contains(page, at+`/secret">Change the secret</a>`) {
+	if page := b.do("GET", at+"?tab=settings", nil).Body.String(); !strings.Contains(page, at+`/secret">Change the secret</a>`) {
 		t.Fatalf("the endpoint's page does not lead to it: %s", page)
 	}
 	asks := b.do("GET", at+"/secret", nil)
@@ -39,7 +39,7 @@ func TestASigningSecretIsChangedAfterAsking(t *testing.T) {
 	if page := b.do("GET", at+"/secret", nil).Body.String(); strings.Contains(page, "whsec_") || !strings.Contains(page, "Change the signing secret?") {
 		t.Fatalf("asked for again, the page shows the secret: %s", page)
 	}
-	if page := b.do("GET", at, nil).Body.String(); !strings.Contains(page, "webhooks are signed with the one before as well") {
+	if page := b.do("GET", at+"?tab=settings", nil).Body.String(); !strings.Contains(page, "webhooks are signed with the one before as well") {
 		t.Fatalf("the endpoint's page does not say the old one still signs: %s", page)
 	}
 	// Another domain's key meets no such endpoint, either way.
@@ -78,7 +78,7 @@ func TestAPausedEndpointSaysSoAndIsResumed(t *testing.T) {
 	miss(false)
 	if page := b.do("GET", at, nil).Body.String(); !strings.Contains(page, "Every try since") ||
 		!strings.Contains(page, "once that has gone on for 2 days, the endpoint is paused.") || !strings.Contains(page, ">Turn off<") ||
-		strings.Contains(page, ">Resume<") {
+		strings.Contains(page, ">Resume<") || !strings.Contains(page, "<strong>1 webhook waits to be sent.</strong>") {
 		t.Fatalf("a failing endpoint: %s", page)
 	}
 	// A test that is answered ends the failing, and the page stops saying it.
@@ -90,7 +90,7 @@ func TestAPausedEndpointSaysSoAndIsResumed(t *testing.T) {
 	miss(true)
 	b = r.signedIn(r.admin) // two days on, the sign-in is over
 	page := b.do("GET", at, nil).Body.String()
-	for _, want := range []string{`</svg>Paused</span>`, "It is still owed everything that happens", ">Resume<", at + `/resume"`,
+	for _, want := range []string{`</svg>Paused</span>`, "It is still owed everything that happens", "<strong>It is owed 1 webhook.</strong>", ">Resume<", at + `/resume"`,
 		">Turn off<", `name="enabled" value="off"`, "Try when resumed"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the paused endpoint's page lacks %q", want)

@@ -1,4 +1,16 @@
-// The console works without this file. It adds two comforts.
+// The console works without this file. It adds a few comforts.
+
+// Times are said in this browser's time zone: its name is kept in a
+// cookie the server reads. Without this file they are in the server's.
+(function () {
+  try {
+    var zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    var root = document.documentElement.getAttribute("data-root") || "/";
+    if (zone && document.cookie.split("; ").indexOf("cairnpost_console_zone=" + zone) < 0) {
+      document.cookie = "cairnpost_console_zone=" + zone + "; path=" + root + "; max-age=31536000; samesite=lax";
+    }
+  } catch (e) {}
+})();
 
 // A button that copies a secret shown once.
 document.addEventListener("click", function (event) {

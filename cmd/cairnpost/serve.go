@@ -168,7 +168,7 @@ func serve(ctx context.Context) error {
 			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout, cfg.DNSServer), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
 			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, EventsOff: eventsOff,
 			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP,
-			PauseAfter: cfg.Webhook.PauseAfter, Stats: stats.New(db, cfg.Console.BounceWarn),
+			PauseAfter: cfg.Webhook.PauseAfter, Stats: stats.New(db, cfg.Console.BounceWarn), Zone: cfg.Console.Zone,
 			Quota: consoleQuota(drv), Log: log})
 		both.Handle(console.Root, pages)
 		both.Handle(console.Root+"/", pages)

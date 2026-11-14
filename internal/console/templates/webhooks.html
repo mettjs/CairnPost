@@ -3,48 +3,12 @@
 <h1>Webhooks</h1>
 <p class="lede">An endpoint is a URL of an application that is told what becomes of emails: delivered, bounced, marked as spam. Each webhook is signed with the endpoint's own secret.{{if .Data.Bound}} You are signed in with a key that manages <code>{{.Data.Bound}}</code>, so you see and make that domain's endpoints only.{{end}}</p>
 
-{{if .Data.Problem}}<p class="problem" role="alert">The endpoint was not made. {{.Data.Problem}} <a href="#new">Go to the form</a></p>{{end}}
+{{template "subtabs" .Data.Tabs}}
 
-{{with .Data.Made}}
-<section class="once" aria-labelledby="made">
-  <h2 id="made">The endpoint was made</h2>
-  <p>This is its signing secret. Copy it now, into the application that will verify the webhooks. It is shown this once and cannot be read again.</p>
-  <div class="secret">
-    <code id="new-secret">{{$.Data.MadeSecret}}</code>
-    <button class="quiet" type="button" data-copy="new-secret">Copy</button>
-  </div>
-  <p class="after"><a href="{{$.Root}}/webhooks/{{.ID}}">Open the endpoint</a> to send it a test.</p>
-</section>
-{{end}}
-
-<section aria-labelledby="all">
-  <h2 id="all">Endpoints</h2>
-  {{if .Data.Unread}}
-  <p class="problem" role="alert">The endpoints could not be read. Reload the page to try again.</p>
-  {{else if not .Data.Endpoints}}
-  <p class="empty">There are no endpoints yet. Make one below.</p>
-  {{else}}
-  <div class="scroll" tabindex="0" role="region" aria-labelledby="all">
-    <table>
-      <thead><tr><th>URL</th><th>Sending domain</th><th>Hears about</th><th>State</th><th>Made</th></tr></thead>
-      <tbody>
-      {{range .Data.Endpoints}}
-      <tr{{if not .Enabled}} class="gone"{{end}}>
-        <td data-label="URL"><a href="{{$.Root}}/webhooks/{{.ID}}">{{.URL}}</a>{{if .Description}} <span class="by">{{.Description}}</span>{{end}}</td>
-        <td data-label="Sending domain">{{if .Domain}}<code>{{.Domain}}</code>{{else}}Any{{end}}</td>
-        <td data-label="Hears about" class="wrap">{{if not .Kinds}}Every event{{else}}{{range $i, $k := .Kinds}}{{if $i}}, {{end}}<code>{{typeOf $k}}</code>{{end}}{{end}}</td>
-        <td data-label="State"><span class="state state-{{endpointTone .}}">{{template "ico" (endpointTone .)}}{{endpointLabel .}}</span></td>
-        <td data-label="Made"><time datetime="{{stamp .CreatedAt}}" title="{{when .CreatedAt}}">{{day .CreatedAt}}</time></td>
-      </tr>
-      {{end}}
-      </tbody>
-    </table>
-  </div>
-  {{end}}
-</section>
-
+{{if eq .Data.Tab "new"}}
 <section aria-labelledby="new" class="narrow">
-  <h2 id="new">Make an endpoint</h2>
+  <h2 id="new" class="sr">Make an endpoint</h2>
+  {{if .Data.Problem}}<p class="problem" role="alert">The endpoint was not made. {{.Data.Problem}}</p>{{end}}
   <form method="post" action="{{.Root}}/webhooks">
     {{template "hookfields" .Data.Form}}
     <div class="field">
@@ -60,4 +24,44 @@
     <button type="submit">Make endpoint</button>
   </form>
 </section>
+{{else}}
+{{with .Data.Made}}
+<section class="once" aria-labelledby="made">
+  <h2 id="made">The endpoint was made</h2>
+  <p>This is its signing secret. Copy it now, into the application that will verify the webhooks. It is shown this once and cannot be read again.</p>
+  <div class="secret">
+    <code id="new-secret">{{$.Data.MadeSecret}}</code>
+    <button class="quiet" type="button" data-copy="new-secret">Copy</button>
+  </div>
+  <p class="after"><a href="{{$.Root}}/webhooks/{{.ID}}">Open the endpoint</a> to send it a test.</p>
+</section>
+{{end}}
+
+<section aria-labelledby="all">
+  <h2 id="all" class="sr">Endpoints</h2>
+  {{if .Data.Unread}}
+  <p class="problem" role="alert">The endpoints could not be read. Reload the page to try again.</p>
+  {{else if not .Data.Endpoints}}
+  <p class="empty"><b>There are no endpoints yet.</b> No application is told what becomes of emails. <a href="{{.Root}}/webhooks?tab=new">Make an endpoint</a></p>
+  {{else}}
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="all">
+    <table>
+      <thead><tr><th>URL</th><th>Sending domain</th><th>Hears about</th><th>State</th><th>Made</th></tr></thead>
+      <tbody>
+      {{range .Data.Endpoints}}
+      <tr{{if not .Enabled}} class="gone"{{end}}>
+        <td data-label="URL"><a href="{{$.Root}}/webhooks/{{.ID}}">{{.URL}}</a>{{if .Description}} <span class="by">{{.Description}}</span>{{end}}</td>
+        <td data-label="Sending domain">{{if .Domain}}<code>{{.Domain}}</code>{{else}}Any{{end}}</td>
+        <td data-label="Hears about" class="wrap">{{if not .Kinds}}Every event{{else}}{{range $i, $k := .Kinds}}{{if $i}}, {{end}}<code>{{typeOf $k}}</code>{{end}}{{end}}</td>
+        <td data-label="State"><span class="state state-{{endpointTone .}}">{{template "ico" (endpointTone .)}}{{endpointLabel .}}</span></td>
+        <td data-label="Made"><time datetime="{{stamp .CreatedAt}}" title="{{when $.Zone .CreatedAt}}">{{day $.Zone .CreatedAt}}</time></td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+</section>
+
+{{end}}
 {{end}}

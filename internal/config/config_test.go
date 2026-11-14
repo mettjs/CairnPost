@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	_ "time/tzdata" // a zone by name, wherever the tests run
 )
 
 func env(pairs ...string) func(string) string {
@@ -165,6 +166,12 @@ func TestConsoleSettings(t *testing.T) {
 	if err != nil || c.Console.Session != time.Minute || c.MaxKeys != 7 || !c.Webhook.AllowPrivate {
 		t.Fatalf("the shortest session, a key limit, on: %+v %d %v", c.Console, c.MaxKeys, err)
 	}
+	if c.Console.Zone != time.Local {
+		t.Fatalf("the console's zone is %v, want the system's own", c.Console.Zone)
+	}
+	if c, err = Load(env(append(base, "CAIRNPOST_CONSOLE_TIMEZONE", " Asia/Kolkata ")...)); err != nil || c.Console.Zone.String() != "Asia/Kolkata" {
+		t.Fatalf("a time zone: %v %v", c.Console.Zone, err)
+	}
 	if c, err = Load(env(base...)); err != nil || c.MaxKeys != 200 || c.DNSTimeout != 6*time.Second {
 		t.Fatalf("the defaults: %d %s %v", c.MaxKeys, c.DNSTimeout, err)
 	}
@@ -175,6 +182,7 @@ func TestConsoleSettings(t *testing.T) {
 		{"CAIRNPOST_CONSOLE", "maybe"}, {"CAIRNPOST_CONSOLE_SESSION", "721h"}, {"CAIRNPOST_CONSOLE_SESSION", "500ms"},
 		{"CAIRNPOST_CONSOLE_PLAIN_HTTP", "yes please"}, {"CAIRNPOST_MAX_KEYS", "100001"}, {"CAIRNPOST_MAX_KEYS", "many"},
 		{"CAIRNPOST_DNS_TIMEOUT", "500ms"}, {"CAIRNPOST_DNS_TIMEOUT", "2m"}, {"CAIRNPOST_DNS_TIMEOUT", "soon"},
+		{"CAIRNPOST_CONSOLE_TIMEZONE", "Mars/Olympus"},
 	} {
 		if _, err := Load(env(append(base, bad[0], bad[1])...)); err == nil || !strings.Contains(err.Error(), bad[0]) {
 			t.Errorf("%s=%s: %v", bad[0], bad[1], err)

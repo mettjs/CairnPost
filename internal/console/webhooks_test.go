@@ -164,17 +164,18 @@ func TestAnEndpointIsChangedTestedAndRemoved(t *testing.T) {
 	id := r.made(b, url.Values{"url": {hook}, "hears": {"some"}, "events": {"email.bounced"}})
 	at := "/webhooks/" + id
 	page := b.do("GET", at, nil).Body.String()
-	if !strings.Contains(page, token) || !strings.Contains(page, `value="email.bounced" checked`) || !strings.Contains(page, "Nothing has been sent to it yet") {
+	if !strings.Contains(page, token) || !strings.Contains(page, "Nothing has been sent to it yet") || strings.Contains(page, `name="events"`) ||
+		!strings.Contains(b.do("GET", at+"?tab=settings", nil).Body.String(), `value="email.bounced" checked`) {
 		t.Fatalf("the endpoint's page: %s", page)
 	}
 	// To every event, and it stays every event through another change.
 	for _, description := range []string{"first", "second"} {
 		rec := b.do("POST", at, url.Values{"url": {hook}, "hears": {"all"}, "description": {description}})
-		if rec.Code != 303 || rec.Header().Get("Location") != "/console"+at {
+		if rec.Code != 303 || rec.Header().Get("Location") != "/console"+at+"?tab=settings" {
 			t.Fatalf("a change: %d %s", rec.Code, rec.Header().Get("Location"))
 		}
 		r.leaks(rec, "after a change")
-		if page = b.do("GET", at, nil).Body.String(); !strings.Contains(page, "The endpoint was changed.") || !strings.Contains(page, `value="all" checked`) ||
+		if page = b.do("GET", at+"?tab=settings", nil).Body.String(); !strings.Contains(page, "The endpoint was changed.") || !strings.Contains(page, `value="all" checked`) ||
 			strings.Contains(page, `" checked> <code>`) || !strings.Contains(page, `value="`+description+`"`) {
 			t.Fatalf("after changing to every event (%s): %s", description, page)
 		}
@@ -290,7 +291,7 @@ func TestAnEndpointsDeliveriesAreShownAndRetried(t *testing.T) {
 		t.Fatalf("%d and %d deliveries", len(mine), len(theirs))
 	}
 	if page = b.follow("POST", at+"/deliveries/"+mine[0].ID+"/retry", url.Values{"in": {"pending"}}).Body.String(); !strings.Contains(page, "is being tried again now") ||
-		!strings.Contains(page, `value="pending" selected`) {
+		!strings.Contains(page, `?state=pending" aria-current="true"`) {
 		t.Fatalf("after a retry: %s", page)
 	}
 	// What is done from a page of the list leads back to that page.

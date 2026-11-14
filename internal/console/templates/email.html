@@ -7,11 +7,17 @@
 <dl class="facts">
   <div><dt>To</dt><dd class="long">{{.Data.Email.Recipient}}</dd></div>
   <div><dt>From</dt><dd class="long">{{.Data.Email.Sender}}</dd></div>
-  <div><dt>Sent</dt><dd><time datetime="{{stamp .Data.Email.CreatedAt}}">{{when .Data.Email.CreatedAt}}</time></dd></div>
-  <div><dt>Last heard of</dt><dd><time datetime="{{stamp .Data.Email.UpdatedAt}}">{{when .Data.Email.UpdatedAt}}</time></dd></div>
-  <div><dt>Id</dt><dd><code>{{.Data.Email.ID}}</code></dd></div>
-  <div><dt>Mail provider</dt><dd><code>{{.Data.Email.Driver}}</code>{{if .Data.Email.UpstreamID}} knows it as <code>{{.Data.Email.UpstreamID}}</code>{{end}}</dd></div>
+  <div><dt>Sent</dt><dd><time datetime="{{stamp .Data.Email.CreatedAt}}">{{when $.Zone .Data.Email.CreatedAt}}</time></dd></div>
+  <div><dt>Last heard of</dt><dd><time datetime="{{stamp .Data.Email.UpdatedAt}}">{{when $.Zone .Data.Email.UpdatedAt}}</time></dd></div>
+  <div><dt>Mail provider</dt><dd>{{.Data.Email.Driver}}</dd></div>
 </dl>
+<details class="fold">
+  <summary>Its names, for the API and the mail provider</summary>
+  <dl class="facts">
+    <div><dt>In the API</dt><dd><code>{{.Data.Email.ID}}</code></dd></div>
+    {{if .Data.Email.UpstreamID}}<div><dt>At the mail provider</dt><dd><code>{{.Data.Email.UpstreamID}}</code></dd></div>{{end}}
+  </dl>
+</details>
 
 <section aria-labelledby="happened">
   <h2 id="happened">What happened to it</h2>
@@ -22,7 +28,7 @@
   <ol class="events" tabindex="0" aria-labelledby="happened">
     {{range .Data.Events}}
     <li>
-      <time datetime="{{stamp .At}}">{{when .At}}</time>
+      <time datetime="{{stamp .At}}">{{when $.Zone .At}}</time>
       <div>
         <span class="state state-{{tone (stateOf .Kind)}}">{{template "ico" (tone (stateOf .Kind))}}{{happened .Kind}}</span>{{if .Permanent}} <span class="tag">for good</span>{{end}}
         {{if or .Code .Reason}}<span class="why">{{if .Code}}<code>{{.Code}}</code>{{end}} {{.Reason}}</span>{{end}}
@@ -42,7 +48,7 @@
   <p class="empty">Nothing this email said is kept. A server keeps what emails say only while <code>CAIRNPOST_CONTENT_RETENTION</code> is set, and only for that long.</p>
   {{else}}
   {{with .Data.Content}}
-  <p class="hint">Kept until <time datetime="{{stamp .KeptUntil}}">{{when .KeptUntil}}</time>, then deleted. Shown as it was written, not as a mail program would draw it.</p>
+  <p class="hint">Kept until <time datetime="{{stamp .KeptUntil}}">{{when $.Zone .KeptUntil}}</time>, then deleted. Shown as it was written, not as a mail program would draw it.</p>
   <dl class="facts">
     <div><dt>Subject</dt><dd class="long">{{.Subject}}</dd></div>
     {{if .FromName}}<div><dt>Sender's name</dt><dd class="long">{{.FromName}}</dd></div>{{end}}

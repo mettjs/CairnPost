@@ -9,6 +9,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	// The time zones, for an image that has none of its own: the
+	// console says times in the one it is set to.
+	_ "time/tzdata"
 )
 
 // version is set at build time from the release's tag.

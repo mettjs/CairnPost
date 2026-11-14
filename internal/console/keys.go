@@ -24,6 +24,9 @@ type keysView struct {
 	// Unread says the list could not be read; More that it is longer
 	// than the page shows.
 	Unread, More bool
+	// Tab is the part shown: "" the list, "new" the form.
+	Tab  string
+	Tabs tabs
 }
 
 type keyForm struct{ Name, Scope, Domain string }
@@ -46,6 +49,18 @@ func (c *console) keysShown(w http.ResponseWriter, r *http.Request, code int, v 
 		list, v.More = list[:shownKeys], true
 	}
 	v.Keys = list
+	forced := ""
+	if v.Problem != "" {
+		forced = "new"
+	}
+	if v.Tab = tabOf(r, forced, "new"); v.Made != nil {
+		v.Tab = "" // a key just made is shown above the list
+	}
+	shown := tab{Label: "Keys", N: len(list)}
+	if v.More {
+		shown.N = 0 // more than are listed: no number is the number
+	}
+	v.Tabs = tabsOf("API keys", "/keys", nil, v.Tab, shown, tab{Key: "new", Label: "New key"})
 	if v.Form.Scope == "" {
 		v.Form.Scope = store.ScopeSend
 	}

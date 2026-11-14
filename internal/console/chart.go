@@ -117,7 +117,7 @@ func stepName(at time.Time, daily, full bool) string {
 	case daily:
 		return at.Format("2 Jan")
 	case full:
-		return at.Format("2 Jan, 15:04") + " UTC"
+		return at.Format("2 Jan, 15:04 ") + zoneName(at)
 	}
 	return at.Format("15:04")
 }
