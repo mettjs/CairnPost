@@ -226,11 +226,28 @@ func TestAQuotaThatCannotBeReadIsAnErrorAndIsNotKept(t *testing.T) {
 	if _, err := d.Quota(context.Background()); !errors.Is(err, driver.ErrUnavailable) {
 		t.Fatalf("a refusal: %v", err)
 	}
+	// Whoever asks right after is told the same, and Cloudflare is left
+	// alone; once that time is over it is asked again.
+	if _, err := d.Quota(context.Background()); !errors.Is(err, driver.ErrUnavailable) || s.calls != 1 {
+		t.Fatalf("asked again at once: %v, %d calls", err, s.calls)
+	}
+	later := func() { d.quota.failedAt = d.quota.failedAt.Add(-quotaRetry) }
+	later()
+	// A caller that left is no failure to remember.
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := d.Quota(gone); err == nil {
+		t.Fatal("a call nobody waited for answered")
+	}
+	if d.quota.failed != nil && time.Since(d.quota.failedAt) < quotaRetry {
+		t.Fatal("a caller that left was remembered as a failure")
+	}
 	for _, body := range []string{`{"success":false,"result":null}`, `{"success":true,"result":null}`, `{"success":true,"result":{}}`} {
 		s.status, s.body = 200, body
 		if q, err := d.Quota(context.Background()); err == nil {
 			t.Errorf("%s was read as %+v", body, q)
 		}
+		later()
 	}
 	// A reset time Cloudflare leaves empty is no reason to fail the rest.
 	s.body = `{"success":true,"result":{"quota":{"value":200,"unit":"day"},"usage":{"sent":0,"over_quota":false,"resets_at":""}}}`
