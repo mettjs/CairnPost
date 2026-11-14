@@ -43,10 +43,13 @@ func sendCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	body, _ := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"from": *from, "to": several(*to), "cc": several(*cc), "bcc": several(*bcc), "subject": *subject, "text": *text, "html": *html,
-		"attachments": files,
-	})
+	}
+	if files != nil {
+		fields["attachments"] = files
+	}
+	body, _ := json.Marshal(fields)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(*url, "/")+"/emails", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -56,7 +59,7 @@ func sendCommand(ctx context.Context, args []string) error {
 	if *idem != "" {
 		req.Header.Set("Idempotency-Key", *idem)
 	}
-	res, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	res, err := (&http.Client{Timeout: 3 * time.Minute}).Do(req)
 	if err != nil {
 		return fmt.Errorf("the server at %s did not answer: %w", *url, err)
 	}

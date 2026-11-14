@@ -170,7 +170,7 @@ func check(r Request, opt Options) (checked, error) {
 			return checked{}, &Invalid{"headers", fmt.Sprintf("The %q header must be one line of at most 2048 bytes.", name)}
 		}
 	}
-	files, err := attachments(r, opt.MaxAttachments, opt.MaxAttachmentBytes)
+	files, err := attachments(r, opt.MaxAttachments, opt.MaxAttachmentBytes, !opt.noInline)
 	if err != nil {
 		return checked{}, err
 	}

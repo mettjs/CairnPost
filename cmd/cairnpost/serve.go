@@ -159,7 +159,7 @@ func serve(ctx context.Context) error {
 		Requests: &metrics.Requests{}, Gauges: counted.gauges,
 		Mail: mailer, Keys: keyring, Suppress: suppressions,
 		Webhooks: endpoints, Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
-		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, MaxEmailBytes: emailBytes(cfg), Log: log,
+		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, MaxEmailBytes: emailBytes(cfg), MaxUploadBytes: cfg.MaxUploadBytes, Log: log,
 		Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy,
 	})
 	if cfg.Console.On {
@@ -184,10 +184,13 @@ func serve(ctx context.Context) error {
 		}
 	}
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler,
-		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: readTimeout,
 		// The slowest answers are a send and the try-out of a webhook
-		// endpoint: each must be able to run to its own timeout.
-		WriteTimeout: max(cfg.SendTimeout, cfg.Webhook.Timeout) + 20*time.Second, IdleTimeout: 2 * time.Minute}
+		// endpoint: each must be able to run to its own timeout. The
+		// time to answer is counted from the request's first line, so
+		// the time a body may take to arrive is part of it: a send that
+		// arrived slowly must still be answered once it is made.
+		WriteTimeout: readTimeout + max(cfg.SendTimeout, cfg.Webhook.Timeout) + 20*time.Second, IdleTimeout: 2 * time.Minute}
 
 	failed := make(chan error, 1)
 	go func() { failed <- srv.ListenAndServe() }()

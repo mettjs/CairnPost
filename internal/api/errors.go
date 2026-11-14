@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -78,7 +80,7 @@ func (a *app) failSend(w http.ResponseWriter, id string, err error) {
 				"Try again after the time in the Retry-After header.", ""}
 	case errors.Is(err, driver.ErrRejected):
 		p = problem{http.StatusUnprocessableEntity, "rejected_by_upstream",
-			"The mail provider refused this email for good. Check the addresses and the headers.", id}
+			"The mail provider refused this email for good. Check the addresses, the headers, and the size and kind of its files.", id}
 	case errors.As(err, &throttled):
 		if throttled.After > 0 {
 			w.Header().Set("Retry-After", seconds(throttled.After))
@@ -114,12 +116,18 @@ func (a *app) bodyUpTo(w http.ResponseWriter, r *http.Request, v any, shape stri
 	// sent without the cc its caller asked for is worse than no email.
 	dec.DisallowUnknownFields()
 	err := dec.Decode(v)
-	var tooBig *http.MaxBytesError
+	var (
+		tooBig *http.MaxBytesError
+		slow   net.Error
+	)
 	switch {
 	case err == nil:
 		return true
 	case errors.As(err, &tooBig):
 		fail(w, http.StatusRequestEntityTooLarge, "request_too_large", "The request body is larger than this server accepts.")
+	case errors.Is(err, os.ErrDeadlineExceeded), errors.As(err, &slow) && slow.Timeout():
+		// Not the request's fault, and nothing was done with it.
+		fail(w, http.StatusRequestTimeout, "request_incomplete", "The request did not arrive whole in time; nothing was done. Try again.")
 	default:
 		fail(w, http.StatusUnprocessableEntity, "validation_error", shape)
 	}

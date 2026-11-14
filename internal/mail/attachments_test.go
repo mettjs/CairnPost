@@ -2,11 +2,16 @@ package mail_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mettjs/cairnpost/internal/mail"
+	"github.com/mettjs/cairnpost/internal/store"
 )
 
 func pdf(name string, content string) mail.Attachment {
@@ -72,6 +77,32 @@ func TestAttachmentsThatCanNeverBeSent(t *testing.T) {
 		"a content id with no html": func(r *mail.Request) {
 			r.Attachments = []mail.Attachment{{Filename: "NAMEMARK", ContentID: "one", Content: []byte("x")}}
 		},
+		"a quote in the name":         func(r *mail.Request) { r.Attachments = []mail.Attachment{pdf(`NAMEMARK".pdf"; x="y`, "x")} },
+		"a name of dots":              func(r *mail.Request) { r.Attachments = []mail.Attachment{pdf("..", "x")} },
+		"a name that ends in a space": func(r *mail.Request) { r.Attachments = []mail.Attachment{pdf("NAMEMARK.pdf ", "x")} },
+		"a name turned round":         func(r *mail.Request) { r.Attachments = []mail.Attachment{pdf("NAMEMARK\u202efdp.exe", "x")} },
+		"a line separator":            func(r *mail.Request) { r.Attachments = []mail.Attachment{pdf("NAMEMARK\u2028b", "x")} },
+		"an unseen character":         func(r *mail.Request) { r.Attachments = []mail.Attachment{pdf("NAMEMARK\u200b.pdf", "x")} },
+		"a type with no slash": func(r *mail.Request) {
+			r.Attachments = []mail.Attachment{{Filename: "NAMEMARK", Type: "attachment", Content: []byte("x")}}
+		},
+		"a type of many parts": func(r *mail.Request) {
+			r.Attachments = []mail.Attachment{{Filename: "NAMEMARK", Type: "multipart/mixed; boundary=x", Content: []byte("x")}}
+		},
+		"a type that is an email": func(r *mail.Request) {
+			r.Attachments = []mail.Attachment{{Filename: "NAMEMARK", Type: "message/rfc822", Content: []byte("x")}}
+		},
+		"a type with a second name": func(r *mail.Request) {
+			r.Attachments = []mail.Attachment{{Filename: "NAMEMARK", Type: `text/plain; charset="x"; name="evil.exe"`, Content: []byte("x")}}
+		},
+		"a content id of two ats": func(r *mail.Request) {
+			r.HTML = "cid:a@@b"
+			r.Attachments = []mail.Attachment{{Filename: "NAMEMARK", ContentID: "a@@b", Content: []byte("x")}}
+		},
+		"a content id the html does not name": func(r *mail.Request) {
+			r.HTML = "<p>cid:other</p>"
+			r.Attachments = []mail.Attachment{{Filename: "NAMEMARK", ContentID: "one", Content: []byte("x")}}
+		},
 		"too many": func(r *mail.Request) {
 			for range mail.DefaultMaxAttachments + 1 {
 				r.Attachments = append(r.Attachments, pdf("NAMEMARK.pdf", "x"))
@@ -98,5 +129,37 @@ func TestAttachmentsThatCanNeverBeSent(t *testing.T) {
 	req.Attachments = []mail.Attachment{{Filename: "full.bin", Content: make([]byte, mail.DefaultMaxAttachmentBytes)}}
 	if _, err := r.send(req); err != nil {
 		t.Fatalf("at the limit: %v", err)
+	}
+}
+
+// plain is a driver that cannot send a file the HTML shows.
+type plain struct{ *fakeDriver }
+
+func (plain) NoInlineFiles() bool { return true }
+
+// What the driver cannot send is refused before anything is recorded,
+// in words that say what to change; and a type is sent written anew.
+func TestWhatTheProviderCannotSendIsRefusedFirst(t *testing.T) {
+	r := newRig(t)
+	r.svc = mail.New(r.store, plain{r.drv}, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
+		InDoubtWindow: 2 * time.Minute, MaxAttachments: -1}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	req := request("")
+	req.Attachments = []mail.Attachment{pdf("a.pdf", "x")}
+	var invalid *mail.Invalid
+	if _, err := r.send(req); !errors.As(err, &invalid) || r.drv.sends != 0 {
+		t.Fatalf("with files off: %v", err)
+	}
+	r.svc = mail.New(r.store, plain{r.drv}, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
+		InDoubtWindow: 2 * time.Minute}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	req.HTML = "<img src=cid:logo>"
+	req.Attachments = []mail.Attachment{{Filename: "logo.png", ContentID: "logo", Content: []byte("x")}}
+	_, err := r.send(req)
+	list, _ := r.store.Messages(context.Background(), store.MessageQuery{Limit: 10})
+	if !errors.As(err, &invalid) || !strings.Contains(invalid.Reason, "mail provider cannot send") || r.drv.sends != 0 || len(list) != 0 {
+		t.Fatalf("a file the html shows: %v, %d sends, %d on record", err, r.drv.sends, len(list))
+	}
+	req.Attachments = []mail.Attachment{{Filename: "a.txt", Type: " Text/Plain ; charset=UTF-8", Content: []byte("x")}}
+	if _, err := r.send(req); err != nil || r.drv.last.Attachments[0].Type != "text/plain; charset=UTF-8" {
+		t.Fatalf("%v %+v", err, r.drv.last.Attachments)
 	}
 }

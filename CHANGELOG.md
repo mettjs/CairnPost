@@ -23,7 +23,10 @@ Every change a user of CairnPost can notice is written here. The format is
   beside it or shown in its HTML by a `content_id`, within
   `CAIRNPOST_MAX_ATTACHMENTS` and `CAIRNPOST_MAX_ATTACHMENT_BYTES`. What a
   file holds is never kept or logged. `cairnpost send -attach`. Through
-  Cloudflare a file with a `content_id` is refused for now.
+  Cloudflare a file with a `content_id` is refused for now. Only so many
+  large sends are taken at one time (`CAIRNPOST_MAX_UPLOAD_BYTES`), and a
+  request that does not arrive whole in time answers 408
+  `request_incomplete`.
 - Delivery events: with `CAIRNPOST_CLOUDFLARE_QUEUE_ID` set, CairnPost reads
   what Cloudflare says became of each email and records it.
 - Suppression: an address that bounces for good or complains is no longer

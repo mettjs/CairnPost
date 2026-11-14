@@ -57,6 +57,15 @@ type sendBody struct {
 // id, and with the addresses it was not sent to because they are
 // suppressed, if any were.
 func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
+	// A send that carries files is held in memory while it is sent:
+	// only so much of them is taken at one time.
+	release, ok := a.uploads.take(r.ContentLength, a.MaxBodyBytes, max(a.MaxEmailBytes, a.MaxBodyBytes), a.MaxUploadBytes)
+	if !ok {
+		w.Header().Set("Retry-After", "5")
+		fail(w, http.StatusServiceUnavailable, "unavailable", "The server is taking as many large emails as it can hold. Nothing was sent. Try again shortly.")
+		return
+	}
+	defer release()
 	var body sendBody
 	if !a.bodyUpTo(w, r, &body, "The body must be JSON with from, to, subject and html or text; "+
 		"cc, bcc, reply_to, headers and attachments are optional. No other field is supported.", max(a.MaxEmailBytes, a.MaxBodyBytes)) {
@@ -71,6 +80,7 @@ func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		files = append(files, mail.Attachment{Filename: f.Filename, Type: f.ContentType, ContentID: f.ContentID, Content: raw})
+		body.Attachments[i].Content = "" // read: not held a second time while it is sent
 	}
 	c := callerOf(r)
 	sent, err := a.Mail.Send(r.Context(), c.key, c.presented, mail.Request{

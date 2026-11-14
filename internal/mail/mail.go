@@ -62,6 +62,9 @@ type Options struct {
 	// of each. A negative MaxAttachments takes none.
 	MaxAttachments     int
 	MaxAttachmentBytes int64
+	// noInline is the driver saying it cannot send a file the HTML
+	// shows; New asks it.
+	noInline bool
 }
 
 // What an email may be unless the operator says otherwise: how many
@@ -98,6 +101,9 @@ type Service struct {
 func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 	if opt.MaxRecipients == 0 {
 		opt.MaxRecipients = DefaultMaxRecipients
+	}
+	if plain, ok := d.(driver.Plain); ok {
+		opt.noInline = plain.NoInlineFiles()
 	}
 	switch {
 	case opt.MaxAttachments == 0:

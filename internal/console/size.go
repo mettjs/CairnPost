@@ -9,7 +9,7 @@ func size(n int) string {
 		return "1 byte"
 	case n < 1000:
 		return fmt.Sprintf("%d bytes", n)
-	case n < 1000*1000:
+	case n < 999950: // above it, a tenth of a KB rounds up to 1000.0
 		return fmt.Sprintf("%.1f KB", float64(n)/1000)
 	}
 	return fmt.Sprintf("%.1f MB", float64(n)/(1000*1000))

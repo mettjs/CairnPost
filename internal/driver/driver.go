@@ -26,12 +26,23 @@ type Message struct {
 	Text     string
 	Headers  map[string]string
 	// Attachments are the files that go with it, in the caller's order.
-	Attachments []Attachment
+	// They are no part of the message's JSON: whoever needs the message
+	// as text is not handed its files with it.
+	Attachments []Attachment `json:"-"`
+}
+
+// Plain is a driver that may be unable to send a file the HTML body
+// shows (one with a content id). A caller that knows refuses such an
+// email before it is recorded, and says why.
+type Plain interface {
+	NoInlineFiles() bool
 }
 
 // Attachment is a file sent with an email. Its name, type and content
-// id were checked to be safe as header values: one line each, no
-// control characters.
+// id were checked: one line each, no control or unseen characters, no
+// quote in the name, a type of plain tokens with at most a charset.
+// A driver that writes them into headers still encodes a name that is
+// not ASCII as the header wants.
 type Attachment struct {
 	Filename string
 	// Type is its media type, always set.

@@ -6,12 +6,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"mime"
-	"path"
 	"regexp"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/mettjs/cairnpost/internal/driver"
 )
@@ -34,15 +30,20 @@ type Attachment struct {
 const (
 	maxFilename  = 255
 	maxMediaType = 255
+	maxContentID = 128
 )
 
-// contentID is a name an HTML body can show an attachment by.
-var contentID = regexp.MustCompile(`^[A-Za-z0-9._@-]{1,128}$`)
+// contentID is a name an HTML body can show an attachment by: words
+// with dots between, and at most one "@", as the header that carries it
+// wants.
+var contentID = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*(@[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*)?$`)
 
 // attachments reads a request's files into the form a driver takes. An
 // error names a file by its place, never by its name: a name is an
 // email's words.
-func attachments(r Request, most int, mostBytes int64) ([]driver.Attachment, error) {
+//
+// inline says whether the driver can send a file the HTML shows.
+func attachments(r Request, most int, mostBytes int64, inline bool) ([]driver.Attachment, error) {
 	if len(r.Attachments) > most {
 		return nil, &Invalid{"attachments", fmt.Sprintf(`An email has at most %d attachments; this one has %d.`, most, len(r.Attachments))}
 	}
@@ -56,26 +57,22 @@ func attachments(r Request, most int, mostBytes int64) ([]driver.Attachment, err
 			return &Invalid{"attachments", fmt.Sprintf("Attachment %d: %s", i+1, reason)}
 		}
 		switch {
-		case a.Filename == "" || len(a.Filename) > maxFilename || !utf8.ValidString(a.Filename) ||
-			strings.ContainsFunc(a.Filename, unicode.IsControl) || strings.ContainsAny(a.Filename, `/\`):
-			return nil, bad(`"filename" must be a file's name of at most 255 bytes, with no path and no control characters.`)
+		case !fileName(a.Filename):
+			return nil, bad(`"filename" must be a file's name of at most 255 bytes: no path, no quote, and no character that cannot be seen.`)
 		case len(a.Content) == 0:
 			return nil, bad(`"content" must not be empty.`)
-		case a.ContentID != "" && !contentID.MatchString(a.ContentID):
-			return nil, bad(`"content_id" must be at most 128 letters, digits, ".", "_", "-" or "@".`)
+		case a.ContentID != "" && (len(a.ContentID) > maxContentID || !contentID.MatchString(a.ContentID)):
+			return nil, bad(`"content_id" must be at most 128 letters, digits, "_" and "-", with single dots between and at most one "@".`)
+		case a.ContentID != "" && !inline:
+			return nil, bad(`"content_id" is for a file the "html" body shows, which this server's mail provider cannot send. Leave it out to send the file beside the email.`)
 		case a.ContentID != "" && ids[a.ContentID]:
 			return nil, bad(`its "content_id" is another attachment's too; give each its own.`)
-		case a.ContentID != "" && r.HTML == "":
-			return nil, bad(`"content_id" is for a file the "html" body shows, and this email has none.`)
+		case a.ContentID != "" && !strings.Contains(r.HTML, "cid:"+a.ContentID):
+			return nil, bad(`"content_id" is for a file the "html" body shows, and the "html" does not name it ("cid:" and the id).`)
 		}
-		kind := a.Type
-		if kind == "" {
-			if kind = mime.TypeByExtension(path.Ext(a.Filename)); kind == "" {
-				kind = "application/octet-stream"
-			}
-		}
-		if _, _, err := mime.ParseMediaType(kind); err != nil || len(kind) > maxMediaType || strings.ContainsFunc(kind, unicode.IsControl) {
-			return nil, bad(`"content_type" must be a media type, such as "application/pdf".`)
+		kind, ok := fileType(a.Type, a.Filename)
+		if !ok || len(kind) > maxMediaType {
+			return nil, bad(`"content_type" must be a media type, such as "application/pdf", with no parameter but a charset.`)
 		}
 		if total += int64(len(a.Content)); total > mostBytes {
 			return nil, &Invalid{"attachments", fmt.Sprintf(`An email's attachments may be %d bytes in all; these are more.`, mostBytes)}

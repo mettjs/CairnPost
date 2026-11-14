@@ -86,6 +86,9 @@ type file struct {
 // wrong would send an email whose pictures are missing: it is refused.
 var errInline = fmt.Errorf("cloudflare: an attachment with a content id cannot be sent through this provider yet: %w", driver.ErrRejected)
 
+// NoInlineFiles implements driver.Plain.
+func (*Driver) NoInlineFiles() bool { return true }
+
 // files are a message's attachments as Cloudflare takes them.
 func files(m driver.Message) ([]file, error) {
 	var out []file
