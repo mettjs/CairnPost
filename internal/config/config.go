@@ -36,6 +36,13 @@ type Config struct {
 	// email may go to, counting "to", "cc" and "bcc". Default 50, which
 	// is what Cloudflare takes.
 	MaxRecipients int
+	// MaxBatch is CAIRNPOST_MAX_BATCH: how many emails one batch may
+	// hold. BatchParallel is CAIRNPOST_BATCH_PARALLEL: how many of them
+	// are sent at one time. BatchTimeout is CAIRNPOST_BATCH_TIMEOUT: how
+	// long a batch goes on starting emails. Defaults 100, 4 and 1m.
+	MaxBatch      int
+	BatchParallel int
+	BatchTimeout  time.Duration
 	// MaxAttachments is CAIRNPOST_MAX_ATTACHMENTS: how many files one
 	// email may carry, 0 for none. MaxAttachmentBytes is
 	// CAIRNPOST_MAX_ATTACHMENT_BYTES: how large they may be in all.
@@ -203,6 +210,26 @@ func Load(getenv func(string) string) (Config, error) {
 		return c, fmt.Errorf("config: CAIRNPOST_MAX_RECIPIENTS must be between 1 and 1000 (got %d)", most)
 	}
 	c.MaxRecipients = int(most)
+	for _, n := range []struct {
+		name          string
+		into          *int
+		fallback, top int64
+	}{{"CAIRNPOST_MAX_BATCH", &c.MaxBatch, 100, 1000}, {"CAIRNPOST_BATCH_PARALLEL", &c.BatchParallel, 4, 64}} {
+		v, err := number(getenv, n.name, n.fallback)
+		if err != nil {
+			return c, err
+		}
+		if v < 1 || v > n.top {
+			return c, fmt.Errorf("config: %s must be between 1 and %d (got %d)", n.name, n.top, v)
+		}
+		*n.into = int(v)
+	}
+	if c.BatchTimeout, err = duration(getenv, "CAIRNPOST_BATCH_TIMEOUT", time.Minute); err != nil {
+		return c, err
+	}
+	if c.BatchTimeout > 10*time.Minute {
+		return c, fmt.Errorf("config: CAIRNPOST_BATCH_TIMEOUT must be at most 10m (got %s)", c.BatchTimeout)
+	}
 	// 0 is a setting here, "no files", so it is read apart from the
 	// numbers that must be positive.
 	c.MaxAttachments = 10

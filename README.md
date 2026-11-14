@@ -69,6 +69,7 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | Call | Does |
 |---|---|
 | `POST /emails` | Send one email, to one address or several. Answers `{"id": "..."}` once the provider has taken it, with `suppressed` naming any address it was not sent to. |
+| `POST /emails/batch` | Send several emails in one request. Answers what became of each, in their order. |
 | `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any, or its sending domain's if it is bound to one. Where content is kept, an admin key also sees what the email said, as `content`. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
 | `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
@@ -123,6 +124,51 @@ says it did not go to that address, not that it went to nobody. An event
 says which address it is about in `to`, and a webhook does the same. An
 `Idempotency-Key` is freed by a failure only once the email failed at
 every address.
+
+**Several emails in one request.** `POST /emails/batch` takes a JSON list
+of emails, each as `POST /emails` takes it: 100 at most unless
+`CAIRNPOST_MAX_BATCH` says otherwise, and the whole request no larger than
+one email with its files may be.
+
+```sh
+curl http://localhost:8025/emails/batch \
+  -H "Authorization: Bearer $KEY" -H "Idempotency-Key: welcome-run-42" \
+  -d '[{"from":"App <app@example.com>","to":"ana@example.org","subject":"Welcome","text":"Hello Ana"},
+       {"from":"App <app@example.com>","to":"ben@example.org","subject":"Welcome","text":"Hello Ben"}]'
+# {"data":[{"id":"01a1d08e-..."},{"id":"01a1d08f-..."}]}
+```
+
+Every email is checked before any is sent. One that could never be sent
+(a bad address, a domain the key may not send from) refuses the whole
+batch with the error it would have had alone, naming it by its place
+("Email 2 of the batch: ..."), and nothing is sent. After that each email
+stands alone: it has its own id and record, and one failing does not stop
+the others. The answer lists them in the order they were given, each with
+its `id` (and `suppressed`, if addresses were left out) or with the
+`error` it would have answered alone.
+
+| Status | Meaning |
+|---|---|
+| 200 | The mail provider took every email. |
+| 207 | It did not take some, or any: read `data`. Each `error` has the `statusCode` and `name` of the same failure on `POST /emails`, and says the same about trying again; where that answer would carry a `Retry-After` header, the error has its seconds as `retry_after`. The answer's own `Retry-After` is the longest of them. |
+| 4xx, 503 | The batch was refused whole. Nothing was sent. |
+
+Two errors are a batch's own. Once the mail provider says its sending
+limit is reached, the emails not yet tried are not tried and answer
+`rate_limit_exceeded` too. And a batch starts emails for a minute
+(`CAIRNPOST_BATCH_TIMEOUT`), a few at one time
+(`CAIRNPOST_BATCH_PARALLEL`): an email whose turn did not come, then or
+because the server was stopping or the request was dropped, answers 503
+`not_started`. Nothing of it was sent.
+
+With an `Idempotency-Key` a batch is safe to send again as it was: each
+email is remembered under the key and its place, so the second try answers
+the ids of what went and sends only what did not. An email whose answer
+from the provider was lost (`upstream_unknown`) answers
+`concurrent_idempotent_requests` until `CAIRNPOST_IN_DOUBT_WINDOW` has
+passed, and is sent again after it, as it would be alone. Send the same
+emails in the same order: a place that holds another email answers
+`invalid_idempotent_request`. A batch's key may be 248 characters.
 
 **An email's state**, from `GET /emails/{id}`:
 
@@ -325,7 +371,7 @@ The status tells a program what to do:
 | 413 | `request_too_large` | The body is over `CAIRNPOST_MAX_BODY_BYTES`, or a send's is over that and its files' allowance. |
 | 429 | `rate_limit_exceeded` | The provider's limit is reached; nothing was sent. Retry after `Retry-After`. |
 | 502 | `upstream_unknown` | The provider did not answer; the email may have gone. Retry with the same key. This is the only answer that leaves it open. |
-| 503 | `upstream_unavailable`, `unavailable` | Nothing was sent. Retry later. |
+| 503 | `upstream_unavailable`, `unavailable`, `not_started` | Nothing was sent. Retry later. `not_started` is an email of a batch whose turn did not come. |
 
 When a send fails after it was recorded (`rejected_by_upstream`, 429, 502,
 503 `upstream_unavailable`), the error carries the email's `id`, and
@@ -613,6 +659,9 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_MAX_UPLOAD_BYTES` | `134217728` | How large the sends with files being taken at one time may be in all, as they arrive. A send past it answers 503 and is tried again. At least twice `CAIRNPOST_MAX_ATTACHMENT_BYTES`. |
 | `CAIRNPOST_MAX_ATTACHMENT_BYTES` | `10485760` | How large an email's files may be in all, as they are, not as they travel (up to 64 MiB). A server holds a send's files in memory while it is sent: about five times their size for each send under way. |
 | `CAIRNPOST_MAX_RECIPIENTS` | `50` | How many addresses one email may name, counting `to`, `cc` and `bcc` (1 to 1000). Set it to what the provider takes or below. |
+| `CAIRNPOST_MAX_BATCH` | `100` | How many emails one `POST /emails/batch` may hold (1 to 1000). |
+| `CAIRNPOST_BATCH_PARALLEL` | `4` | How many emails of a batch are handed to the provider at one time (1 to 64). Keep it below what the provider takes at once. |
+| `CAIRNPOST_BATCH_TIMEOUT` | `1m` | How long a batch goes on starting emails, `10m` at most. An email whose turn has not come by then answers `not_started`. The answer may come as late as this, `CAIRNPOST_SEND_TIMEOUT` and 20 seconds more after the request arrived, which may itself take 30 seconds: a proxy in front of the server must wait that long. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
 | `CAIRNPOST_DNS_TIMEOUT` | `6s` | The most one check of a domain's DNS records may take, in the console and in `domains check`: a second at least, a minute at most. Raise it where the first DNS server is slow to answer. |
 | `CAIRNPOST_DNS_SERVER` | the system's | The one DNS server those checks ask, as an IP address with or without a port (`1.1.1.1`). Set it where the machine's own resolver does not answer as the public internet does: a home router that makes up answers, or one that is silent about names that do not exist. |

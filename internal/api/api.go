@@ -54,7 +54,10 @@ type Deps struct {
 	// MaxUploadBytes bounds the sends larger than MaxBodyBytes that are
 	// being taken at one time, by the sum of their bodies; 0 is no bound.
 	MaxUploadBytes int64
-	Log            *slog.Logger
+	// BatchTime is how long a batch may take to answer, from the moment
+	// it is read; 0 leaves the server's own bound.
+	BatchTime time.Duration
+	Log       *slog.Logger
 }
 
 // New returns the handler for every route.
@@ -63,6 +66,7 @@ func New(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", a.health)
 	mux.Handle("POST /emails", a.auth(false, a.sendEmail))
+	mux.Handle("POST /emails/batch", a.auth(false, a.sendBatch))
 	mux.Handle("GET /emails/{id}", a.auth(false, a.getEmail))
 	mux.Handle("GET /limits", a.auth(false, a.limits))
 	mux.Handle("GET /metrics", a.auth(true, a.metrics))
@@ -138,6 +142,9 @@ type status struct {
 	http.ResponseWriter
 	code int
 }
+
+// Unwrap lets a handler reach the connection's own controls.
+func (s *status) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func (s *status) WriteHeader(code int) {
 	s.code = code

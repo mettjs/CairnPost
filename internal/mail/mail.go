@@ -62,6 +62,15 @@ type Options struct {
 	// of each. A negative MaxAttachments takes none.
 	MaxAttachments     int
 	MaxAttachmentBytes int64
+	// MaxBatch is how many emails one batch may hold, BatchParallel how
+	// many of them are sent at one time, and BatchTime how long a batch
+	// goes on starting emails; 0 is the default of each.
+	MaxBatch      int
+	BatchParallel int
+	BatchTime     time.Duration
+	// Stopping is closed when the server is told to stop: a batch then
+	// starts no further email. nil never stops one.
+	Stopping <-chan struct{}
 	// noInline is the driver saying it cannot send a file the HTML
 	// shows; New asks it.
 	noInline bool
@@ -73,6 +82,10 @@ const (
 	DefaultMaxRecipients      = 50
 	DefaultMaxAttachments     = 10
 	DefaultMaxAttachmentBytes = 10 << 20
+	// And a batch: how many emails, how many at one time, for how long.
+	DefaultMaxBatch      = 100
+	DefaultBatchParallel = 4
+	DefaultBatchTime     = time.Minute
 )
 
 // Receipt is what a send answers: the email's id, and the addresses it
@@ -114,6 +127,15 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 	if opt.MaxAttachmentBytes == 0 {
 		opt.MaxAttachmentBytes = DefaultMaxAttachmentBytes
 	}
+	if opt.MaxBatch == 0 {
+		opt.MaxBatch = DefaultMaxBatch
+	}
+	if opt.BatchParallel <= 0 {
+		opt.BatchParallel = DefaultBatchParallel
+	}
+	if opt.BatchTime == 0 {
+		opt.BatchTime = DefaultBatchTime
+	}
 	return &Service{store: s, events: s, driver: d, opt: opt, log: log}
 }
 
@@ -131,19 +153,34 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 // an earlier try under the same key that was left in doubt, if there was
 // one.
 func (s *Service) Send(ctx context.Context, key store.Key, presented string, r Request) (Receipt, error) {
-	c, err := check(r, s.opt)
+	c, err := s.checked(key, r)
 	if err != nil {
 		return Receipt{}, err
 	}
-	if key.Domain != "" && key.Domain != c.domain {
-		return Receipt{}, ErrDomain
+	return s.send(ctx, key, presented, r.IdemKey, c)
+}
+
+// checked is a request this key may send, found sendable: an *Invalid
+// or ErrDomain otherwise.
+func (s *Service) checked(key store.Key, r Request) (checked, error) {
+	c, err := check(r, s.opt)
+	if err != nil {
+		return checked{}, err
 	}
+	if key.Domain != "" && key.Domain != c.domain {
+		return checked{}, ErrDomain
+	}
+	return c, nil
+}
+
+// send is Send for a request already checked.
+func (s *Service) send(ctx context.Context, key store.Key, presented, idem string, c checked) (Receipt, error) {
 	start := store.Start{
 		KeyID: key.ID, Sender: c.msg.From, Recipients: addressees(c.msg), Driver: s.driver.Name(),
-		IdemKey: r.IdemKey, TTL: s.opt.IdempotencyTTL, InDoubt: s.opt.InDoubtWindow,
+		IdemKey: idem, TTL: s.opt.IdempotencyTTL, InDoubt: s.opt.InDoubtWindow,
 		Content: s.contentOf(c.msg), KeepContent: s.opt.KeepContent,
 	}
-	if r.IdemKey != "" {
+	if idem != "" {
 		start.Fingerprint = fingerprint(presented, c.msg)
 	}
 	claim, err := s.store.Start(ctx, start)

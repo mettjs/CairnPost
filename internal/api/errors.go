@@ -49,11 +49,20 @@ func seconds(d time.Duration) string {
 // sent, and everything else is worth trying again. Only upstream_unknown
 // leaves it open whether an email went.
 func (a *app) failSend(w http.ResponseWriter, id string, err error) {
+	p, wait := a.problemOf(id, err)
+	if wait != "" {
+		w.Header().Set("Retry-After", wait)
+	}
+	write(w, p.StatusCode, p)
+}
+
+// problemOf is a send that did not happen, as it is answered; with it
+// the Retry-After to say, "" for none.
+func (a *app) problemOf(id string, err error) (p problem, wait string) {
 	var (
 		invalid   *mail.Invalid
 		busy      *mail.Busy
 		throttled *driver.Throttled
-		p         problem
 	)
 	switch {
 	case errors.As(err, &invalid):
@@ -74,7 +83,7 @@ func (a *app) failSend(w http.ResponseWriter, id string, err error) {
 		p = problem{http.StatusConflict, "invalid_idempotent_request",
 			"This Idempotency-Key was already used with a different request, which was sent. Use a new key for a new email.", ""}
 	case errors.As(err, &busy):
-		w.Header().Set("Retry-After", seconds(busy.After))
+		wait = seconds(busy.After)
 		p = problem{http.StatusConflict, "concurrent_idempotent_requests",
 			"A send with this Idempotency-Key is in flight, or its answer has not come yet. " +
 				"Try again after the time in the Retry-After header.", ""}
@@ -83,10 +92,14 @@ func (a *app) failSend(w http.ResponseWriter, id string, err error) {
 			"The mail provider refused this email for good. Check the addresses, the headers, and the size and kind of its files.", id}
 	case errors.As(err, &throttled):
 		if throttled.After > 0 {
-			w.Header().Set("Retry-After", seconds(throttled.After))
+			wait = seconds(throttled.After)
 		}
 		p = problem{http.StatusTooManyRequests, "rate_limit_exceeded",
 			"The mail provider's sending limit is reached. Nothing was sent; try again later.", id}
+	case errors.Is(err, mail.ErrNotStarted):
+		p = problem{http.StatusServiceUnavailable, "not_started",
+			"The batch ended before this email's turn: it ran out of time, the server is stopping or the request was dropped. " +
+				"Nothing was sent; send it again.", ""}
 	case errors.Is(err, driver.ErrUnavailable):
 		p = problem{http.StatusServiceUnavailable, "upstream_unavailable",
 			"The mail provider is not taking mail right now. Nothing was sent; try again later.", id}
@@ -100,7 +113,7 @@ func (a *app) failSend(w http.ResponseWriter, id string, err error) {
 		p = problem{http.StatusServiceUnavailable, "unavailable",
 			"CairnPost could not record the send, so nothing was sent. Try again shortly.", ""}
 	}
-	write(w, p.StatusCode, p)
+	return p, wait
 }
 
 // body reads a request's JSON into v, and answers false, having said why,
@@ -115,7 +128,11 @@ func (a *app) bodyUpTo(w http.ResponseWriter, r *http.Request, v any, shape stri
 	// A field CairnPost does not know is refused, never dropped: an email
 	// sent without the cc its caller asked for is worse than no email.
 	dec.DisallowUnknownFields()
-	err := dec.Decode(v)
+	return a.read(w, dec.Decode(v), shape)
+}
+
+// read answers whether a body was read, having said why when it was not.
+func (a *app) read(w http.ResponseWriter, err error, shape string) bool {
 	var (
 		tooBig *http.MaxBytesError
 		slow   net.Error
