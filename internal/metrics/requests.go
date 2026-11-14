@@ -80,13 +80,13 @@ func (r *Requests) Samples() []Sample {
 	for _, route := range routes {
 		t := r.took[route]
 		for i, bound := range buckets {
-			out = append(out, Sample{Name: took + "_bucket", Help: tookHelp, Kind: "histogram",
+			out = append(out, Sample{Name: took + "_bucket", Help: tookHelp, Kind: Histogram,
 				Labels: [][2]string{{"route", route}, {"le", strconv.FormatFloat(bound, 'g', -1, 64)}}, Value: float64(t.within[i])})
 		}
 		out = append(out,
-			Sample{Name: took + "_bucket", Help: tookHelp, Kind: "histogram", Labels: [][2]string{{"route", route}, {"le", "+Inf"}}, Value: float64(t.n)},
-			Sample{Name: took + "_sum", Help: tookHelp, Kind: "histogram", Labels: [][2]string{{"route", route}}, Value: t.sum},
-			Sample{Name: took + "_count", Help: tookHelp, Kind: "histogram", Labels: [][2]string{{"route", route}}, Value: float64(t.n)})
+			Sample{Name: took + "_bucket", Help: tookHelp, Kind: Histogram, Labels: [][2]string{{"route", route}, {"le", "+Inf"}}, Value: float64(t.n)},
+			Sample{Name: took + "_sum", Help: tookHelp, Kind: Histogram, Labels: [][2]string{{"route", route}}, Value: t.sum},
+			Sample{Name: took + "_count", Help: tookHelp, Kind: Histogram, Labels: [][2]string{{"route", route}}, Value: float64(t.n)})
 	}
 	return out
 }

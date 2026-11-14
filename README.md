@@ -356,17 +356,23 @@ in the scrape config):
 |---|---|
 | `cairnpost_http_requests_total{route,status}` | Requests the API answered. |
 | `cairnpost_http_request_seconds{route}` | How long they took, as a histogram. |
-| `cairnpost_emails_last_day{state}` | Emails begun in the last 24 hours, by the state they are in now. |
+| `cairnpost_emails_last_day{state}` | Emails begun in the last 24 whole hours, by the state they are in now: each address an email went to is one. |
 | `cairnpost_webhook_endpoints{state}` | Webhook endpoints that are `on`, `off` or `paused`. |
 | `cairnpost_webhook_endpoints_failing` | Endpoints that are on and have failed every try since their last answer. |
 | `cairnpost_provider_quota`, `cairnpost_provider_quota_used` | The mail provider's allowance, where it tells one. |
 | `cairnpost_part_up{part}` | Whether delivery events are read, webhooks sent and old records pruned; a part that is off is not listed. |
-| `cairnpost_database_up`, `cairnpost_build_info{version,driver}` | Whether the database answers; what is running. |
+| `cairnpost_build_info{version,driver}` | What is running. |
 
 A route is the pattern that matched (`GET /emails/{id}`), never a path as
 it was asked for, and no label holds an address, a subject, a URL or an
 id. The request counts are one server's own, since it started; the rest
 is read from the database when asked.
+
+There is no number for the database: a scrape needs it to know the key,
+so a scrape that fails is that signal (and `/health`, which needs no
+key, says it outright). A key bound to a sending domain is told of that
+domain's emails and endpoints only, and not of the request counts, which
+would say how much others send.
 
 ## Console
 

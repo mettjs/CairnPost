@@ -2,25 +2,25 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"net/http"
-	"time"
 
 	"github.com/mettjs/cairnpost/internal/metrics"
 )
 
 // metrics answers the server's numbers in the text form Prometheus
 // reads. It needs an admin key, as a scraper can send one: the numbers
-// say how much mail a server sends.
+// say how much mail a server sends. A key bound to a sending domain is
+// told of that domain's emails and endpoints only, and not how many
+// requests the server answered, which would say how much others send.
 func (a *app) metrics(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
+	ctx := r.Context()
 	var samples []metrics.Sample
-	if a.Requests != nil {
+	domain := callerOf(r).key.Domain
+	if a.Requests != nil && domain == "" {
 		samples = a.Requests.Samples()
 	}
 	if a.Gauges != nil {
-		samples = append(samples, a.Gauges(ctx)...)
+		samples = append(samples, a.Gauges(ctx, domain)...)
 	}
 	// Written whole before any of it is sent: half an exposition is none.
 	var out bytes.Buffer

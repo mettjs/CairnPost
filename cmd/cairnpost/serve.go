@@ -153,7 +153,7 @@ func serve(ctx context.Context) error {
 	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention,
 		MaxRecipients: cfg.MaxRecipients}, log)
-	counted := measured{ping: db.Ping, counts: db, endpoints: endpoints, driver: drv, version: version, log: log,
+	counted := measured{sent: stats.New(db, 0), endpoints: endpoints, driver: drv, version: version, log: log,
 		parts: map[string]func() bool{"events": eventsHealth(reader), "webhooks": hooks.Healthy, "pruning": pruner.Healthy}}
 	var handler http.Handler = api.New(api.Deps{
 		Requests: &metrics.Requests{}, Gauges: counted.gauges,

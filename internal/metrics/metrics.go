@@ -15,15 +15,18 @@ import (
 
 // Kinds of metric.
 const (
-	Counter = "counter"
-	Gauge   = "gauge"
+	Counter   = "counter"
+	Gauge     = "gauge"
+	Histogram = "histogram"
 )
 
 // Sample is one number: of a metric, with the labels that tell it from
 // the metric's other numbers.
 type Sample struct {
-	// Name is the metric's; Help says what it counts; Kind is Counter
-	// or Gauge.
+	// Name is the metric's; Help says what it counts; Kind is Counter,
+	// Gauge or Histogram. A histogram's samples are named for its
+	// buckets, sum and count (the metric's name and "_bucket", "_sum"
+	// or "_count").
 	Name, Help, Kind string
 	// Labels are name and value pairs, in the order they are written.
 	Labels [][2]string
@@ -43,10 +46,10 @@ func Up(yes bool) float64 {
 // scrapes of the same state read the same.
 func Write(w io.Writer, samples []Sample) error {
 	sorted := slices.Clone(samples)
-	slices.SortStableFunc(sorted, func(a, b Sample) int { return cmp.Compare(family(a.Name), family(b.Name)) })
+	slices.SortStableFunc(sorted, func(a, b Sample) int { return cmp.Compare(family(a), family(b)) })
 	last := ""
 	for _, s := range sorted {
-		if name := family(s.Name); name != last {
+		if name := family(s); name != last {
 			last = name
 			if _, err := fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s %s\n", name, escape(s.Help, false), name, s.Kind); err != nil {
 				return err
@@ -61,13 +64,16 @@ func Write(w io.Writer, samples []Sample) error {
 
 // family is the metric a sample's name belongs to: a histogram's
 // buckets, sum and count are one metric.
-func family(name string) string {
+func family(s Sample) string {
+	if s.Kind != Histogram {
+		return s.Name
+	}
 	for _, part := range []string{"_bucket", "_sum", "_count"} {
-		if base, ok := strings.CutSuffix(name, part); ok && strings.HasSuffix(base, "_seconds") {
+		if base, ok := strings.CutSuffix(s.Name, part); ok {
 			return base
 		}
 	}
-	return name
+	return s.Name
 }
 
 func labels(pairs [][2]string) string {

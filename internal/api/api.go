@@ -44,7 +44,7 @@ type Deps struct {
 	// Requests counts what the API answers, and Gauges answers how the
 	// server stands in numbers, both for GET /metrics; nil for neither.
 	Requests *metrics.Requests
-	Gauges   func(context.Context) []metrics.Sample
+	Gauges   func(ctx context.Context, domain string) []metrics.Sample
 	// Driver and Version are said by GET /health.
 	Driver, Version string
 	// MaxBodyBytes bounds a request body.
@@ -92,6 +92,9 @@ func unrouted(mux *http.ServeMux) http.Handler {
 			mux.ServeHTTP(w, r)
 			return
 		}
+		// No route of this API took it, whatever a mux in front of the
+		// API matched: the request is logged and counted as unrouted.
+		r.Pattern = ""
 		// The mux knows which of the two it is, and says so in plain
 		// text: its answer is read, not sent.
 		probe := &unsent{header: http.Header{}}
