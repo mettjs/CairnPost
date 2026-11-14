@@ -153,24 +153,37 @@ func (db *DB) PruneMessages(ctx context.Context, before time.Time, limit int) (i
 		}
 		// Its other rows are taken too, and looked at again once they
 		// are held: an event recorded meanwhile at one of them keeps the
-		// email.
-		rows, err = tx.Query(ctx, `SELECT id::text, email_id::text, updated_at > $2 FROM messages WHERE email_id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, emails, before)
+		// email. A row someone else holds is not waited for, since its
+		// holder may want the first row in turn: the email is left for
+		// the next pass.
+		rows, err = tx.Query(ctx, `
+			SELECT m.id::text, m.email_id::text, m.updated_at > $2,
+			       (SELECT count(*) FROM messages a WHERE a.email_id = m.email_id)
+			FROM messages m WHERE m.email_id = ANY($1::uuid[]) ORDER BY m.id FOR UPDATE OF m SKIP LOCKED`, emails, before)
 		if err != nil {
 			return err
 		}
 		var ids, of []string
-		fresh := map[string]bool{}
+		fresh, held, all := map[string]bool{}, map[string]int{}, map[string]int{}
 		var (
 			id, email string
 			newer     bool
+			rowsOf    int
 		)
-		if _, err := pgx.ForEachRow(rows, []any{&id, &email, &newer}, func() error {
-			if ids, of = append(ids, id), append(of, email); newer {
+		if _, err := pgx.ForEachRow(rows, []any{&id, &email, &newer, &rowsOf}, func() error {
+			ids, of = append(ids, id), append(of, email)
+			held[email]++
+			if all[email] = rowsOf; newer {
 				fresh[email] = true
 			}
 			return nil
 		}); err != nil {
 			return err
+		}
+		for _, email := range emails {
+			if held[email] < max(all[email], 1) {
+				fresh[email] = true
+			}
 		}
 		for i := len(ids) - 1; i >= 0; i-- {
 			if fresh[of[i]] {
