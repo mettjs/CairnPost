@@ -4,9 +4,6 @@ package mail
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -60,11 +57,23 @@ type Options struct {
 	// MaxRecipients is how many addresses one email may go to, counting
 	// "to", "cc" and "bcc"; 0 is DefaultMaxRecipients.
 	MaxRecipients int
+	// MaxAttachments is how many files one email may carry, and
+	// MaxAttachmentBytes how large they may be in all; 0 is the default
+	// of each. A negative MaxAttachments takes none.
+	MaxAttachments     int
+	MaxAttachmentBytes int64
+	// noInline is the driver saying it cannot send a file the HTML
+	// shows; New asks it.
+	noInline bool
 }
 
-// DefaultMaxRecipients is how many addresses an email may go to unless
-// the operator says otherwise.
-const DefaultMaxRecipients = 50
+// What an email may be unless the operator says otherwise: how many
+// addresses it goes to, how many files it carries and their size in all.
+const (
+	DefaultMaxRecipients      = 50
+	DefaultMaxAttachments     = 10
+	DefaultMaxAttachmentBytes = 10 << 20
+)
 
 // Receipt is what a send answers: the email's id, and the addresses it
 // was not sent to because they are suppressed.
@@ -93,6 +102,18 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 	if opt.MaxRecipients == 0 {
 		opt.MaxRecipients = DefaultMaxRecipients
 	}
+	if plain, ok := d.(driver.Plain); ok {
+		opt.noInline = plain.NoInlineFiles()
+	}
+	switch {
+	case opt.MaxAttachments == 0:
+		opt.MaxAttachments = DefaultMaxAttachments
+	case opt.MaxAttachments < 0:
+		opt.MaxAttachments = 0
+	}
+	if opt.MaxAttachmentBytes == 0 {
+		opt.MaxAttachmentBytes = DefaultMaxAttachmentBytes
+	}
 	return &Service{store: s, events: s, driver: d, opt: opt, log: log}
 }
 
@@ -110,7 +131,7 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 // an earlier try under the same key that was left in doubt, if there was
 // one.
 func (s *Service) Send(ctx context.Context, key store.Key, presented string, r Request) (Receipt, error) {
-	c, err := check(r, s.opt.MaxRecipients)
+	c, err := check(r, s.opt)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -206,16 +227,4 @@ func (s *Service) deliver(ctx context.Context, id string, m driver.Message) erro
 		}
 		return ErrInDoubt
 	}
-}
-
-// fingerprint is a digest of a request keyed by the caller's API key, which
-// is kept nowhere: whoever reads the digest cannot test a guessed body
-// against it.
-func fingerprint(presented string, m driver.Message) []byte {
-	// encoding/json writes a struct's fields in order and a map's keys
-	// sorted, so equal requests encode equally.
-	raw, _ := json.Marshal(m)
-	mac := hmac.New(sha256.New, []byte(presented))
-	mac.Write(raw)
-	return mac.Sum(nil)
 }

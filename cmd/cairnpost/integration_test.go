@@ -140,7 +140,8 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 	// database outlives the run.
 	to := "rule-one-" + k.Prefix + "@example.org"
 	body := `{"from":"NAMEMARKQ <app@` + domain + `>","to":"` + to + `","subject":"SUBJECTMARKQ",
-		"text":"TEXTMARKQ","html":"<p>HTMLMARKQ</p>","headers":{"X-Trace":"HEADERMARKQ"}}`
+		"text":"TEXTMARKQ","html":"<p>HTMLMARKQ</p>","headers":{"X-Trace":"HEADERMARKQ"},
+		"attachments":[{"filename":"FILEMARKQ.txt","content":"QllURVNNQVJLUQ=="}]}`
 	if code := send("words", body); code != 200 || len(kept.Held()) != 1 {
 		t.Fatalf("the send: %d", code)
 	}
@@ -227,7 +228,8 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 		t.Errorf("%d emails on record, the words of %d kept: %v", sentRows, keptRows, err)
 	}
 	secret := full[len(k.Prefix)+1:]
-	for _, mark := range []string{"SUBJECTMARKQ", "TEXTMARKQ", "HTMLMARKQ", "HEADERMARKQ", "NAMEMARKQ", "DETAILMARKQ", secret} {
+	for _, mark := range []string{"SUBJECTMARKQ", "TEXTMARKQ", "HTMLMARKQ", "HEADERMARKQ", "NAMEMARKQ", "DETAILMARKQ",
+		"FILEMARKQ", "BYTESMARKQ", "QllURVNNQVJLUQ", secret} {
 		if strings.Contains(held, mark) {
 			t.Errorf("the database holds %q", mark)
 		}
@@ -281,9 +283,10 @@ func TestWhenWordsAreKeptTheyAreKeptInOnePlace(t *testing.T) {
 		return rec.Code, rec.Body.String()
 	}
 	on := serving(time.Hour)
-	marks := []string{"KEPTSUBJECTQ", "KEPTTEXTQ", "KEPTHTMLQ", "KEPTHEADERQ", "KEPTNAMEQ"}
+	marks := []string{"KEPTSUBJECTQ", "KEPTTEXTQ", "KEPTHTMLQ", "KEPTHEADERQ", "KEPTNAMEQ", "KEPTFILEQ"}
 	code, sent := call(on, "POST", "/emails", sender, `{"from":"KEPTNAMEQ <app@example.com>","to":"kept@example.org",
-		"subject":"KEPTSUBJECTQ","text":"KEPTTEXTQ","html":"<p>KEPTHTMLQ</p>","headers":{"X-Trace":"KEPTHEADERQ"}}`)
+		"subject":"KEPTSUBJECTQ","text":"KEPTTEXTQ","html":"<p>KEPTHTMLQ</p>","headers":{"X-Trace":"KEPTHEADERQ"},
+		"attachments":[{"filename":"KEPTFILEQ.txt","content":"S0VQVEJZVEVTUQ=="}]}`)
 	var made struct{ ID string }
 	if json.Unmarshal([]byte(sent), &made); code != 200 || made.ID == "" {
 		t.Fatalf("the send: %d %s", code, sent)
@@ -326,6 +329,10 @@ func TestWhenWordsAreKeptTheyAreKeptInOnePlace(t *testing.T) {
 	elsewhere, everywhere := dump(t, dsn, "message_contents", "event_details"), dump(t, dsn)
 	if strings.Contains(everywhere, "EVENTSUBJECTQ") || strings.Contains(logged.String(), "EVENTSUBJECTQ") {
 		t.Error("the subject an event carried was kept or logged")
+	}
+	// What a file was is kept with the words; its bytes are kept nowhere.
+	if strings.Contains(everywhere, "KEPTBYTESQ") || strings.Contains(everywhere, "S0VQVEJZVEVTUQ") {
+		t.Error("a file's bytes were kept")
 	}
 	// The dump reads inside the two tables: without that, finding no mark
 	// in them would prove nothing, here or where nothing is to be kept.

@@ -255,6 +255,7 @@ td:last-child, th:last-child { padding-right: 0.75rem; }
 td.act { text-align: right; }
 tr.gone td { color: var(--soft); }
 .by { display: block; color: var(--soft); font-size: 0.85rem; font-weight: 400; }
+.files { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; gap: 0.5rem; }
 
 .tag { font-size: 0.78rem; font-weight: 600; padding: 0.1rem 0.45rem; border: 1px solid var(--muted); color: var(--soft); }
 

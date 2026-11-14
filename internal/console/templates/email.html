@@ -84,6 +84,9 @@
 {{end}}</pre></dd></div>{{end}}
     {{if .Text}}<div><dt>Text</dt><dd><pre class="said" tabindex="0">{{.Text}}</pre></dd></div>{{end}}
     {{if .HTML}}<div><dt>HTML, as source</dt><dd><pre class="said" tabindex="0">{{.HTML}}</pre></dd></div>{{end}}
+    {{if .Attachments}}<div><dt>Files</dt><dd><ul class="files">{{range .Attachments}}
+      <li><span class="long">{{.Filename}}</span><span class="by long">{{.ContentType}}, {{size .Size}}{{if .ContentID}}, shown in the HTML as {{.ContentID}}{{end}}</span></li>{{end}}
+    </ul><span class="by">What a file held is never kept.</span></dd></div>{{end}}
   </dl>
   {{end}}
   {{end}}

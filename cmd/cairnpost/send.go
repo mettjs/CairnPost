@@ -27,6 +27,8 @@ func sendCommand(ctx context.Context, args []string) error {
 	text := fs.String("text", "", "the plain-text body")
 	html := fs.String("html", "", "the HTML body")
 	idem := fs.String("idempotency-key", "", "a key that makes sending this twice send it once")
+	var attach paths
+	fs.Var(&attach, "attach", "a file to send with it; give the flag once for each file")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -37,9 +39,17 @@ func sendCommand(ctx context.Context, args []string) error {
 	case key == "":
 		return errors.New("set CAIRNPOST_API_KEY to an API key (make one with: cairnpost keys create)")
 	}
-	body, _ := json.Marshal(map[string]any{
+	files, err := attached(attach)
+	if err != nil {
+		return err
+	}
+	fields := map[string]any{
 		"from": *from, "to": several(*to), "cc": several(*cc), "bcc": several(*bcc), "subject": *subject, "text": *text, "html": *html,
-	})
+	}
+	if files != nil {
+		fields["attachments"] = files
+	}
+	body, _ := json.Marshal(fields)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(*url, "/")+"/emails", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -49,7 +59,7 @@ func sendCommand(ctx context.Context, args []string) error {
 	if *idem != "" {
 		req.Header.Set("Idempotency-Key", *idem)
 	}
-	res, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	res, err := (&http.Client{Timeout: 3 * time.Minute}).Do(req)
 	if err != nil {
 		return fmt.Errorf("the server at %s did not answer: %w", *url, err)
 	}

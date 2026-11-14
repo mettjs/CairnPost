@@ -36,6 +36,15 @@ type Config struct {
 	// email may go to, counting "to", "cc" and "bcc". Default 50, which
 	// is what Cloudflare takes.
 	MaxRecipients int
+	// MaxAttachments is CAIRNPOST_MAX_ATTACHMENTS: how many files one
+	// email may carry, 0 for none. MaxAttachmentBytes is
+	// CAIRNPOST_MAX_ATTACHMENT_BYTES: how large they may be in all.
+	MaxAttachments     int
+	MaxAttachmentBytes int64
+	// MaxUploadBytes is CAIRNPOST_MAX_UPLOAD_BYTES: how large the sends
+	// with files being taken at one time may be in all. A send over it
+	// is told to come back: what guards the server's memory.
+	MaxUploadBytes int64
 	// CaptureKeep is CAIRNPOST_CAPTURE_KEEP: how many emails the capture
 	// driver holds in memory. Default 100.
 	CaptureKeep int
@@ -192,6 +201,27 @@ func Load(getenv func(string) string) (Config, error) {
 		return c, fmt.Errorf("config: CAIRNPOST_MAX_RECIPIENTS must be between 1 and 1000 (got %d)", most)
 	}
 	c.MaxRecipients = int(most)
+	// 0 is a setting here, "no files", so it is read apart from the
+	// numbers that must be positive.
+	c.MaxAttachments = 10
+	if v := getenv("CAIRNPOST_MAX_ATTACHMENTS"); v != "" {
+		if c.MaxAttachments, err = strconv.Atoi(v); err != nil || c.MaxAttachments < 0 || c.MaxAttachments > 100 {
+			return c, fmt.Errorf("config: CAIRNPOST_MAX_ATTACHMENTS must be a whole number between 0 and 100 (got %q)", v)
+		}
+	}
+	if c.MaxAttachmentBytes, err = number(getenv, "CAIRNPOST_MAX_ATTACHMENT_BYTES", 10<<20); err != nil {
+		return c, err
+	}
+	if c.MaxAttachmentBytes < 1 || c.MaxAttachmentBytes > 64<<20 {
+		return c, fmt.Errorf("config: CAIRNPOST_MAX_ATTACHMENT_BYTES must be between 1 and %d (got %d)", 64<<20, c.MaxAttachmentBytes)
+	}
+	if c.MaxUploadBytes, err = number(getenv, "CAIRNPOST_MAX_UPLOAD_BYTES", 128<<20); err != nil {
+		return c, err
+	}
+	if c.MaxUploadBytes < c.MaxAttachmentBytes*2 {
+		return c, fmt.Errorf("config: CAIRNPOST_MAX_UPLOAD_BYTES (%d) must be at least twice CAIRNPOST_MAX_ATTACHMENT_BYTES (%d), "+
+			"or one email with files could not be taken", c.MaxUploadBytes, c.MaxAttachmentBytes)
+	}
 	// A retry must not be let through while the first try can still be
 	// answered, and a key must outlive the wait for that answer.
 	if c.InDoubtWindow <= c.SendTimeout {

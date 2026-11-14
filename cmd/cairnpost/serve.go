@@ -152,14 +152,14 @@ func serve(ctx context.Context) error {
 	suppressions := suppress.New(db)
 	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention,
-		MaxRecipients: cfg.MaxRecipients}, log)
+		MaxRecipients: cfg.MaxRecipients, MaxAttachments: attachmentsOf(cfg), MaxAttachmentBytes: cfg.MaxAttachmentBytes}, log)
 	counted := measured{sent: stats.New(db, 0), endpoints: endpoints, driver: drv, version: version, log: log,
 		parts: map[string]func() bool{"events": eventsHealth(reader), "webhooks": hooks.Healthy, "pruning": pruner.Healthy}}
 	var handler http.Handler = api.New(api.Deps{
 		Requests: &metrics.Requests{}, Gauges: counted.gauges,
 		Mail: mailer, Keys: keyring, Suppress: suppressions,
 		Webhooks: endpoints, Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
-		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
+		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, MaxEmailBytes: emailBytes(cfg), MaxUploadBytes: cfg.MaxUploadBytes, Log: log,
 		Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy,
 	})
 	if cfg.Console.On {
@@ -184,10 +184,13 @@ func serve(ctx context.Context) error {
 		}
 	}
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler,
-		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: readTimeout,
 		// The slowest answers are a send and the try-out of a webhook
-		// endpoint: each must be able to run to its own timeout.
-		WriteTimeout: max(cfg.SendTimeout, cfg.Webhook.Timeout) + 20*time.Second, IdleTimeout: 2 * time.Minute}
+		// endpoint: each must be able to run to its own timeout. The
+		// time to answer is counted from the request's first line, so
+		// the time a body may take to arrive is part of it: a send that
+		// arrived slowly must still be answered once it is made.
+		WriteTimeout: readTimeout + max(cfg.SendTimeout, cfg.Webhook.Timeout) + 20*time.Second, IdleTimeout: 2 * time.Minute}
 
 	failed := make(chan error, 1)
 	go func() { failed <- srv.ListenAndServe() }()
@@ -212,7 +215,7 @@ func capturedEmails(d *capture.Driver) []api.CapturedEmail {
 	var out []api.CapturedEmail
 	for _, c := range d.Held() {
 		out = append(out, api.CapturedEmail{ID: c.ID, At: c.At, From: c.From, FromName: c.FromName, To: c.To, Cc: c.Cc, Bcc: c.Bcc,
-			ReplyTo: c.ReplyTo, Subject: c.Subject, HTML: c.HTML, Text: c.Text, Headers: c.Headers})
+			ReplyTo: c.ReplyTo, Subject: c.Subject, HTML: c.HTML, Text: c.Text, Headers: c.Headers, Attachments: filesOf(c.Files)})
 	}
 	return out
 }

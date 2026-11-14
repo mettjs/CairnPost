@@ -183,6 +183,8 @@ func TestConsoleSettings(t *testing.T) {
 		{"CAIRNPOST_CONSOLE_PLAIN_HTTP", "yes please"}, {"CAIRNPOST_MAX_KEYS", "100001"}, {"CAIRNPOST_MAX_KEYS", "many"},
 		{"CAIRNPOST_DNS_TIMEOUT", "500ms"}, {"CAIRNPOST_DNS_TIMEOUT", "2m"}, {"CAIRNPOST_DNS_TIMEOUT", "soon"},
 		{"CAIRNPOST_CONSOLE_TIMEZONE", "Mars/Olympus"}, {"CAIRNPOST_MAX_RECIPIENTS", "0"}, {"CAIRNPOST_MAX_RECIPIENTS", "1001"},
+		{"CAIRNPOST_MAX_ATTACHMENTS", "-1"}, {"CAIRNPOST_MAX_ATTACHMENTS", "101"}, {"CAIRNPOST_MAX_ATTACHMENT_BYTES", "0"},
+		{"CAIRNPOST_MAX_ATTACHMENT_BYTES", "67108865"}, {"CAIRNPOST_MAX_UPLOAD_BYTES", "1048576"},
 	} {
 		if _, err := Load(env(append(base, bad[0], bad[1])...)); err == nil || !strings.Contains(err.Error(), bad[0]) {
 			t.Errorf("%s=%s: %v", bad[0], bad[1], err)
@@ -218,5 +220,13 @@ func TestDNSServer(t *testing.T) {
 		if _, err := DNSServer(env("CAIRNPOST_DNS_SERVER", bad)); err == nil || !strings.Contains(err.Error(), "CAIRNPOST_DNS_SERVER") {
 			t.Errorf("%q: %v", bad, err)
 		}
+	}
+}
+
+// No files at all is a setting: 0 is taken, not refused as no number.
+func TestNoFilesIsASetting(t *testing.T) {
+	c, err := Load(env("CAIRNPOST_POSTGRES_DSN", "postgres://x", "CAIRNPOST_DRIVER", "capture", "CAIRNPOST_MAX_ATTACHMENTS", "0"))
+	if err != nil || c.MaxAttachments != 0 || c.MaxAttachmentBytes != 10<<20 || c.MaxUploadBytes != 128<<20 {
+		t.Fatalf("%+v %v", c, err)
 	}
 }
