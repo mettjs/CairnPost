@@ -84,6 +84,7 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `POST /webhooks/{id}/secret` | Give the endpoint a new signing secret. Answers the endpoint with the new `secret`, said this once, and `previous_secret_until`: until then webhooks are signed with the old one too. Admin key. |
 | `POST /webhooks/{id}/resume` | End an endpoint's pause, and send what it is owed. One that is not paused is answered as it is. Admin key. |
 | `GET /limits` | The provider's sending allowance and how much of it is used, so you know before it runs out. `quota` is `null` for a provider with none to tell. |
+| `GET /metrics` | The server's numbers in the text form Prometheus reads. Admin key. |
 | `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent and old records pruned. |
 
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both;
@@ -334,6 +335,28 @@ with the time until it resets.
 **`capture`** sends nothing. It keeps the last emails in memory and shows
 them at `GET /capture/emails`: for development and tests.
 
+## Metrics
+
+`GET /metrics` answers what a monitoring system reads, with an admin key
+as the bearer token (in Prometheus, `authorization: {credentials: cp_...}`
+in the scrape config):
+
+| Metric | Says |
+|---|---|
+| `cairnpost_http_requests_total{route,status}` | Requests the API answered. |
+| `cairnpost_http_request_seconds{route}` | How long they took, as a histogram. |
+| `cairnpost_emails_last_day{state}` | Emails begun in the last 24 hours, by the state they are in now. |
+| `cairnpost_webhook_endpoints{state}` | Webhook endpoints that are `on`, `off` or `paused`. |
+| `cairnpost_webhook_endpoints_failing` | Endpoints that are on and have failed every try since their last answer. |
+| `cairnpost_provider_quota`, `cairnpost_provider_quota_used` | The mail provider's allowance, where it tells one. |
+| `cairnpost_part_up{part}` | Whether delivery events are read, webhooks sent and old records pruned; a part that is off is not listed. |
+| `cairnpost_database_up`, `cairnpost_build_info{version,driver}` | Whether the database answers; what is running. |
+
+A route is the pattern that matched (`GET /emails/{id}`), never a path as
+it was asked for, and no label holds an address, a subject, a URL or an
+id. The request counts are one server's own, since it started; the rest
+is read from the database when asked.
+
 ## Console
 
 The console is at `/console` on the same address as the API. Sign in with
@@ -437,11 +460,14 @@ cairnpost webhooks list         list the webhook endpoints
 cairnpost webhooks remove ID    remove a webhook endpoint
 cairnpost domains check DOMAIN  see whether a domain's DNS is ready
 cairnpost send                  send an email through a running server
+cairnpost tail                  show what becomes of emails, as it happens
 cairnpost version               print the version
 ```
 
-`keys`, `suppressions`, `webhooks` and `migrate` work on the database directly, so they run where the
-server runs. A key has a scope, `send` or `admin`, and may be bound to one
+`keys`, `suppressions`, `webhooks`, `tail` and `migrate` work on the database directly, so they run where the
+server runs. `tail` shows the last delivery events and then each new one
+(`-domain` for one sending domain's, `-last` for how many to begin with,
+`-once` to stop after them). A key has a scope, `send` or `admin`, and may be bound to one
 sending domain with `--domain`.
 
 `domains check` reads public DNS only: it needs no database and no

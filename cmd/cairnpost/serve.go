@@ -20,6 +20,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/events"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
+	"github.com/mettjs/cairnpost/internal/metrics"
 	"github.com/mettjs/cairnpost/internal/prune"
 	"github.com/mettjs/cairnpost/internal/session"
 	"github.com/mettjs/cairnpost/internal/stats"
@@ -151,7 +152,10 @@ func serve(ctx context.Context) error {
 	suppressions := suppress.New(db)
 	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention}, log)
+	counted := measured{ping: db.Ping, counts: db, endpoints: endpoints, driver: drv, version: version, log: log,
+		parts: map[string]func() bool{"events": eventsHealth(reader), "webhooks": hooks.Healthy, "pruning": pruner.Healthy}}
 	var handler http.Handler = api.New(api.Deps{
+		Requests: &metrics.Requests{}, Gauges: counted.gauges,
 		Mail: mailer, Keys: keyring, Suppress: suppressions,
 		Webhooks: endpoints, Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, Log: log,
