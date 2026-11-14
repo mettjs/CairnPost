@@ -70,6 +70,12 @@ Every change a user of CairnPost can notice is written here. The format is
   admin key to see whether each part of the server is working and to list,
   make and revoke API keys. `CAIRNPOST_CONSOLE`, `CAIRNPOST_CONSOLE_SESSION`
   and `CAIRNPOST_CONSOLE_PLAIN_HTTP` set it up.
+- The console's first page shows how much was sent over the last 24
+  hours, 7 days or 30 days and what became of it, as numbers and charts
+  drawn by the server; each sending domain's bounce rate, marked at
+  `CAIRNPOST_BOUNCE_WARN` percent (5); the mail provider's allowance; the
+  webhook endpoints that are failing or paused; and whether each part of
+  the server is working, which every page says at its top.
 - The console lists the emails on record, newest first, narrowed to a
   state or a recipient, and shows what happened to each and, where content
   is kept, what it said. A recipient looked for is never in a page's

@@ -10,6 +10,7 @@
 package console
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
+	"github.com/mettjs/cairnpost/internal/stats"
 	"github.com/mettjs/cairnpost/internal/suppress"
 	"github.com/mettjs/cairnpost/internal/webhook"
 )
@@ -33,6 +35,11 @@ type Deps struct {
 	Webhooks *webhook.Service
 	Domains  *domains.Service
 	Sessions *session.Service
+	// Stats reads how much was sent and what became of it.
+	Stats *stats.Service
+	// Quota asks the mail provider for its allowance; nil for a provider
+	// that has none to tell.
+	Quota func(context.Context) (Quota, error)
 	// Events, Sending and Pruning report whether delivery events are read,
 	// webhooks sent and old records pruned; nil for one that is off.
 	Events, Sending, Pruning func() bool

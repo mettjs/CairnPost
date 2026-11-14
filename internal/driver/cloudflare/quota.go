@@ -15,23 +15,44 @@ import (
 // for by people and dashboards, and Cloudflare need not hear each of them.
 const quotaFresh = 30 * time.Second
 
+// quotaRetry is how long Cloudflare is left alone after it failed to
+// answer about the quota: whoever asks meanwhile is told the same.
+const quotaRetry = 10 * time.Second
+
 type cache struct {
 	mu   sync.Mutex
 	at   time.Time
 	held driver.Quota
+	// failed is the last failure and when it was, for quotaRetry.
+	failed   error
+	failedAt time.Time
 }
 
 // Quota implements driver.Limited: the account's daily allowance and how
-// much of it is used, as Cloudflare counts it. A recent answer is reused.
+// much of it is used, as Cloudflare counts it. A recent answer is reused,
+// and so, for a shorter time, is a recent failure.
 func (d *Driver) Quota(ctx context.Context) (driver.Quota, error) {
 	d.quota.mu.Lock()
 	fresh := !d.quota.at.IsZero() && time.Since(d.quota.at) < quotaFresh
-	held := d.quota.held
-	d.quota.mu.Unlock()
-	if fresh {
-		return held, nil
+	held, failed := d.quota.held, d.quota.failed
+	if time.Since(d.quota.failedAt) >= quotaRetry {
+		failed = nil
 	}
-	return d.readQuota(ctx)
+	d.quota.mu.Unlock()
+	switch {
+	case fresh:
+		return held, nil
+	case failed != nil:
+		return driver.Quota{}, failed
+	}
+	q, err := d.readQuota(ctx)
+	// A caller that left, or would not wait, is no failure of Cloudflare's.
+	if err != nil && ctx.Err() == nil {
+		d.quota.mu.Lock()
+		d.quota.failed, d.quota.failedAt = err, time.Now()
+		d.quota.mu.Unlock()
+	}
+	return q, err
 }
 
 // readQuota asks Cloudflare now, and keeps a good answer for Quota.
@@ -64,7 +85,7 @@ func (d *Driver) readQuota(ctx context.Context) (driver.Quota, error) {
 		q.ResetsAt = at
 	}
 	d.quota.mu.Lock()
-	d.quota.held, d.quota.at = q, time.Now()
+	d.quota.held, d.quota.at, d.quota.failed = q, time.Now(), nil
 	d.quota.mu.Unlock()
 	return q, nil
 }

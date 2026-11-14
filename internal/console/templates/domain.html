@@ -2,7 +2,7 @@
 {{define "main"}}
 <p class="back"><a href="{{.Root}}/domains">Domains</a></p>
 <h1 class="long">{{.Data.Domain}}</h1>
-<p class="lede">{{if .Data.Wanting}}<span class="state state-failing">{{.Data.Wanting}} of {{len .Data.Results}} need a look</span>{{else}}<span class="state state-ok">Ready</span> {{if .Data.Asks}}Every record the mail provider asks for is in place.{{else}}Nothing stands in the way of sending.{{end}}{{if .Data.NoPolicy}} It has no DMARC policy, which is allowed.{{end}}{{end}}
+<p class="lede">{{if .Data.Wanting}}<span class="state state-failing">{{template "ico" "failing"}}{{.Data.Wanting}} of {{len .Data.Results}} need a look</span>{{else}}<span class="state state-ok">{{template "ico" "ok"}}Ready</span> {{if .Data.Asks}}Every record the mail provider asks for is in place.{{else}}Nothing stands in the way of sending.{{end}}{{if .Data.NoPolicy}} It has no DMARC policy, which is allowed.{{end}}{{end}}
 {{if not .Data.Asks}} This server's mail provider, <code>{{.Data.Provider}}</code>, asks no DNS records of a domain, so only the DMARC policy is looked at.{{end}}</p>
 
 <section aria-labelledby="records">
@@ -15,7 +15,7 @@
         <span class="by">{{.Words.For}}</span>
       </div>
       <div>
-        <span class="state state-{{.Words.Tone}}">{{.Words.Label}}</span> {{.Words.Says}}
+        <span class="state state-{{.Words.Tone}}">{{template "ico" .Words.Tone}}{{.Words.Label}}</span> {{.Words.Says}}
         <p class="where"><code>{{.Type}}</code> at <code>{{.At}}</code>{{if .Inherited}}, as <code>{{.Name}}</code> has none{{end}}</p>
         {{if .Found}}<pre class="said" tabindex="0">{{range .Found}}{{.}}
 {{end}}</pre>{{end}}

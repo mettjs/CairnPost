@@ -1,0 +1,16 @@
+{{/* Pieces more than one page draws: the shape that goes with a tone (ok, failing, wait, anything else is off), a bar of how much, a chart. */}}
+{{define "ico"}}{{if eq . "ok"}}<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path class="cut" d="M4.6 8.3l2.2 2.2 4.6-4.9"/></svg>{{else if eq . "failing"}}<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.2l7.2 13H.8z"/><path class="cut" d="M8 6v4M8 12v.4"/></svg>{{else if eq . "wait"}}<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13"/><path class="cut" d="M8 4.5v4M8 11v.4"/></svg>{{else}}<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><circle class="ring" cx="8" cy="8" r="6.2"/></svg>{{end}}{{end}}
+{{define "cairn"}}<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="13.5" width="16" height="4.5" rx="2.2"/><rect x="4.5" y="7.6" width="11" height="4.4" rx="2.2"/><rect x="7" y="2" width="6" height="4.2" rx="2.1"/></svg>{{end}}
+
+{{define "track"}}<svg class="track{{if .High}} high{{end}}{{if .Wide}} wide{{end}}" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="rest" width="100" height="8"/><rect class="fill" width="{{.Fill}}" height="8"/></svg>{{end}}
+
+{{define "chart"}}
+<svg class="chart" viewBox="0 0 {{.W}} {{.H}}" role="img" aria-label="{{.Title}}">
+  {{range .Ticks}}<line class="grid" x1="{{$.Left}}" x2="{{$.Right}}" y1="{{.Y}}" y2="{{.Y}}"/><text x="{{$.Left}}" y="{{.Y}}" dx="-8" dy="4" text-anchor="end">{{.Label}}</text>{{end}}
+  <line class="axis" x1="{{.Left}}" x2="{{.Right}}" y1="{{.Base}}" y2="{{.Base}}"/>
+  {{range .Labels}}<text x="{{.X}}" y="{{$.Base}}" dy="18" text-anchor="middle">{{.Text}}</text>{{end}}
+  {{range .Lines}}<polyline class="line {{.Class}}" points="{{.Points}}"/>{{end}}
+  {{range .Lines}}<circle class="dot {{.Class}}" cx="{{.EndX}}" cy="{{.EndY}}" r="4"/>{{if .End}}<text class="end" x="{{.EndX}}" y="{{.EndY}}" dx="10" dy="{{.EndLift}}">{{.End}}</text>{{end}}{{end}}
+  {{range .Marks}}<g class="step" data-tip="{{.Tip}}"><rect class="hit" x="{{.X}}" y="{{$.Top}}" width="{{.W}}" height="{{$.Height}}"/>{{with .Bar}}<rect class="bar" x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}"/>{{end}}{{if .Dots}}<line class="cross" x1="{{.Mid}}" x2="{{.Mid}}" y1="{{$.Top}}" y2="{{$.Base}}"/>{{range .Dots}}<circle class="dot hover {{.Class}}" cx="{{.X}}" cy="{{.Y}}" r="4"/>{{end}}{{end}}</g>{{end}}
+</svg>
+{{end}}

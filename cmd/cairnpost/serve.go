@@ -22,6 +22,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/prune"
 	"github.com/mettjs/cairnpost/internal/session"
+	"github.com/mettjs/cairnpost/internal/stats"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
 	"github.com/mettjs/cairnpost/internal/suppress"
 	"github.com/mettjs/cairnpost/internal/webhook"
@@ -167,7 +168,8 @@ func serve(ctx context.Context) error {
 			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout, cfg.DNSServer), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
 			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, EventsOff: eventsOff,
 			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP,
-			PauseAfter: cfg.Webhook.PauseAfter, Log: log})
+			PauseAfter: cfg.Webhook.PauseAfter, Stats: stats.New(db, cfg.Console.BounceWarn),
+			Quota: consoleQuota(drv), Log: log})
 		both.Handle(console.Root, pages)
 		both.Handle(console.Root+"/", pages)
 		both.Handle("/", handler)
@@ -227,6 +229,19 @@ func quotaOf(d driver.Driver) func(context.Context) (api.Quota, error) {
 			out.ResetsAt = &q.ResetsAt
 		}
 		return out, nil
+	}
+}
+
+// consoleQuota is the same question, asked of the same driver, for the
+// console's first page.
+func consoleQuota(d driver.Driver) func(context.Context) (console.Quota, error) {
+	limited, ok := d.(driver.Limited)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context) (console.Quota, error) {
+		q, err := limited.Quota(ctx)
+		return console.Quota{Limit: q.Limit, Used: q.Used, Per: q.Per, Over: q.Over, ResetsAt: q.ResetsAt}, err
 	}
 }
 

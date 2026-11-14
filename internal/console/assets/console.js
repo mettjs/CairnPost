@@ -30,3 +30,42 @@ document.addEventListener("change", function (event) {
     if (only) only.checked = true;
   }
 });
+
+// A chart says what is under the pointer. Without this file the numbers
+// are in the table under it.
+(function () {
+  var tip = null, over = null;
+  function hide() {
+    over = null;
+    if (tip) tip.hidden = true;
+  }
+  function show(step, x, y) {
+    if (!tip) {
+      tip = document.createElement("div");
+      tip.className = "tip";
+      document.body.appendChild(tip);
+    }
+    if (step !== over) {
+      over = step;
+      tip.textContent = "";
+      (step.getAttribute("data-tip") || "").split("|").forEach(function (text, i) {
+        var line = document.createElement(i === 0 ? "b" : "div");
+        line.textContent = text;
+        tip.appendChild(line);
+      });
+      tip.hidden = false;
+    }
+    tip.style.left = Math.max(8, Math.min(x + 14, window.innerWidth - tip.offsetWidth - 8)) + "px";
+    tip.style.top = Math.max(8, y - tip.offsetHeight - 12) + "px";
+  }
+  document.addEventListener("pointermove", function (event) {
+    var step = event.target.closest ? event.target.closest(".chart .step") : null;
+    if (step) show(step, event.clientX, event.clientY);
+    else hide();
+  });
+  // The pointer left the page, or the page moved under it.
+  document.documentElement.addEventListener("pointerleave", hide);
+  document.addEventListener("pointercancel", hide);
+  document.addEventListener("scroll", hide, true);
+  window.addEventListener("blur", hide);
+})();

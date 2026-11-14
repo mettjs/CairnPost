@@ -40,7 +40,7 @@
       <tr>
         <td data-label="To"><a href="{{$.Root}}/emails/{{.ID}}{{with $.Data.For}}?for={{.}}{{end}}">{{.Recipient}}</a></td>
         <td data-label="From" class="wrap">{{.Sender}}</td>
-        <td data-label="State"><span class="state state-{{tone .State}}">{{label .State}}</span></td>
+        <td data-label="State"><span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{label .State}}</span></td>
         <td data-label="Sent"><time datetime="{{stamp .CreatedAt}}">{{when .CreatedAt}}</time></td>
       </tr>
       {{end}}
