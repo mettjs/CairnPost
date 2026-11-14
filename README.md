@@ -398,8 +398,9 @@ no driver for. Things worth knowing:
   says otherwise, and a server that does not offer it is not used: the
   password is never said in the clear. The server's certificate must be
   valid for `CAIRNPOST_SMTP_HOST`. Sign-in is by `PLAIN` or `LOGIN`.
-- A wrong password, a refused greeting or a server that is down is never
-  the email's fault: sends answer 503 and nothing is dropped. A refusal of
+- A wrong password, a refused greeting, a server that wants a sign-in it
+  was not given, or one that is down is never the email's fault: sends
+  answer 503 and nothing is dropped. A refusal of
   the sender, a recipient or the message is the email's: 422. A connection
   lost after the message was handed over leaves it open whether it went:
   502, and a retry under the same `Idempotency-Key`.
@@ -410,7 +411,15 @@ no driver for. Things worth knowing:
 - The server signs the mail (DKIM) and its addresses must be allowed to
   send for the domain (SPF): that is the server's setup, and
   `domains check` looks only for the domain's DMARC record here.
-- Each send opens a connection of its own, within `CAIRNPOST_SEND_TIMEOUT`.
+- Each send opens a connection of its own, and the whole exchange
+  (connecting, securing, handing the message over, the server's answer)
+  must fit in `CAIRNPOST_SEND_TIMEOUT`, 10 seconds unless set. Raise it
+  for a slow server or large files: a send cut off after the message was
+  handed over is one that may have gone.
+- An address that is not plain ASCII is sent only through a server that
+  says it carries such (SMTPUTF8); through another the email is refused.
+- Set `CAIRNPOST_SMTP_HELLO` to the machine's full host name if it is
+  not that already: some servers refuse a short one.
 
 **`capture`** sends nothing. It keeps the last emails in memory and shows
 them at `GET /capture/emails`: for development and tests. Of a file it

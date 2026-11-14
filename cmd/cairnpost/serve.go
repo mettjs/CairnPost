@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/api"
@@ -107,6 +108,9 @@ func serve(ctx context.Context) error {
 		drv = smtp.New(smtp.Options{Host: cfg.SMTP.Host, Port: cfg.SMTP.Port, Security: cfg.SMTP.Security,
 			Username: cfg.SMTP.Username, Password: cfg.SMTP.Password, Hello: cfg.SMTP.Hello}, time.Now)
 		neverTold = true
+		if !strings.Contains(cfg.SMTP.Hello, ".") {
+			log.Warn("the name the mail server is greeted with is not a full host name; some servers refuse such a one (CAIRNPOST_SMTP_HELLO)")
+		}
 		log.Warn("the smtp driver is in use: a mail server tells nothing of an email after it took it, " +
 			"so records stop at \"sent\" and no address is suppressed by itself")
 	default:

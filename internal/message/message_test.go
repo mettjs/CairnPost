@@ -163,3 +163,66 @@ func TestAPlainMessageIsOnePart(t *testing.T) {
 		t.Fatalf("%d addresses %v, subject %d bytes", len(to), err, len(msg.Header.Get("Subject")))
 	}
 }
+
+// Headers are broken only where they may be: no line is of spaces
+// alone, a value reads back as it was written, an encoded subject keeps
+// to the length of a line, and an address in the form it is sent in is
+// not quoted again. A value no line can hold is refused, not sent.
+func TestHeadersAreBrokenWhereTheyMayBe(t *testing.T) {
+	m := driver.Message{From: `"ana maria"@example.org`, FromName: "Ana", To: []string{"bo@example.org"}, Text: "t",
+		Subject: "wide" + strings.Repeat(" ", 200) + "gap  and two"}
+	var out bytes.Buffer
+	if err := Write(&out, m, stamp()); err != nil {
+		t.Fatal(err)
+	}
+	head, _, _ := strings.Cut(out.String(), "\r\n\r\n")
+	for _, line := range strings.Split(head, "\r\n") {
+		if strings.TrimSpace(line) == "" || strings.HasSuffix(line, " ") {
+			t.Fatalf("a line of spaces, or one that ends in them: %q", line)
+		}
+	}
+	msg, err := netmail.ReadMessage(bytes.NewReader(out.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, err := msg.Header.AddressList("From")
+	// Unfolded as the rule has it, by taking the line breaks out, the
+	// subject is what was written, its spaces too.
+	_, after, _ := strings.Cut(head, "Subject: ")
+	subject, _, _ := strings.Cut(strings.ReplaceAll(after, "\r\n ", "\x00"), "\r\n")
+	if subject = strings.ReplaceAll(subject, "\x00", " "); err != nil || len(from) != 1 || from[0].Address != "ana maria@example.org" ||
+		from[0].Name != "Ana" || subject != m.Subject {
+		t.Fatalf("%+v %v, subject %q", from, err, subject)
+	}
+	if !strings.Contains(head, `From: "Ana" <"ana maria"@example.org>`) && !strings.Contains(head, `From: Ana <"ana maria"@example.org>`) {
+		t.Fatalf("the sender: %s", head)
+	}
+	// A long subject that is not plain is many encoded words, a line each.
+	m.Subject = strings.Repeat("Grüße№", 40)
+	out.Reset()
+	if err := Write(&out, m, stamp()); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(out.String(), "\r\n") {
+		if len(line) > 78 {
+			t.Fatalf("a line of %d bytes: %q", len(line), line)
+		}
+	}
+	msg, _ = netmail.ReadMessage(bytes.NewReader(out.Bytes()))
+	if got, err := new(mime.WordDecoder).DecodeHeader(msg.Header.Get("Subject")); err != nil || got != m.Subject {
+		t.Fatalf("%q %v", got, err)
+	}
+	// One plain word longer than a line may be cannot be written.
+	for name, change := range map[string]func(*driver.Message){
+		"a subject":  func(m *driver.Message) { m.Subject = strings.Repeat("x", 998) },
+		"a header":   func(m *driver.Message) { m.Headers = map[string]string{"X-Long": strings.Repeat("y", 1200)} },
+		"a reply-to": func(m *driver.Message) { m.ReplyTo = strings.Repeat("r", 1000) + "@example.org" },
+	} {
+		long := driver.Message{From: "a@example.org", To: []string{"b@example.org"}, Subject: "s", Text: "t"}
+		change(&long)
+		out.Reset()
+		if err := Write(&out, long, stamp()); err != ErrLine {
+			t.Errorf("%s no line can hold: %v", name, err)
+		}
+	}
+}

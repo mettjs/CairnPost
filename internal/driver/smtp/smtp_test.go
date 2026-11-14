@@ -77,6 +77,24 @@ func TestEachAnswerHasItsKind(t *testing.T) {
 			t.Errorf("%s: the message was handed over all the same", name)
 		}
 	}
+	// A refusal that is about how this side speaks is not the email's,
+	// wherever it comes; nor is "too many recipients".
+	for name, c := range map[string][2]string{
+		"a sign-in wanted, at the sender":      {"MAIL", "530 5.7.0 authentication required"},
+		"a hello refused, at the recipient":    {"RCPT", "504 5.5.2 helo rejected"},
+		"too many recipients":                  {"RCPT", "552 too many recipients"},
+		"commands out of turn, at the content": {"DATA", "503 bad sequence"},
+	} {
+		s := &server{answers: map[string]string{c[0]: c[1]}}
+		if _, err := driverFor(t, s, None, "", "").Send(ctx(t), email); !errors.Is(err, driver.ErrUnavailable) || errors.Is(err, driver.ErrRejected) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// "Taken", said in another number than the usual, is taken.
+	other := &server{answers: map[string]string{"end": "251 forwarded"}}
+	if id, err := driverFor(t, other, None, "", "").Send(ctx(t), email); err != nil || id == "" {
+		t.Fatalf("a 251 after the message: %q %v", id, err)
+	}
 	// Handed over whole and never answered: it may have gone, which is
 	// neither of the two kinds that say nothing was sent.
 	s := &server{hangAtEnd: true}
@@ -134,5 +152,62 @@ func TestASilentServerEndsWithTheCallersTime(t *testing.T) {
 	began := time.Now()
 	if _, err := d.Send(short, email); !errors.Is(err, driver.ErrUnavailable) || time.Since(began) > 3*time.Second {
 		t.Fatalf("%v after %v", err, time.Since(began))
+	}
+}
+
+// An address that is not plain ASCII goes only through a server that
+// says it carries such; through another the email is refused before
+// the server is told of it. And no setting of this driver is read as
+// "in the clear" that does not say so.
+func TestWhatIsNotPlainAndWhatIsNotSet(t *testing.T) {
+	wide := email
+	wide.To = []string{"añá@exämple.org"}
+	wide.From = "josé@exämple.org"
+	s := &server{}
+	d := driverFor(t, s, None, "", "")
+	if _, err := d.Send(ctx(t), wide); !errors.Is(err, driver.ErrRejected) || strings.Contains(s.lines(), "MAIL") ||
+		strings.Contains(err.Error(), "exämple") {
+		t.Fatalf("through a server that takes none such: %v\n%s", err, s.lines())
+	}
+	able := &server{offers: []string{"SMTPUTF8"}}
+	id, err := driverFor(t, able, None, "", "").Send(ctx(t), wide)
+	if err != nil || !plainASCII(id) || !strings.HasSuffix(id, "@cairnpost.test>") || !strings.Contains(able.lines(), "SMTPUTF8") {
+		t.Fatalf("through one that does: %q %v\n%s", id, err, able.lines())
+	}
+	for _, unset := range []string{"", "STARTTLS", "ssl"} {
+		bare := &server{offers: []string{"AUTH PLAIN"}}
+		_, err := driverFor(t, bare, unset, "u", "PASSWORDMARK").Send(ctx(t), email)
+		if !errors.Is(err, driver.ErrUnavailable) || bare.lines() != "" {
+			t.Errorf("security %q: %v, the server was told %q", unset, err, bare.lines())
+		}
+	}
+	// A send that is called off ends, with no time set for it.
+	silent := driverFor(t, &server{}, None, "", "")
+	silent.dial = func(context.Context, string, string) (net.Conn, error) {
+		a, b := net.Pipe()
+		t.Cleanup(func() { a.Close(); b.Close() })
+		go func() { // greets, then says no more
+			b.Write([]byte("220 ready\r\n"))
+			buf := make([]byte, 512)
+			for {
+				if _, err := b.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+		return a, nil
+	}
+	off, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := silent.Send(off, email); done <- err }()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, driver.ErrUnavailable) {
+			t.Fatalf("called off: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a send that was called off went on waiting")
 	}
 }

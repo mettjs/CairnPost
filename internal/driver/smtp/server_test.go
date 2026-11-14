@@ -82,9 +82,15 @@ func (s *server) serve(conn net.Conn) {
 		}
 		verb := strings.ToUpper(strings.Fields(line + " x")[0])
 		switch verb {
-		case "EHLO":
+		case "EHLO", "HELO":
+			// A client refused its EHLO tries the older word: the
+			// script's answer is for both.
 			if a := s.answers["EHLO"]; a != "" {
 				say(a)
+				continue
+			}
+			if verb == "HELO" {
+				say("250 ok")
 				continue
 			}
 			// The first line is the server's name; what it offers follows.

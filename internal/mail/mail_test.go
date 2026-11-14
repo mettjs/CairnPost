@@ -247,14 +247,21 @@ func TestAKeyBoundToADomainSendsOnlyFromIt(t *testing.T) {
 
 func TestRequestsThatCanNeverBeSent(t *testing.T) {
 	cases := map[string]func(*mail.Request){
-		"from":            func(r *mail.Request) { r.From = "not an address" },
-		"to":              func(r *mail.Request) { r.To = nil; r.Cc = []string{"a@example.org"} },
-		"cc":              func(r *mail.Request) { r.Cc = []string{"Ana <ANA@example.org>"} },
-		"bcc":             func(r *mail.Request) { r.Bcc = []string{"not an address"} },
-		"reply_to":        func(r *mail.Request) { r.ReplyTo = "nope" },
-		"subject":         func(r *mail.Request) { r.Subject = "two\nlines" },
-		"html":            func(r *mail.Request) { r.Text = "" },
-		"headers":         func(r *mail.Request) { r.Headers = map[string]string{"Subject": "x"} },
+		"from":      func(r *mail.Request) { r.From = "not an address" },
+		"to":        func(r *mail.Request) { r.To = nil; r.Cc = []string{"a@example.org"} },
+		"cc":        func(r *mail.Request) { r.Cc = []string{"Ana <ANA@example.org>"} },
+		"bcc":       func(r *mail.Request) { r.Bcc = []string{"not an address"} },
+		"reply_to":  func(r *mail.Request) { r.ReplyTo = "nope" },
+		"subject":   func(r *mail.Request) { r.Subject = "two\nlines" },
+		"html":      func(r *mail.Request) { r.Text = "" },
+		"headers":   func(r *mail.Request) { r.Headers = map[string]string{"Subject": "x"} },
+		"headers ":  func(r *mail.Request) { r.Headers = map[string]string{"Content-Disposition": "attachment"} },
+		"headers  ": func(r *mail.Request) { r.Headers = map[string]string{"X-Long": strings.Repeat("y", 901)} },
+		"subject ":  func(r *mail.Request) { r.Subject = strings.Repeat("x", 901) },
+		"reply_to ": func(r *mail.Request) {
+			r.ReplyTo = strings.Repeat("r", 60) + "@" + strings.Repeat("d", 300) + ".example.org"
+		},
+		"from ":           func(r *mail.Request) { r.From = strings.Repeat("N", 321) + " <app@example.com>" },
 		"Idempotency-Key": func(r *mail.Request) { r.IdemKey = "caf\xe9" },
 	}
 	for field, breakIt := range cases {
@@ -262,7 +269,7 @@ func TestRequestsThatCanNeverBeSent(t *testing.T) {
 		req := request("")
 		breakIt(&req)
 		var invalid *mail.Invalid
-		if _, err := r.send(req); !errors.As(err, &invalid) || invalid.Field != field || r.drv.sends != 0 {
+		if _, err := r.send(req); !errors.As(err, &invalid) || invalid.Field != strings.TrimSpace(field) || r.drv.sends != 0 {
 			t.Errorf("%s: err %v, sends %d", field, err, r.drv.sends)
 		}
 	}

@@ -36,6 +36,11 @@ func smtpOf(getenv func(string) string, inUse bool) (SMTP, error) {
 		Username: getenv("CAIRNPOST_SMTP_USERNAME"), Password: getenv("CAIRNPOST_SMTP_PASSWORD"),
 		Hello: strings.TrimSpace(getenv("CAIRNPOST_SMTP_HELLO")),
 	}
+	if !inUse {
+		// Another driver's deployment is not stopped by what is left
+		// here.
+		return SMTP{}, nil
+	}
 	if s.Security == "" {
 		s.Security = "starttls"
 	}
@@ -51,7 +56,7 @@ func smtpOf(getenv func(string) string, inUse bool) (SMTP, error) {
 		return s, fmt.Errorf("config: CAIRNPOST_SMTP_PORT must be at most 65535 (got %d)", port)
 	}
 	switch {
-	case inUse && s.Host == "":
+	case s.Host == "":
 		return s, fmt.Errorf("config: the smtp driver needs CAIRNPOST_SMTP_HOST, the mail server to send through")
 	case (s.Username == "") != (s.Password == ""):
 		return s, fmt.Errorf("config: set CAIRNPOST_SMTP_USERNAME and CAIRNPOST_SMTP_PASSWORD both, or neither")

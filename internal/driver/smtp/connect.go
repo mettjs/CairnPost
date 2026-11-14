@@ -15,11 +15,26 @@ import (
 // connect opens a connection ready to be told an email: greeted,
 // secured as asked and signed in. Its errors all mean nothing was sent
 // and the server, or how it is set here, is why.
-func (d *Driver) connect(ctx context.Context) (*netsmtp.Client, error) {
+//
+// Whoever calls the send off ends the exchange, at whatever step it
+// is and whether or not a time was set for it: done is to be called
+// when the exchange is over.
+func (d *Driver) connect(ctx context.Context) (c *netsmtp.Client, done func() bool, err error) {
+	if !slices.Contains([]string{StartTLS, TLS, None}, d.opt.Security) {
+		// Never taken to mean "in the clear".
+		return nil, nil, fmt.Errorf("smtp: how the connection is secured is not set to a way known here: %w", driver.ErrUnavailable)
+	}
 	conn, err := d.dial(ctx, "tcp", d.address())
 	if err != nil {
-		return nil, fmt.Errorf("smtp: the server was not reached: %w", driver.ErrUnavailable)
+		return nil, nil, fmt.Errorf("smtp: the server was not reached: %w", driver.ErrUnavailable)
 	}
+	wire := conn
+	stop := context.AfterFunc(ctx, func() { wire.Close() })
+	defer func() {
+		if err != nil {
+			stop()
+		}
+	}()
 	// The whole exchange ends with the caller's time: net/smtp takes no
 	// context of its own.
 	if until, ok := ctx.Deadline(); ok {
@@ -29,20 +44,19 @@ func (d *Driver) connect(ctx context.Context) (*netsmtp.Client, error) {
 		secured := tls.Client(conn, d.tls)
 		if err := secured.HandshakeContext(ctx); err != nil {
 			conn.Close()
-			return nil, fmt.Errorf("smtp: the connection could not be secured: %w", driver.ErrUnavailable)
+			return nil, nil, fmt.Errorf("smtp: the connection could not be secured: %w", driver.ErrUnavailable)
 		}
 		conn = secured
 	}
-	c, err := netsmtp.NewClient(conn, d.opt.Host)
-	if err != nil {
+	if c, err = netsmtp.NewClient(conn, d.opt.Host); err != nil {
 		conn.Close()
-		return nil, said("the greeting", err, false)
+		return nil, nil, said("the greeting", err, false)
 	}
-	if err := d.ready(c); err != nil {
+	if err = d.ready(c); err != nil {
 		c.Close()
-		return nil, err
+		return nil, nil, err
 	}
-	return c, nil
+	return c, stop, nil
 }
 
 // ready says hello, secures a connection begun in the clear, and signs
