@@ -29,7 +29,7 @@ func (z zone) LookupTXT(_ context.Context, name string) ([]string, error) {
 
 func (z zone) LookupMX(_ context.Context, name string) ([]*net.MX, error) {
 	if _, ok := z["mx:"+strings.TrimSuffix(name, ".")]; ok {
-		return []*net.MX{{Host: "mx.provider.example."}}, nil
+		return []*net.MX{{Host: "route1.mx.cloudflare.net."}}, nil
 	}
 	return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 }
@@ -140,5 +140,17 @@ func TestEveryRecordInEveryStateHasWords(t *testing.T) {
 	none.Use = dnscheck.UseDMARC
 	if w := domains.WordsFor(none); w.Tone != "off" || w.Label != "None" {
 		t.Errorf("no DMARC record: %+v", w)
+	}
+}
+
+// A bounce address that points somewhere else is said to, apart from one
+// that takes no mail at all.
+func TestABounceAddressElsewhereSaysWhere(t *testing.T) {
+	at := driver.Record{Use: driver.UseBounce, Name: "cf-bounce.mail.example.com", Type: "MX", Under: "mx.cloudflare.net"}
+	elsewhere := domains.WordsFor(dnscheck.Result{Record: at, State: dnscheck.Wrong, Found: []string{"mx.other.example."}})
+	null := domains.WordsFor(dnscheck.Result{Record: at, State: dnscheck.Wrong, Found: []string{"."}})
+	if elsewhere.Tone != "failing" || !strings.Contains(elsewhere.Says, "does not point at the mail provider's servers (mx.cloudflare.net)") ||
+		!strings.Contains(null.Says, "takes no mail") || elsewhere.Says == null.Says {
+		t.Fatalf("elsewhere: %q\nnull: %q", elsewhere.Says, null.Says)
 	}
 }

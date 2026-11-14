@@ -24,7 +24,7 @@ func (z resolver) LookupTXT(_ context.Context, name string) ([]string, error) {
 
 func (z resolver) LookupMX(_ context.Context, name string) ([]*net.MX, error) {
 	if _, ok := z.r.dns["mx:"+strings.TrimSuffix(name, ".")]; ok {
-		return []*net.MX{{Host: "mx.provider.example."}}, nil
+		return []*net.MX{{Host: "route1.mx.cloudflare.net."}}, nil
 	}
 	return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 }
@@ -75,7 +75,7 @@ func TestADomainsDNSIsChecked(t *testing.T) {
 	rec := b.do("GET", "/domains/Mail.Example.com", nil)
 	page := rec.Body.String()
 	for _, want := range []string{">Ready<", "Every record the mail provider asks for is in place.",
-		"<code>_dmarc.example.com</code>, as <code>_dmarc.mail.example.com</code> has none", "the-key-in-dns", "It names _spf.mx.cloudflare.net", "Bounces have somewhere to go",
+		"<code>_dmarc.example.com</code>, as <code>_dmarc.mail.example.com</code> has none", "the-key-in-dns", "It names _spf.mx.cloudflare.net", "Bounces go to the mail provider&#39;s servers",
 		"The one of example.com may speak for it", "Receivers are asked to refuse", "&lt;b&gt;odd&lt;/b&gt;",
 		"<code>cf-bounce._domainkey.mail.example.com</code>", "this server cannot tell whether a key is the one"} {
 		if !strings.Contains(page, want) {

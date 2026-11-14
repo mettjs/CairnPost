@@ -64,10 +64,25 @@ type Checker struct {
 	Timeout time.Duration
 }
 
-// New returns a checker on the system's resolver; one whole check may
-// take timeout.
-func New(timeout time.Duration) *Checker {
-	return &Checker{Resolver: net.DefaultResolver, Timeout: timeout}
+// New returns a checker; one whole check may take timeout. It asks the
+// system's resolver, or, when server is not "", the DNS server at that
+// address ("1.1.1.1:53") and no other: for a machine whose own resolver
+// does not answer as the public internet does.
+func New(timeout time.Duration, server string) *Checker {
+	if server == "" {
+		return &Checker{Resolver: net.DefaultResolver, Timeout: timeout}
+	}
+	dialer := &net.Dialer{Timeout: timeout}
+	return &Checker{Timeout: timeout, Resolver: &net.Resolver{PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, server)
+		}}}
+}
+
+// under reports whether a host is a name, or below it.
+func under(host, name string) bool {
+	host, name = strings.ToLower(strings.Trim(host, ".")), strings.ToLower(strings.Trim(name, "."))
+	return host == name || strings.HasSuffix(host, "."+name)
 }
 
 // ErrNotAHost is a check asked of what is no host name.
@@ -105,10 +120,12 @@ func (c *Checker) one(ctx context.Context, r driver.Record) Result {
 		good := len(hosts) > 0
 		for _, h := range hosts {
 			res.Found = append(res.Found, h.Host)
-			// "." is the null MX: the name says it takes no mail.
-			good = good && strings.Trim(h.Host, ".") != ""
+			// "." is the null MX: the name says it takes no mail. A host
+			// that is not the upstream's takes the bounces somewhere the
+			// upstream never hears of them: a wildcard record, or another
+			// provider's, answers there too.
+			good = good && strings.Trim(h.Host, ".") != "" && (r.Under == "" || under(h.Host, r.Under))
 		}
-		// A bounce needs somewhere to go: which host is the upstream's own.
 		res.State, res.Found = stateOf(err, len(hosts) > 0, good), shown(res.Found)
 		return res
 	}

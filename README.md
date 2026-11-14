@@ -409,7 +409,9 @@ credentials, so it can be run before anything else is set up. It looks for
 the records of the provider named by `CAIRNPOST_DRIVER`, or by
 `-provider` before the domain (`cairnpost domains check -provider
 cloudflare mail.example.com`), and ends as a failure when one is missing,
-or when no provider it knows is named.
+or when no provider it knows is named. The bounce address must point at
+the provider's own mail servers: a record that sends bounces elsewhere is
+not right, since the server would never hear of them.
 
 ## Configuration
 
@@ -435,6 +437,7 @@ or when no provider it knows is named.
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
 | `CAIRNPOST_DNS_TIMEOUT` | `6s` | The most one check of a domain's DNS records may take, in the console and in `domains check`: a second at least, a minute at most. Raise it where the first DNS server is slow to answer. |
+| `CAIRNPOST_DNS_SERVER` | the system's | The one DNS server those checks ask, as an IP address with or without a port (`1.1.1.1`). Set it where the machine's own resolver does not answer as the public internet does: a home router that makes up answers, or one that is silent about names that do not exist. |
 | `CAIRNPOST_CONSOLE` | `on` | Serve the console at `/console`. `off` leaves it out. |
 | `CAIRNPOST_CONSOLE_SESSION` | `12h` | How long a sign-in to the console lasts: a minute at least, 30 days at most. |
 | `CAIRNPOST_CONSOLE_PLAIN_HTTP` | `off` | Let the console's session cookie travel without TLS, for a console opened over plain http in development. |

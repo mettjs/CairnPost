@@ -88,7 +88,7 @@ func (z zone) LookupMX(ctx context.Context, name string) ([]*net.MX, error) {
 var asked = []driver.Record{
 	{Use: driver.UseDKIM, Name: "sel._domainkey.mail.example.com", Type: "TXT"},
 	{Use: driver.UseSPF, Name: "bounce.mail.example.com", Type: "TXT", Include: "_spf.provider.example"},
-	{Use: driver.UseBounce, Name: "bounce.mail.example.com", Type: "MX"},
+	{Use: driver.UseBounce, Name: "bounce.mail.example.com", Type: "MX", Under: "provider.example"},
 }
 
 // check answers the state of each record by its use.
@@ -137,8 +137,16 @@ func TestEachRecordIsInPlaceMissingOrDifferent(t *testing.T) {
 		"an include that only begins alike": {func(z *zone) {
 			z.txt["bounce.mail.example.com"] = []string{"v=spf1 include:_spf.provider.example.evil ~all"}
 		}, driver.UseSPF, dnscheck.Wrong},
-		"nowhere for bounces":       {func(z *zone) { delete(z.mx, "bounce.mail.example.com") }, driver.UseBounce, dnscheck.Missing},
-		"a name that takes no mail": {func(z *zone) { z.mx["bounce.mail.example.com"] = []string{"."} }, driver.UseBounce, dnscheck.Wrong},
+		"nowhere for bounces":           {func(z *zone) { delete(z.mx, "bounce.mail.example.com") }, driver.UseBounce, dnscheck.Missing},
+		"a name that takes no mail":     {func(z *zone) { z.mx["bounce.mail.example.com"] = []string{"."} }, driver.UseBounce, dnscheck.Wrong},
+		"bounces sent to somebody else": {func(z *zone) { z.mx["bounce.mail.example.com"] = []string{"mx.other.example."} }, driver.UseBounce, dnscheck.Wrong},
+		"one host of several is somebody else's": {func(z *zone) {
+			z.mx["bounce.mail.example.com"] = []string{"mx1.provider.example.", "mx.other.example."}
+		}, driver.UseBounce, dnscheck.Wrong},
+		"a host that only ends alike": {func(z *zone) { z.mx["bounce.mail.example.com"] = []string{"mx.evilprovider.example."} }, driver.UseBounce, dnscheck.Wrong},
+		"the provider's hosts, however written": {func(z *zone) {
+			z.mx["bounce.mail.example.com"] = []string{"MX1.Provider.Example.", "provider.example"}
+		}, driver.UseBounce, dnscheck.OK},
 		"two spf records": {func(z *zone) {
 			z.txt["bounce.mail.example.com"] = []string{"v=spf1 include:other.example -all", "v=spf1 include:_spf.provider.example ~all"}
 		}, driver.UseSPF, dnscheck.Wrong},

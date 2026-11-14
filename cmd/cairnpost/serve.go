@@ -164,7 +164,7 @@ func serve(ctx context.Context) error {
 			eventsOff = "None to read: this driver keeps emails and sends them to nobody."
 		}
 		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppressions, Webhooks: endpoints,
-			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
+			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout, cfg.DNSServer), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
 			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, EventsOff: eventsOff,
 			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP,
 			PauseAfter: cfg.Webhook.PauseAfter, Log: log})

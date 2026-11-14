@@ -1,6 +1,8 @@
 package domains
 
 import (
+	"strings"
+
 	"github.com/mettjs/cairnpost/internal/dnscheck"
 	"github.com/mettjs/cairnpost/internal/driver"
 )
@@ -61,6 +63,9 @@ func found(r dnscheck.Result) string {
 		}
 		return "An SPF record is published there."
 	case driver.UseBounce:
+		if r.Under != "" {
+			return "Bounces go to the mail provider's servers."
+		}
 		return "Bounces have somewhere to go."
 	case dnscheck.UseDMARC:
 		says := policies[r.Policy]
@@ -102,7 +107,12 @@ func wrong(r dnscheck.Result) string {
 		return "A record is there, but it names no policy that can be read: it needs p=none, p=quarantine or p=reject."
 	}
 	if r.Use == driver.UseBounce {
-		return "The record there says the name takes no mail, so a bounce has nowhere to go."
+		for _, host := range r.Found {
+			if strings.Trim(host, ".") == "" {
+				return "The record there says the name takes no mail, so a bounce has nowhere to go."
+			}
+		}
+		return "The MX record there does not point at the mail provider's servers (" + r.Under + "), so a bounce goes somewhere else and this server never hears of it."
 	}
 	return "Something is there, and it is not what is needed."
 }
