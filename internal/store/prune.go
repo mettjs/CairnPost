@@ -23,6 +23,13 @@ type Pruning interface {
 	// ones a new request would take over anyway. A message one of them
 	// left with no answer is recorded as unknown, as a takeover would.
 	PruneKeys(ctx context.Context, ttl time.Duration, limit int) (int, error)
+	// PruneNotices deletes the deliveries, made at or before a time, that
+	// tell of a suppression on its own: a suppression in force is never
+	// deleted, so nothing else would take them.
+	PruneNotices(ctx context.Context, before time.Time, limit int) (int, error)
+	// ForgetSecrets drops the signing keys that endpoints had before a
+	// change, once webhooks are no longer signed with them.
+	ForgetSecrets(ctx context.Context, limit int) (int, error)
 	// MarkUnanswered records as unknown the messages still "sending"
 	// that were started older ago: a send is answered or given up long
 	// before, so one left like that lost whoever was sending it (the

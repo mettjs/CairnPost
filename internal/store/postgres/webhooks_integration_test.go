@@ -137,17 +137,17 @@ func TestADeliveryIsSettledAndCanBeRetried(t *testing.T) {
 	if err := db.DeliveryDone(ctx, first[0].Delivery.ID, 204); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeliveryMissed(ctx, first[1].Delivery.ID, 7, 503, "status", time.Hour, false); err != nil {
+	if _, err := db.DeliveryMissed(ctx, first[1].Delivery.ID, 7, 503, "status", time.Hour, false, 0); err != nil {
 		t.Fatal(err) // a try long overtaken settles nothing
 	}
-	if err := db.DeliveryMissed(ctx, first[1].Delivery.ID, 1, 503, "status", time.Hour, false); err != nil {
+	if _, err := db.DeliveryMissed(ctx, first[1].Delivery.ID, 1, 503, "status", time.Hour, false, 0); err != nil {
 		t.Fatal(err)
 	}
 	rest := take(t, db, 10, e)
 	if len(rest) != 1 {
 		t.Fatalf("%d taken next, want the one left: the missed one waits an hour", len(rest))
 	}
-	if err := db.DeliveryMissed(ctx, rest[0].Delivery.ID, 1, 0, "timeout", 0, true); err != nil {
+	if _, err := db.DeliveryMissed(ctx, rest[0].Delivery.ID, 1, 0, "timeout", 0, true, 0); err != nil {
 		t.Fatal(err)
 	}
 	list, err := db.ListDeliveries(ctx, e.ID, "", "", 10)
@@ -190,7 +190,7 @@ func TestADeliveryIsSettledAndCanBeRetried(t *testing.T) {
 	if back := take(t, db, 10, e); len(back) != 1 || back[0].Delivery.Attempts != 2 {
 		t.Fatalf("handed back: %+v", back)
 	}
-	db.DeliveryMissed(ctx, gaveUp.ID, 2, 0, "timeout", 0, true)
+	db.DeliveryMissed(ctx, gaveUp.ID, 2, 0, "timeout", 0, true, 0)
 	if err := db.DeliveryDone(ctx, gaveUp.ID, 200); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestADeliveryIsSettledAndCanBeRetried(t *testing.T) {
 	if now := take(t, db, 10, e); len(now) != 1 || now[0].Delivery.ID != states[store.DeliveryPending].ID {
 		t.Fatalf("a waiting delivery sent now: %+v", now)
 	}
-	db.DeliveryMissed(ctx, states[store.DeliveryPending].ID, 2, 503, "status", time.Hour, false)
+	db.DeliveryMissed(ctx, states[store.DeliveryPending].ID, 2, 503, "status", time.Hour, false, 0)
 	// A disabled endpoint's deliveries wait, and go on when it is enabled.
 	off, on := false, true
 	db.UpdateEndpoint(ctx, e.ID, store.EndpointChange{Enabled: &off})

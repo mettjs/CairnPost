@@ -9,13 +9,20 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
-// typeOf is the name each kind of event goes out under. It covers every
-// kind.
+// typeOf is the name each kind of thing an endpoint is owed goes out
+// under: every kind of event, and a suppression told on its own.
 var typeOf = map[string]string{
+	store.KindSuppressed: TypeSuppressed,
 	store.EventDelivered: "email.delivered", store.EventDeferred: "email.delivery_delayed",
 	store.EventBounced: "email.bounced", store.EventComplained: "email.complained",
 	store.EventFailed: "email.failed",
 }
+
+// TypeSuppressed is the type of the webhook that tells of an address put
+// on the suppression list because of a bounce or a complaint about an
+// email this server has no record of. Such an email has no event to say
+// so; one that has a record says it in its own webhook ("suppressed").
+const TypeSuppressed = "address.suppressed"
 
 // TypeTest is the type of the webhook sent to try an endpoint out.
 const TypeTest = "webhook.test"
@@ -98,6 +105,21 @@ func body(e store.Event, m store.Message) []byte {
 		}
 	}
 	return encode(payload{Type: typeOf[e.Kind], CreatedAt: e.At.UTC(), Data: d})
+}
+
+// suppressedBody is the webhook that tells of a suppression on its own.
+// It is about an address, and names no email.
+func suppressedBody(s store.Suppression) []byte {
+	return encode(map[string]any{"type": TypeSuppressed, "created_at": s.CreatedAt.UTC(),
+		"data": map[string]string{"domain": s.Domain, "address": s.Address, "reason": s.Reason}})
+}
+
+// bodyOf is the webhook a delivery sends.
+func bodyOf(d store.Due) []byte {
+	if d.Suppression != nil {
+		return suppressedBody(*d.Suppression)
+	}
+	return body(d.Event, d.Message)
 }
 
 // testBody is the webhook that tries an endpoint out. It is about no email.

@@ -28,6 +28,18 @@ Every change a user of CairnPost can notice is written here. The format is
   sign, retried on a schedule (`CAIRNPOST_WEBHOOK_*`). Endpoints are listed,
   changed, disabled, removed and tried out; their deliveries are listed and
   a webhook given up, or waiting, tried again by hand. `cairnpost webhooks create|list|remove`.
+- An endpoint whose every try has failed for
+  `CAIRNPOST_WEBHOOK_PAUSE_AFTER` (5 days by default, `off` for never) is
+  paused when a webhook is given up: it is still owed what happens, and
+  nothing is sent to it until `POST /webhooks/{id}/resume`, which also
+  sends what was given up while it failed. `paused_at` and `failing_since`
+  say how an endpoint stands.
+- `POST /webhooks/{id}/secret` changes an endpoint's signing secret. For
+  `CAIRNPOST_WEBHOOK_SECRET_OVERLAP` (24 hours by default) webhooks are
+  signed with the old and the new one both.
+- `address.suppressed`: a webhook for an address suppressed because of a
+  bounce or a complaint about an email with no record, which had no
+  webhook to tell of it.
 - API keys with a scope (`send` or `admin`), optionally bound to one sending
   domain; stored hashed, shown once. `cairnpost keys create|list|revoke`.
 - The `cloudflare` driver: delivery through Cloudflare Email Sending.

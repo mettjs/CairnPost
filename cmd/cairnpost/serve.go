@@ -121,7 +121,8 @@ func serve(ctx context.Context) error {
 	// Webhooks are sent beside the API too, and stop with it.
 	poster := webhook.NewPoster(cfg.Webhook.Timeout, cfg.Webhook.AllowPrivate, cfg.Webhook.PerEndpoint, version, time.Now)
 	hooks := webhook.NewWorker(db, poster, webhook.Options{Poll: cfg.Webhook.Poll, Workers: cfg.Webhook.Workers,
-		PerEndpoint: cfg.Webhook.PerEndpoint, Retries: cfg.Webhook.Retries}, log)
+		PerEndpoint: cfg.Webhook.PerEndpoint, Retries: cfg.Webhook.Retries,
+		PauseAfter: cfg.Webhook.PauseAfter}, log)
 	sending := make(chan struct{})
 	go func() { defer close(sending); hooks.Run(ctx) }()
 	if cfg.Webhook.AllowPrivate {
@@ -145,7 +146,7 @@ func serve(ctx context.Context) error {
 	keyring := keys.New(db).WithMax(cfg.MaxKeys)
 	// One of each service, for the API and the console alike: so that
 	// neither can be given a rule the other lacks.
-	endpoints := webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, time.Now)
+	endpoints := webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, cfg.Webhook.SecretOverlap, time.Now)
 	suppressions := suppress.New(db)
 	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention}, log)
@@ -165,7 +166,8 @@ func serve(ctx context.Context) error {
 		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppressions, Webhooks: endpoints,
 			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
 			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, EventsOff: eventsOff,
-			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP, Log: log})
+			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP,
+			PauseAfter: cfg.Webhook.PauseAfter, Log: log})
 		both.Handle(console.Root, pages)
 		both.Handle(console.Root+"/", pages)
 		both.Handle("/", handler)

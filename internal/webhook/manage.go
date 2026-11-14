@@ -43,7 +43,8 @@ type Change struct {
 }
 
 // Update changes an endpoint. Disabled, it is owed nothing new, and what
-// it was owed waits until it is enabled again.
+// it was owed waits until it is enabled again. It neither pauses nor
+// resumes: Resume does.
 func (s *Service) Update(ctx context.Context, scope, id string, c Change) (store.Endpoint, error) {
 	if _, err := s.Get(ctx, scope, id); err != nil {
 		return store.Endpoint{}, err
@@ -144,5 +145,40 @@ func (s *Service) Test(ctx context.Context, scope, id string) (Result, error) {
 	}
 	name := make([]byte, 12)
 	_, _ = rand.Read(name)
-	return s.poster.Post(ctx, e.URL, e.Secret, "test_"+hex.EncodeToString(name), testBody(s.now())), nil
+	result := s.poster.Post(ctx, e.URL, keysOf(e), "test_"+hex.EncodeToString(name), testBody(s.now()))
+	if result.Delivered() {
+		// It answers: it is no longer failing. Not being able to write
+		// that down does not make the test fail.
+		_ = s.store.EndpointAnswered(ctx, e.ID)
+	}
+	return result, nil
+}
+
+// Rotate gives an endpoint a new signing key and answers the endpoint
+// with it. For the service's overlap its webhooks are signed with the key
+// it had as well, and with any before that still within their own time,
+// so its receiver can change over without missing one.
+func (s *Service) Rotate(ctx context.Context, scope, id string) (store.Endpoint, error) {
+	if _, err := s.Get(ctx, scope, id); err != nil {
+		return store.Endpoint{}, err
+	}
+	e, err := s.store.RotateSecret(ctx, id, newSecret(), s.overlap)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return store.Endpoint{}, fmt.Errorf("webhook: change an endpoint's signing key: %w", err)
+	}
+	return e, err
+}
+
+// Resume ends an endpoint's pause: what it is owed is sent again, with
+// what was given up while it failed. It answers whether the endpoint was
+// paused; one that was not is left as it is.
+func (s *Service) Resume(ctx context.Context, scope, id string) (store.Endpoint, bool, error) {
+	if _, err := s.Get(ctx, scope, id); err != nil {
+		return store.Endpoint{}, false, err
+	}
+	e, resumed, err := s.store.ResumeEndpoint(ctx, id)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return store.Endpoint{}, false, fmt.Errorf("webhook: resume an endpoint: %w", err)
+	}
+	return e, resumed, err
 }

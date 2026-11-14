@@ -31,6 +31,9 @@ type endpointView struct {
 	Older  string
 	Paged  bool
 	Unread bool
+	// PauseAfter is how long an endpoint may fail before it is paused,
+	// in words; "" when it never is.
+	PauseAfter string
 }
 
 // endpoint answers the endpoint a request names, if the signed-in key
@@ -93,6 +96,9 @@ func (c *console) endpointShown(w http.ResponseWriter, r *http.Request, code int
 	q := r.URL.Query()
 	after := q.Get("after")
 	v.States, v.Paged, v.After = store.DeliveryStates, after != "", after
+	if c.PauseAfter > 0 {
+		v.PauseAfter = span(c.PauseAfter)
+	}
 	if v.State = q.Get("state"); !slices.Contains(store.DeliveryStates, v.State) {
 		v.State = "" // a state nobody chose from the page narrows nothing
 	}

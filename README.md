@@ -71,9 +71,11 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `GET /webhooks`, `GET /webhooks/{id}` | The endpoints. Admin key. |
 | `PATCH /webhooks/{id}` | Change any of `url`, `events`, `description`, `enabled`. Admin key. |
 | `DELETE /webhooks/{id}` | Remove an endpoint and all it was owed. Admin key. |
-| `GET /webhooks/{id}/deliveries` | What the endpoint was sent and how each went, newest first. `?state=` narrows to `pending`, `delivered` or `failed`. A page is 50 unless `?limit=` says otherwise (500 at most); when more follow, the answer has a `next` to pass as `?after=`. Admin key. |
+| `GET /webhooks/{id}/deliveries` | What the endpoint was sent and how each went, newest first. `?state=` narrows to `pending`, `delivered` or `failed`. A page is 50 unless `?limit=` says otherwise (500 at most); when more follow, the answer has a `next` to pass as `?after=`. Admin key. Each names its email in `email_id`, absent for an `address.suppressed`, which is about no email. |
 | `POST /webhooks/{id}/deliveries/{delivery}/retry` | Try a webhook now: once more if it was given up, or without waiting for its next try if it is pending. Admin key. |
 | `POST /webhooks/{id}/test` | Send the endpoint a signed `webhook.test` now and say how it answered. Admin key. |
+| `POST /webhooks/{id}/secret` | Give the endpoint a new signing secret. Answers the endpoint with the new `secret`, said this once, and `previous_secret_until`: until then webhooks are signed with the old one too. Admin key. |
+| `POST /webhooks/{id}/resume` | End an endpoint's pause, and send what it is owed. One that is not paused is answered as it is. Admin key. |
 | `GET /limits` | The provider's sending allowance and how much of it is used, so you know before it runs out. `quota` is `null` for a provider with none to tell. |
 | `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent and old records pruned. |
 
@@ -132,6 +134,7 @@ sending domain or all of them, and the event types you name or all of them:
 | `email.bounced` | It refused the email. `data.bounce.type` says how. |
 | `email.complained` | The recipient marked the email as spam. |
 | `email.failed` | The provider took the email and then did not send it. |
+| `address.suppressed` | An address was put on the suppression list because of a bounce or a complaint about an email CairnPost has no record of. |
 
 ```json
 {
@@ -160,6 +163,21 @@ domain's suppression list. A `Permanent` bounce can come with `suppressed`
 false: when the suppression was lifted and the email that bounced was sent
 before the lift.
 
+An email CairnPost has no record of (its send's answer was lost, or its
+record was already deleted) has no event to tell of. If its bounce or
+complaint suppresses the address, that is told on its own, once:
+
+```json
+{
+  "type": "address.suppressed",
+  "created_at": "2026-01-02T03:04:05Z",
+  "data": {"domain": "mail.example.com", "address": "ana@example.org", "reason": "bounce"}
+}
+```
+
+An email on record never sends this: its own webhook says `suppressed`.
+Nor does a suppression added by hand.
+
 Each webhook is signed as [Standard Webhooks](https://www.standardwebhooks.com/)
 describes, which is also how Svix signs, so a library for either verifies
 it with the endpoint's `secret`. The headers go out under both names:
@@ -170,6 +188,16 @@ believing a webhook, and refuse a timestamp far from now. The id is the
 same on every try of one webhook, so use it to tell a repeat: a webhook can
 arrive more than once, and webhooks can arrive out of order.
 
+To change an endpoint's secret, `POST /webhooks/{id}/secret`. For
+`CAIRNPOST_WEBHOOK_SECRET_OVERLAP` after (24 hours by default), each
+webhook carries more than one signature in the one header, separated by a
+space: one under the new secret and one under the old. A verifier accepts
+a webhook when any signature matches, so the application can change over
+at any moment in that time without refusing one. Each old secret signs
+for its own time, so changing the secret twice does not cut off an
+application that still holds the first; the last four changed sign at
+most.
+
 Answer with any 2xx within `CAIRNPOST_WEBHOOK_TIMEOUT`. Anything else, a
 redirect included, is a failed try: the webhook is tried again after each
 wait in `CAIRNPOST_WEBHOOK_RETRIES` (about 28 hours in all by default) and
@@ -177,13 +205,21 @@ then given up, after which `…/retry` tries it once more. Webhooks go out
 `CAIRNPOST_WEBHOOK_PER_ENDPOINT` at a time to one endpoint, so one that is
 slow does not hold up another's. A disabled
 endpoint is owed nothing new, and what it was owed waits until it is
-enabled again, or until its email's record is pruned. An endpoint must be `https://` at a public address, unless
+enabled again, or until its email's record is pruned.
+
+While every try at an endpoint fails, `failing_since` says since when; one
+answer ends it, to a webhook or to a test. When a webhook is given up and
+the failing has gone on for `CAIRNPOST_WEBHOOK_PAUSE_AFTER` (5 days by
+default), the endpoint is paused: `paused_at` is set, and nothing more is
+sent to it. Unlike a disabled one it is still owed everything that
+happens. `POST /webhooks/{id}/resume` resumes it: what it is owed is sent
+then, with what was given up while it was failing. Changing an endpoint,
+`"enabled": true` included, does not resume it.
+ An endpoint must be `https://` at a public address, unless
 the operator sets `CAIRNPOST_WEBHOOK_ALLOW_PRIVATE` for an application on
 the same private network. An admin key bound to a sending domain manages
 that domain's endpoints only. Webhooks need delivery events to be read (see
-Drivers); a bounce of an email CairnPost has no record of suppresses the
-address but sends no webhook, so treat a 422 `recipient_suppressed` as the
-same news.
+Drivers).
 
 **Idempotency.** Send an `Idempotency-Key` header and a request repeated
 with the same key and the same content is one email: the repeat answers the
@@ -317,7 +353,9 @@ on the page that made it.
   is it blocked".
 - A webhook endpoint is made, changed, turned off and on, tested and
   removed there. Its signing secret is shown once, on the page that made
-  it. "Send a test" posts a signed `webhook.test` and says how the
+  it, and can be changed, after asking, for a new one shown once. An
+  endpoint paused for failing says so, and is resumed or turned off
+  there. "Send a test" posts a signed `webhook.test` and says how the
   endpoint answered. Its page lists what it was sent, fifty to a page,
   and tries again what was not delivered.
 - Domains lists the domains mail is sent from, and checks one's DNS: the
@@ -407,6 +445,8 @@ or when no provider it knows is named.
 | `CAIRNPOST_WEBHOOK_PER_ENDPOINT` | `2` | How many are being sent at once to one endpoint. Under the number of workers, it keeps an endpoint that hangs from holding up the others. |
 | `CAIRNPOST_WEBHOOK_MAX_ENDPOINTS` | `20` | How many endpoints may hear about one sending domain, and how many about all. |
 | `CAIRNPOST_WEBHOOK_POLL` | `2s` | How long the sender rests when nothing is due. |
+| `CAIRNPOST_WEBHOOK_PAUSE_AFTER` | `5d` | How long an endpoint may fail every try before a webhook given up pauses it: still owed what happens, sent nothing until it is resumed. In days or as a duration, `1h` at least; `off` never pauses. |
+| `CAIRNPOST_WEBHOOK_SECRET_OVERLAP` | `24h` | How long, after an endpoint's signing secret is changed, webhooks are signed with the one before as well. In days or as a duration, `7d` at most; `off` ends the old one at once. |
 | `CAIRNPOST_WEBHOOK_ALLOW_PRIVATE` | `off` | Let an endpoint be plain `http://` and at an address that is not on the public internet: for an application on the same private network. |
 
 `cairnpost send` reads `CAIRNPOST_URL` and `CAIRNPOST_API_KEY`.

@@ -62,7 +62,7 @@ func webhooksCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	svc := webhook.NewService(db, nil, insecure, most, time.Now)
+	svc := webhook.NewService(db, nil, insecure, most, 0, time.Now)
 	switch args[0] {
 	case "create":
 		e, err := svc.Create(ctx, "", n)
@@ -104,8 +104,11 @@ func listWebhooks(ctx context.Context, svc *webhook.Service) error {
 			}
 			events = strings.Join(types, ",")
 		}
-		if !e.Enabled {
+		switch webhook.StateOf(e) {
+		case webhook.StateOff:
 			status = "disabled"
+		case webhook.StatePaused:
+			status = "paused"
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.ID, e.URL, domain, events, status, e.Description)
 	}

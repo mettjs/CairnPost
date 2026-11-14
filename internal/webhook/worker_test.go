@@ -56,12 +56,15 @@ type rig struct {
 
 var retries = []time.Duration{time.Minute, time.Hour}
 
+// overlap is how long a changed signing key goes on signing in the tests.
+const overlap = 24 * time.Hour
+
 func newRig(t *testing.T, insecure bool) *rig {
 	r := &rig{t: t, store: memstore.New(), now: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
 	r.store.Now = func() time.Time { return r.now }
 	clock := func() time.Time { return r.now }
 	poster := webhook.NewPoster(time.Second, true, 2, "test", clock)
-	r.svc = webhook.NewService(r.store, poster, insecure, 3, clock)
+	r.svc = webhook.NewService(r.store, poster, insecure, 3, overlap, clock)
 	r.worker = webhook.NewWorker(r.store, poster, webhook.Options{Poll: 10 * time.Millisecond, Workers: 4,
 		PerEndpoint: 2, Retries: retries}, slog.New(slog.NewTextHandler(&r.logged, nil)))
 	return r

@@ -139,7 +139,7 @@ func TestAnEndpointIsMadeAndItsSecretShownOnce(t *testing.T) {
 // setting that is.
 func TestEndpointsAreLimited(t *testing.T) {
 	r := newRigOn(t, func(r *rig, d *console.Deps) {
-		d.Webhooks = webhook.NewService(r.s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 1, time.Now)
+		d.Webhooks = webhook.NewService(r.s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 1, 24*time.Hour, time.Now)
 	})
 	b := r.signedIn(r.admin)
 	r.made(b, url.Values{"url": {"https://app.example.com/a"}})
@@ -259,7 +259,7 @@ func TestAnEndpointIsChangedTestedAndRemoved(t *testing.T) {
 // allows it, and the page says which setting does.
 func TestABlockedEndpointSaysWhy(t *testing.T) {
 	r := newRigOn(t, func(r *rig, d *console.Deps) {
-		d.Webhooks = webhook.NewService(r.s, webhook.NewPoster(time.Second, false, 2, "test", time.Now), false, 20, time.Now)
+		d.Webhooks = webhook.NewService(r.s, webhook.NewPoster(time.Second, false, 2, "test", time.Now), false, 20, 24*time.Hour, time.Now)
 	})
 	b := r.signedIn(r.admin)
 	id := r.made(b, url.Values{"url": {"https://127.0.0.1:9/hook"}})

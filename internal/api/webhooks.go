@@ -19,7 +19,16 @@ type endpointView struct {
 	Description string    `json:"description,omitempty"`
 	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
-	// Secret is the signing secret, said once: when the endpoint is made.
+	// FailingSince is set while every try since then has failed.
+	FailingSince *time.Time `json:"failing_since,omitempty"`
+	// PausedAt is set while the endpoint is paused for failing too long:
+	// it is still owed what happens, and nothing is sent to it.
+	PausedAt *time.Time `json:"paused_at,omitempty"`
+	// PreviousSecretUntil is set after the signing secret was changed:
+	// until then webhooks are signed with the one before as well.
+	PreviousSecretUntil *time.Time `json:"previous_secret_until,omitempty"`
+	// Secret is the signing secret, said once: when the endpoint is made,
+	// and when its secret is changed.
 	Secret string `json:"secret,omitempty"`
 }
 
@@ -29,7 +38,8 @@ func endpointOf(e store.Endpoint) endpointView {
 		events = append(events, webhook.TypeOf(kind))
 	}
 	return endpointView{ID: e.ID, URL: e.URL, Domain: e.Domain, Events: events, Description: e.Description,
-		Enabled: e.Enabled, CreatedAt: e.CreatedAt.UTC()}
+		Enabled: e.Enabled, CreatedAt: e.CreatedAt.UTC(), FailingSince: utc(e.FailingSince), PausedAt: utc(e.PausedAt),
+		PreviousSecretUntil: utc(e.PreviousUntil)}
 }
 
 // failWebhook answers a webhook request that was not carried out.
@@ -100,7 +110,8 @@ func (a *app) getWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateWebhook is PATCH /webhooks/{id}: change what is named, leave the
-// rest. "enabled": false stops it being told anything new.
+// rest. "enabled": false stops it being told anything new. It does not
+// resume a paused endpoint: POST /webhooks/{id}/resume does.
 func (a *app) updateWebhook(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		URL         *string   `json:"url"`
@@ -116,6 +127,35 @@ func (a *app) updateWebhook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.failWebhook(w, err)
 		return
+	}
+	write(w, http.StatusOK, endpointOf(e))
+}
+
+// rotateWebhookSecret is POST /webhooks/{id}/secret: give the endpoint a
+// new signing secret. The answer carries it, and no later answer does.
+func (a *app) rotateWebhookSecret(w http.ResponseWriter, r *http.Request) {
+	e, err := a.Webhooks.Rotate(r.Context(), scope(r), r.PathValue("id"))
+	if err != nil {
+		a.failWebhook(w, err)
+		return
+	}
+	view := endpointOf(e)
+	view.Secret = webhook.Reveal(e.Secret)
+	// The endpoint's id and nothing of the key.
+	a.Log.Info("api: a webhook endpoint's signing secret was changed", "endpoint", e.ID, "key", callerOf(r).key.Prefix)
+	write(w, http.StatusOK, view)
+}
+
+// resumeWebhook is POST /webhooks/{id}/resume: end an endpoint's pause.
+// One that is not paused is answered as it is.
+func (a *app) resumeWebhook(w http.ResponseWriter, r *http.Request) {
+	e, resumed, err := a.Webhooks.Resume(r.Context(), scope(r), r.PathValue("id"))
+	if err != nil {
+		a.failWebhook(w, err)
+		return
+	}
+	if resumed {
+		a.Log.Info("api: a webhook endpoint was resumed", "endpoint", e.ID, "key", callerOf(r).key.Prefix)
 	}
 	write(w, http.StatusOK, endpointOf(e))
 }

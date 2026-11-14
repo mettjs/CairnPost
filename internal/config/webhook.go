@@ -47,6 +47,12 @@ func webhook(getenv func(string) string) (Webhook, error) {
 	if len(w.Retries) > 20 {
 		return w, fmt.Errorf("config: CAIRNPOST_WEBHOOK_RETRIES must be at most 20 waits")
 	}
+	if w.PauseAfter, err = pauseAfter(getenv); err != nil {
+		return w, err
+	}
+	if w.SecretOverlap, err = secretOverlap(getenv); err != nil {
+		return w, err
+	}
 	w.AllowPrivate, err = AllowPrivate(getenv)
 	return w, err
 }
@@ -65,4 +71,38 @@ func MaxEndpoints(getenv func(string) string) (int, error) {
 // command that needs that one setting and not a whole configuration.
 func AllowPrivate(getenv func(string) string) (bool, error) {
 	return flag(getenv, "CAIRNPOST_WEBHOOK_ALLOW_PRIVATE", false)
+}
+
+// pauseAfter reads CAIRNPOST_WEBHOOK_PAUSE_AFTER.
+func pauseAfter(getenv func(string) string) (time.Duration, error) {
+	const name = "CAIRNPOST_WEBHOOK_PAUSE_AFTER"
+	switch v := strings.TrimSpace(getenv(name)); v {
+	case "":
+		return 5 * 24 * time.Hour, nil
+	case "off":
+		return 0, nil
+	default:
+		d, ok := span(v)
+		if !ok || d < time.Hour {
+			return 0, fmt.Errorf("config: %s must be a time of at least 1h, such as 5d or 72h, or off (got %q)", name, v)
+		}
+		return d, nil
+	}
+}
+
+// secretOverlap reads CAIRNPOST_WEBHOOK_SECRET_OVERLAP.
+func secretOverlap(getenv func(string) string) (time.Duration, error) {
+	const name = "CAIRNPOST_WEBHOOK_SECRET_OVERLAP"
+	switch v := strings.TrimSpace(getenv(name)); v {
+	case "":
+		return 24 * time.Hour, nil
+	case "off":
+		return 0, nil
+	default:
+		d, ok := span(v)
+		if !ok || d > 7*24*time.Hour {
+			return 0, fmt.Errorf("config: %s must be a time of at most 7d, such as 24h or 3d, or off (got %q)", name, v)
+		}
+		return d, nil
+	}
 }

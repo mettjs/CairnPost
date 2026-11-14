@@ -44,6 +44,9 @@ var helpers = template.FuncMap{
 	"deliveryLabel": func(state string) string { label, _ := deliveryWords(state); return label },
 	"deliveryTone":  func(state string) string { _, tone := deliveryWords(state); return tone },
 	"typeOf":        webhook.TypeOf,
+	"endpointState": webhook.StateOf,
+	"endpointLabel": func(e store.Endpoint) string { return endpointStates[webhook.StateOf(e)][0] },
+	"endpointTone":  func(e store.Endpoint) string { return endpointStates[webhook.StateOf(e)][1] },
 	// Whether a sending domain is a name that can be looked up.
 	"isHost":  func(name string) bool { _, ok := domains.Host(name); return ok },
 	"stateOf": func(kind string) string { return store.StateOf[kind] },

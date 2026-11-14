@@ -55,6 +55,38 @@ func (s *Store) PruneKeys(_ context.Context, ttl time.Duration, limit int) (int,
 	return n, nil
 }
 
+// PruneNotices implements store.Pruning.
+func (s *Store) PruneNotices(_ context.Context, before time.Time, limit int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	s.deliveries = slices.DeleteFunc(s.deliveries, func(d *delivery) bool {
+		if n == limit || d.about == nil || d.CreatedAt.After(before) {
+			return false
+		}
+		n++
+		return true
+	})
+	return n, nil
+}
+
+// ForgetSecrets implements store.Pruning.
+func (s *Store) ForgetSecrets(_ context.Context, limit int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for id, keys := range s.previous {
+		s.previous[id] = slices.DeleteFunc(keys, func(k before) bool {
+			if n == limit || k.until.After(s.Now()) {
+				return false
+			}
+			n++
+			return true
+		})
+	}
+	return n, nil
+}
+
 // MarkUnanswered implements store.Pruning.
 func (s *Store) MarkUnanswered(_ context.Context, older time.Duration, limit int) (int, error) {
 	s.mu.Lock()
@@ -127,6 +159,10 @@ func (s *Store) PruneLifted(_ context.Context, before time.Time, limit int) (int
 		held := !oldest.IsZero() && !oldest.After(*orNow(row.lifted))
 		if n < limit && row.lifted != nil && !row.lifted.After(before) && !held {
 			delete(s.suppressed, at)
+			// What told of it on its own goes with it.
+			s.deliveries = slices.DeleteFunc(s.deliveries, func(d *delivery) bool {
+				return d.about != nil && d.about.Domain == row.Domain && d.about.Address == row.Address
+			})
 			n++
 		}
 	}

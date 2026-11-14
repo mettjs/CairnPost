@@ -1,7 +1,9 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,7 +23,8 @@ func TestWebhookEndpointsAreAnAdminsToManage(t *testing.T) {
 	defer app.Close()
 	make := `{"url":"` + app.URL + `/hook","domain":"example.com","events":["email.bounced"],"description":"billing"}`
 	for _, call := range [][2]string{{"POST", "/webhooks"}, {"GET", "/webhooks"}, {"GET", "/webhooks/x"}, {"PATCH", "/webhooks/x"},
-		{"DELETE", "/webhooks/x"}, {"GET", "/webhooks/x/deliveries"}, {"POST", "/webhooks/x/test"}, {"POST", "/webhooks/x/deliveries/y/retry"}} {
+		{"DELETE", "/webhooks/x"}, {"GET", "/webhooks/x/deliveries"}, {"POST", "/webhooks/x/test"}, {"POST", "/webhooks/x/deliveries/y/retry"},
+		{"POST", "/webhooks/x/secret"}, {"POST", "/webhooks/x/resume"}} {
 		if code, name, _ := r.do(call[0], call[1], r.send, "", make); code != 403 || name != "admin_key_required" {
 			t.Fatalf("%s %s with a send key: %d %s", call[0], call[1], code, name)
 		}
@@ -108,5 +111,56 @@ func TestAKeyBoundToADomainManagesOnlyItsOwnEndpoints(t *testing.T) {
 	_, _, got := r.do("GET", "/webhooks", bound, "", "")
 	if list, _ := got["data"].([]any); len(list) != 1 {
 		t.Fatalf("its list: %v", got)
+	}
+}
+
+// A signing secret is changed by an admin key that manages the endpoint:
+// the new one is said once, with until when the old one signs as well.
+func TestASigningSecretIsChangedAndSaidOnce(t *testing.T) {
+	var (
+		bound  string
+		logged bytes.Buffer
+	)
+	r := newRigWith(t, func(d *api.Deps) {
+		var err error
+		if bound, _, err = d.Keys.Create(context.Background(), "tenant", store.ScopeAdmin, "example.com"); err != nil {
+			t.Fatal(err)
+		}
+		d.Log = slog.New(slog.NewTextHandler(&logged, nil))
+	})
+	_, _, made := r.do("POST", "/webhooks", r.admin, "", `{"url":"https://app.other.example/h","domain":"other.example"}`)
+	id, _ := made["id"].(string)
+	old, _ := made["secret"].(string)
+	if made["previous_secret_until"] != nil || made["paused_at"] != nil || made["failing_since"] != nil {
+		t.Fatalf("a new endpoint: %v", made)
+	}
+	code, _, got := r.do("POST", "/webhooks/"+id+"/secret", r.admin, "", "")
+	fresh, _ := got["secret"].(string)
+	until, _ := got["previous_secret_until"].(string)
+	if code != 200 || !strings.HasPrefix(fresh, "whsec_") || fresh == old || until == "" || got["id"] != id {
+		t.Fatalf("change: %d %v", code, got)
+	}
+	if raw := r.raw("GET", "/webhooks/"+id, r.admin); strings.Contains(raw, fresh) || strings.Contains(raw, old) ||
+		!strings.Contains(raw, `"previous_secret_until":"`+until+`"`) {
+		t.Fatalf("a later read: %s", raw)
+	}
+	for what, call := range map[string][2]string{"another domain's key": {bound, id}, "no such endpoint": {r.admin, "nothing"}} {
+		if code, name, _ := r.do("POST", "/webhooks/"+call[1]+"/secret", call[0], "", ""); code != 404 || name != "not_found" {
+			t.Errorf("%s: %d %s", what, code, name)
+		}
+	}
+	// Resuming one that is not paused answers it as it is; a paused one
+	// is resumed, and a change that says "enabled" does not do that.
+	if code, _, got := r.do("POST", "/webhooks/"+id+"/resume", r.admin, "", ""); code != 200 || got["id"] != id || got["paused_at"] != nil {
+		t.Fatalf("resuming one that is not paused: %d %v", code, got)
+	}
+	for what, call := range map[string][2]string{"another domain's key": {bound, id}, "no such endpoint": {r.admin, "nothing"}} {
+		if code, name, _ := r.do("POST", "/webhooks/"+call[1]+"/resume", call[0], "", ""); code != 404 || name != "not_found" {
+			t.Errorf("resume, %s: %d %s", what, code, name)
+		}
+	}
+	if !strings.Contains(logged.String(), "signing secret was changed") || strings.Contains(logged.String(), "whsec_") ||
+		strings.Contains(logged.String(), "app.other.example") {
+		t.Fatalf("the log does not say it, or holds the secret or the URL: %s", logged.String())
 	}
 }

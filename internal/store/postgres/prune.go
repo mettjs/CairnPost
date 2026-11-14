@@ -66,6 +66,32 @@ func (db *DB) PruneKeys(ctx context.Context, ttl time.Duration, limit int) (int,
 	return n, nil
 }
 
+// PruneNotices implements store.Pruning.
+func (db *DB) PruneNotices(ctx context.Context, before time.Time, limit int) (int, error) {
+	tag, err := db.pool.Exec(ctx, `
+		DELETE FROM webhook_deliveries WHERE id IN (
+			SELECT id FROM webhook_deliveries
+			WHERE suppression_domain IS NOT NULL AND created_at <= $1
+			ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED)`, before, limit)
+	if err != nil {
+		return 0, fmt.Errorf("postgres: prune the webhooks that told of suppressions: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// ForgetSecrets implements store.Pruning. Whether a key's time is over
+// is asked of each row as it is deleted, on the database's clock.
+func (db *DB) ForgetSecrets(ctx context.Context, limit int) (int, error) {
+	tag, err := db.pool.Exec(ctx, `
+		DELETE FROM webhook_previous_secrets WHERE ctid IN (
+			SELECT ctid FROM webhook_previous_secrets WHERE until <= now() ORDER BY until LIMIT $1 FOR UPDATE SKIP LOCKED)
+		AND until <= now()`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("postgres: forget signing keys no longer used: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 // MarkUnanswered implements store.Pruning, on the database's clock.
 func (db *DB) MarkUnanswered(ctx context.Context, older time.Duration, limit int) (int, error) {
 	n := 0

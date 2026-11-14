@@ -53,11 +53,17 @@ func suppressByEvent(ctx context.Context, tx pgx.Tx, domain, address, reason, me
 // an email with no record here. When that email was sent is not known, so
 // it never brings back a suppression that was lifted: if the address is
 // dead, the next email to it says so.
+//
+// No event of an email will tell of it, so the endpoints are owed the
+// news on its own, once: only when this is what put the address there.
 func suppressUnrecorded(ctx context.Context, tx pgx.Tx, domain, address, reason string) error {
-	_, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO suppressions (domain, address, reason) VALUES ($1, $2, $3)
 		ON CONFLICT (domain, address) DO NOTHING`, domain, address, reason)
-	return err
+	if err != nil || tag.RowsAffected() == 0 {
+		return err
+	}
+	return oweNotice(ctx, tx, domain, address, reason)
 }
 
 // Unsuppress implements store.Suppressions.

@@ -70,7 +70,8 @@ func TestAWebhookSaysWhatHappenedAndWhetherTheAddressIsAtFault(t *testing.T) {
 			t.Errorf("kind %q has no type of its own", kind)
 		}
 	}
-	if len(Types()) != len(store.StateOf) || kindOf(TypeTest) != "" {
+	// And one type more, for the suppression told on its own.
+	if len(Types()) != len(store.StateOf)+1 || kindOf(TypeSuppressed) != store.KindSuppressed || kindOf(TypeTest) != "" {
 		t.Errorf("types: %v", Types())
 	}
 	if string(testBody(at)) != `{"created_at":"2026-01-02T03:04:05Z","data":{},"type":"webhook.test"}` {

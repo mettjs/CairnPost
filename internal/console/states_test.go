@@ -56,6 +56,15 @@ func TestEveryWebhookOutcomeHasWords(t *testing.T) {
 			t.Errorf("%s has no words", failure)
 		}
 	}
+	// And every state an endpoint can be in.
+	if len(endpointStates) != len(webhook.States) {
+		t.Fatalf("%d endpoint states have words, of %d", len(endpointStates), len(webhook.States))
+	}
+	for _, state := range webhook.States {
+		if w := endpointStates[state]; w[0] == "" || (w[1] != "ok" && w[1] != "failing" && w[1] != "off") {
+			t.Errorf("an endpoint that is %s: %q", state, w)
+		}
+	}
 	for _, state := range store.DeliveryStates {
 		if label, tone := deliveryWords(state); label == "" || label == state || (tone != "ok" && tone != "failing" && tone != "off") {
 			t.Errorf("%s: %q %q", state, label, tone)

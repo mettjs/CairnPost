@@ -27,7 +27,11 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 		if suppresses && e.Sender != "" && e.Recipient != "" {
 			domain, address := store.SuppressionKey(e.Sender, e.Recipient)
 			// When the email was sent is not known: a lift is never undone.
-			s.suppress(store.Suppression{Domain: domain, Address: address, Reason: reason}, func(time.Time) bool { return false })
+			sup := store.Suppression{Domain: domain, Address: address, Reason: reason}
+			if s.suppress(sup, func(time.Time) bool { return false }) {
+				// No event of an email will tell of it: it is told on its own.
+				s.oweNotice(s.suppressed[slot(domain, address)].Suppression)
+			}
 		}
 		return store.NoMessage, nil
 	}

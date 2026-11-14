@@ -33,7 +33,7 @@
         <td data-label="URL"><a href="{{$.Root}}/webhooks/{{.ID}}">{{.URL}}</a>{{if .Description}} <span class="by">{{.Description}}</span>{{end}}</td>
         <td data-label="Sending domain">{{if .Domain}}<code>{{.Domain}}</code>{{else}}Any{{end}}</td>
         <td data-label="Hears about" class="wrap">{{if not .Kinds}}Every event{{else}}{{range $i, $k := .Kinds}}{{if $i}}, {{end}}<code>{{typeOf $k}}</code>{{end}}{{end}}</td>
-        <td data-label="State">{{if .Enabled}}On{{else}}Off{{end}}</td>
+        <td data-label="State">{{endpointLabel .}}</td>
         <td data-label="Made"><time datetime="{{stamp .CreatedAt}}" title="{{when .CreatedAt}}">{{day .CreatedAt}}</time></td>
       </tr>
       {{end}}

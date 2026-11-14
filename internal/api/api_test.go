@@ -86,7 +86,7 @@ func newRigBuilt(t *testing.T, s store.Store, adjust func(*api.Deps)) *rig {
 		Mail: mail.New(s, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 			InDoubtWindow: time.Minute}, log),
 		Keys: ks, Suppress: suppress.New(s), Ping: s.Ping,
-		Webhooks: webhook.NewService(s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, time.Now), Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
+		Webhooks: webhook.NewService(s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, 24*time.Hour, time.Now), Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
 		Captured: func() []api.CapturedEmail {
 			var out []api.CapturedEmail
 			for _, m := range drv.held {
