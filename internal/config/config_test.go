@@ -185,6 +185,8 @@ func TestConsoleSettings(t *testing.T) {
 		{"CAIRNPOST_CONSOLE_TIMEZONE", "Mars/Olympus"}, {"CAIRNPOST_MAX_RECIPIENTS", "0"}, {"CAIRNPOST_MAX_RECIPIENTS", "1001"},
 		{"CAIRNPOST_MAX_ATTACHMENTS", "-1"}, {"CAIRNPOST_MAX_ATTACHMENTS", "101"}, {"CAIRNPOST_MAX_ATTACHMENT_BYTES", "0"},
 		{"CAIRNPOST_MAX_ATTACHMENT_BYTES", "67108865"}, {"CAIRNPOST_MAX_UPLOAD_BYTES", "1048576"},
+		{"CAIRNPOST_MAX_BATCH", "0"}, {"CAIRNPOST_MAX_BATCH", "1001"}, {"CAIRNPOST_BATCH_PARALLEL", "0"},
+		{"CAIRNPOST_BATCH_PARALLEL", "65"}, {"CAIRNPOST_BATCH_TIMEOUT", "11m"}, {"CAIRNPOST_BATCH_TIMEOUT", "soon"},
 	} {
 		if _, err := Load(env(append(base, bad[0], bad[1])...)); err == nil || !strings.Contains(err.Error(), bad[0]) {
 			t.Errorf("%s=%s: %v", bad[0], bad[1], err)

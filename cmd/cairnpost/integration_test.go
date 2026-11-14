@@ -206,6 +206,22 @@ func TestNothingOfAnEmailsWordsIsKeptOrLogged(t *testing.T) {
 	if list.Code != 200 || strings.Contains(list.Body.String(), "whsec_") {
 		t.Errorf("the endpoint, read again, says its secret: %d %s", list.Code, list.Body)
 	}
+	// A batch goes the same way, taken and refused.
+	batch := func(idem, body string) int {
+		req := httptest.NewRequest("POST", "/emails/batch", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+full)
+		req.Header.Set("Idempotency-Key", idem)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	second := strings.Replace(body, `"to":"`+to+`"`, `"to":"rule-one-b-`+k.Prefix+`@example.org"`, 1)
+	if code := batch("words-3", "["+second+","+strings.Replace(second, "rule-one-b-", "rule-one-c-", 1)+"]"); code != 200 {
+		t.Fatalf("the batch: %d", code)
+	}
+	if code := batch("words-4", "["+second+","+strings.Replace(body, `"to":"`+to+`"`, `"to":"SUBJECTMARKQ"`, 1)+"]"); code != 422 {
+		t.Fatalf("the refused batch: %d", code)
+	}
 	held := dump(t, dsn)
 	// The event was recorded, by what Cloudflare called it; the receiving
 	// server's own sentence, which here quotes the subject, was not.

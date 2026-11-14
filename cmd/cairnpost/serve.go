@@ -166,7 +166,8 @@ func serve(ctx context.Context) error {
 	suppressions := suppress.New(db)
 	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention,
-		MaxRecipients: cfg.MaxRecipients, MaxAttachments: attachmentsOf(cfg), MaxAttachmentBytes: cfg.MaxAttachmentBytes}, log)
+		MaxRecipients: cfg.MaxRecipients, MaxAttachments: attachmentsOf(cfg), MaxAttachmentBytes: cfg.MaxAttachmentBytes,
+		MaxBatch: cfg.MaxBatch, BatchParallel: cfg.BatchParallel, BatchTime: cfg.BatchTimeout, Stopping: ctx.Done()}, log)
 	counted := measured{sent: stats.New(db, 0), endpoints: endpoints, driver: drv, version: version, log: log,
 		parts: map[string]func() bool{"events": eventsHealth(reader), "webhooks": hooks.Healthy, "pruning": pruner.Healthy}}
 	var handler http.Handler = api.New(api.Deps{
@@ -174,7 +175,10 @@ func serve(ctx context.Context) error {
 		Mail: mailer, Keys: keyring, Suppress: suppressions,
 		Webhooks: endpoints, Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, MaxEmailBytes: emailBytes(cfg), MaxUploadBytes: cfg.MaxUploadBytes, Log: log,
-		Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy,
+		// A batch starts emails for so long, and the last of them may
+		// take a whole send and its record.
+		BatchTime: cfg.BatchTimeout + cfg.SendTimeout + 20*time.Second,
+		Events:    eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy,
 	})
 	if cfg.Console.On {
 		// The console is served beside the API, under its own path.

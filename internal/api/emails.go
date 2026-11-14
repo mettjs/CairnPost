@@ -52,6 +52,24 @@ type sendBody struct {
 	} `json:"attachments"`
 }
 
+// request is the body as the send service takes it: an *Invalid for a
+// file that is not base64. The body lets go of each file as it is read,
+// so none is held a second time while it is sent.
+func (b *sendBody) request() (mail.Request, error) {
+	var files []mail.Attachment
+	for i, f := range b.Attachments {
+		raw, err := base64.StdEncoding.DecodeString(f.Content)
+		if err != nil {
+			return mail.Request{}, &mail.Invalid{Field: "attachments",
+				Reason: fmt.Sprintf(`Attachment %d: "content" must be the file's bytes in base64.`, i+1)}
+		}
+		files = append(files, mail.Attachment{Filename: f.Filename, Type: f.ContentType, ContentID: f.ContentID, Content: raw})
+		b.Attachments[i].Content = ""
+	}
+	return mail.Request{From: b.From, To: b.To, Cc: b.Cc, Bcc: b.Bcc, ReplyTo: b.ReplyTo, Subject: b.Subject,
+		HTML: b.HTML, Text: b.Text, Headers: b.Headers, Attachments: files}, nil
+}
+
 // sendEmail is POST /emails: one email, to one address or several. It
 // answers once the mail provider has taken the email, with the email's
 // id, and with the addresses it was not sent to because they are
@@ -71,23 +89,14 @@ func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 		"cc, bcc, reply_to, headers and attachments are optional. No other field is supported.", max(a.MaxEmailBytes, a.MaxBodyBytes)) {
 		return
 	}
-	var files []mail.Attachment
-	for i, f := range body.Attachments {
-		raw, err := base64.StdEncoding.DecodeString(f.Content)
-		if err != nil {
-			a.failSend(w, "", &mail.Invalid{Field: "attachments",
-				Reason: fmt.Sprintf(`Attachment %d: "content" must be the file's bytes in base64.`, i+1)})
-			return
-		}
-		files = append(files, mail.Attachment{Filename: f.Filename, Type: f.ContentType, ContentID: f.ContentID, Content: raw})
-		body.Attachments[i].Content = "" // read: not held a second time while it is sent
+	req, err := body.request()
+	if err != nil {
+		a.failSend(w, "", err)
+		return
 	}
+	req.IdemKey = r.Header.Get("Idempotency-Key")
 	c := callerOf(r)
-	sent, err := a.Mail.Send(r.Context(), c.key, c.presented, mail.Request{
-		From: body.From, To: body.To, Cc: body.Cc, Bcc: body.Bcc, ReplyTo: body.ReplyTo, Subject: body.Subject,
-		HTML: body.HTML, Text: body.Text, Headers: body.Headers, Attachments: files,
-		IdemKey: r.Header.Get("Idempotency-Key"),
-	})
+	sent, err := a.Mail.Send(r.Context(), c.key, c.presented, req)
 	if err != nil {
 		a.failSend(w, sent.ID, err)
 		return

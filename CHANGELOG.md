@@ -27,6 +27,11 @@ Every change a user of CairnPost can notice is written here. The format is
   large sends are taken at one time (`CAIRNPOST_MAX_UPLOAD_BYTES`), and a
   request that does not arrive whole in time answers 408
   `request_incomplete`.
+- Batches: `POST /emails/batch` sends a list of emails in one request
+  (100, `CAIRNPOST_MAX_BATCH`). All are checked before any is sent; then
+  each has its own id and outcome, answered in order, 200 when all were
+  taken and 207 when some were not. With an `Idempotency-Key` the same
+  batch sent again sends only what did not go.
 - The `smtp` driver: send through any mail server that takes mail by SMTP
   (`CAIRNPOST_SMTP_*`), secured by STARTTLS or TLS, signed in by PLAIN or
   LOGIN. Such a server reports nothing after it took an email, so records

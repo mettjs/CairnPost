@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,15 +27,23 @@ import (
 
 // fake is a driver that keeps what it is handed, or answers an error.
 type fake struct {
+	mu   sync.Mutex
 	err  error
 	held []driver.Message
+	// refuse answers an error for an email to that address.
+	refuse map[string]error
 }
 
 func (*fake) Name() string { return "fake" }
 
 func (f *fake) Send(_ context.Context, m driver.Message) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.err != nil {
 		return "", f.err
+	}
+	if err := f.refuse[m.To[0]]; err != nil {
+		return "", err
 	}
 	f.held = append(f.held, m)
 	return "up-1", nil
