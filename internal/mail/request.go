@@ -44,7 +44,33 @@ const (
 	// the "@", 255 after. Longer is not an address any server takes, and
 	// an address is kept in indexes, which hold only so much.
 	maxAddress = 320
+	// maxName is the longest name a sender may have.
+	maxName = 320
+	// maxWord is the longest run without a space a subject or a header
+	// may have when it is plain ASCII: a mail server takes lines of 998
+	// bytes, and a line can be broken only at a space. Other text is
+	// written in an encoded form that breaks anywhere.
+	maxWord = 900
 )
+
+// unbroken reports whether a value written as it is would make a line
+// no mail server takes.
+func unbroken(value string) bool {
+	run := 0
+	for i := range len(value) {
+		switch c := value[i]; {
+		case c < 0x20 || c > 0x7e:
+			return false // written encoded
+		case c == ' ':
+			run = 0
+		default:
+			if run++; run > maxWord {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 var (
 	headerName = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
@@ -134,6 +160,9 @@ func check(r Request, opt Options) (checked, error) {
 		// in it would be a header of the caller's choosing.
 		return checked{}, &Invalid{"from", `The sender's name in "from" must not contain line breaks or control characters.`}
 	}
+	if len(from.Name) > maxName {
+		return checked{}, &Invalid{"from", `The sender's name in "from" must be at most 320 bytes.`}
+	}
 	if len(address.Wire(from)) > maxAddress {
 		return checked{}, &Invalid{"from", `The address in "from" must be at most 320 bytes.`}
 	}
@@ -147,13 +176,17 @@ func check(r Request, opt Options) (checked, error) {
 		if err != nil {
 			return checked{}, &Invalid{"reply_to", `"reply_to" must be an address.`}
 		}
-		reply = address.Wire(a)
+		if reply = address.Wire(a); len(reply) > maxAddress {
+			return checked{}, &Invalid{"reply_to", `The address in "reply_to" must be at most 320 bytes.`}
+		}
 	}
 	switch {
 	case strings.TrimSpace(r.Subject) == "":
 		return checked{}, &Invalid{"subject", `"subject" must not be empty.`}
 	case len(r.Subject) > maxSubject || strings.ContainsAny(r.Subject, "\r\n"):
 		return checked{}, &Invalid{"subject", `"subject" must be one line of at most 998 bytes.`}
+	case unbroken(r.Subject):
+		return checked{}, &Invalid{"subject", `"subject" must have a space at least every 900 characters.`}
 	case r.HTML == "" && r.Text == "":
 		return checked{}, &Invalid{"html", `Give "html", "text" or both: an email needs a body.`}
 	case len(r.IdemKey) > maxIdemKey || !idemKey.MatchString(r.IdemKey):
@@ -164,10 +197,12 @@ func check(r Request, opt Options) (checked, error) {
 		switch {
 		case !headerName.MatchString(name):
 			return checked{}, &Invalid{"headers", fmt.Sprintf("%q is not a header name: use letters, digits and hyphens.", name)}
-		case reserved[strings.ToLower(name)]:
+		case reserved[strings.ToLower(name)], strings.HasPrefix(strings.ToLower(name), "content-"):
 			return checked{}, &Invalid{"headers", fmt.Sprintf("The %q header is set by its own field or by the mail system; remove it from \"headers\".", name)}
 		case len(value) > maxHeaderValue || strings.ContainsAny(value, "\r\n"):
 			return checked{}, &Invalid{"headers", fmt.Sprintf("The %q header must be one line of at most 2048 bytes.", name)}
+		case unbroken(value):
+			return checked{}, &Invalid{"headers", fmt.Sprintf("The %q header must have a space at least every 900 characters.", name)}
 		}
 	}
 	files, err := attachments(r, opt.MaxAttachments, opt.MaxAttachmentBytes, !opt.noInline)

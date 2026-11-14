@@ -27,6 +27,10 @@ Every change a user of CairnPost can notice is written here. The format is
   large sends are taken at one time (`CAIRNPOST_MAX_UPLOAD_BYTES`), and a
   request that does not arrive whole in time answers 408
   `request_incomplete`.
+- The `smtp` driver: send through any mail server that takes mail by SMTP
+  (`CAIRNPOST_SMTP_*`), secured by STARTTLS or TLS, signed in by PLAIN or
+  LOGIN. Such a server reports nothing after it took an email, so records
+  stop at `sent`.
 - Delivery events: with `CAIRNPOST_CLOUDFLARE_QUEUE_ID` set, CairnPost reads
   what Cloudflare says became of each email and records it.
 - Suppression: an address that bounces for good or complains is no longer

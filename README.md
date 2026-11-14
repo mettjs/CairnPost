@@ -381,6 +381,46 @@ So CairnPost does not depend on it: when a send is refused it asks
 Cloudflare for the allowance, and if that is spent the send answers 429
 with the time until it resets.
 
+**`smtp`** sends through any mail server that takes mail by SMTP: your
+own, or a provider's relay. It is the way to use a provider CairnPost has
+no driver for. Things worth knowing:
+
+- **A mail server says only whether it took the email.** What became of it
+  afterwards it does not tell CairnPost: an email's record stops at
+  `sent`, no webhook about a delivery or a bounce is sent, and no address
+  is suppressed by itself. Bounces come back as email to the sender's
+  address. Suppress by hand what you learn there.
+- If the server refuses one address of an email to several, the email is
+  refused whole (422 `rejected_by_upstream`) and nothing is sent: nothing
+  would ever say what became of the others. Take the address out, or
+  suppress it.
+- The connection is secured by STARTTLS unless `CAIRNPOST_SMTP_SECURITY`
+  says otherwise, and a server that does not offer it is not used: the
+  password is never said in the clear. The server's certificate must be
+  valid for `CAIRNPOST_SMTP_HOST`. Sign-in is by `PLAIN` or `LOGIN`.
+- A wrong password, a refused greeting, a server that wants a sign-in it
+  was not given, or one that is down is never the email's fault: sends
+  answer 503 and nothing is dropped. A refusal of
+  the sender, a recipient or the message is the email's: 422. A connection
+  lost after the message was handed over leaves it open whether it went:
+  502, and a retry under the same `Idempotency-Key`.
+- CairnPost writes the message itself: text and HTML for the reader to
+  choose from, files the HTML shows, files beside it. `bcc` addresses are
+  named to the server and written in no header. The email's Message-ID is
+  CairnPost's own, under the sending domain.
+- The server signs the mail (DKIM) and its addresses must be allowed to
+  send for the domain (SPF): that is the server's setup, and
+  `domains check` looks only for the domain's DMARC record here.
+- Each send opens a connection of its own, and the whole exchange
+  (connecting, securing, handing the message over, the server's answer)
+  must fit in `CAIRNPOST_SEND_TIMEOUT`, 10 seconds unless set. Raise it
+  for a slow server or large files: a send cut off after the message was
+  handed over is one that may have gone.
+- An address that is not plain ASCII is sent only through a server that
+  says it carries such (SMTPUTF8); through another the email is refused.
+- Set `CAIRNPOST_SMTP_HELLO` to the machine's full host name if it is
+  not that already: some servers refuse a short one.
+
 **`capture`** sends nothing. It keeps the last emails in memory and shows
 them at `GET /capture/emails`: for development and tests. Of a file it
 holds the name, type and size, not what is in it.
@@ -546,7 +586,12 @@ not right, since the server would never hear of them.
 | Variable | Default | Purpose |
 |---|---|---|
 | `CAIRNPOST_POSTGRES_DSN` | required | The database. Postgres 18 or later. |
-| `CAIRNPOST_DRIVER` | required | Who delivers the mail: `cloudflare` or `capture`. See Drivers. |
+| `CAIRNPOST_DRIVER` | required | Who delivers the mail: `cloudflare`, `smtp` or `capture`. See Drivers. |
+| `CAIRNPOST_SMTP_HOST` | required for `smtp` | The mail server to send through. |
+| `CAIRNPOST_SMTP_SECURITY` | `starttls` | How the connection is secured: `starttls` (secured before anything is said, or not used), `tls` (from the first byte) or `none`. |
+| `CAIRNPOST_SMTP_PORT` | `587`, `465` or `25` | The server's port: by default the one its security is spoken on. |
+| `CAIRNPOST_SMTP_USERNAME`, `CAIRNPOST_SMTP_PASSWORD` | none | The sign-in, both or neither. The password is a secret, and is refused with `none`. |
+| `CAIRNPOST_SMTP_HELLO` | the machine's name | The name the server is greeted with. |
 | `CAIRNPOST_CLOUDFLARE_ACCOUNT_ID` | required for `cloudflare` | The Cloudflare account whose sending domains are used. |
 | `CAIRNPOST_CLOUDFLARE_API_TOKEN` | required for `cloudflare` | An API token with the Email Sending permission. A secret. |
 | `CAIRNPOST_ADDR` | `:8080` | Where the API listens. |

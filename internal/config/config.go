@@ -91,6 +91,8 @@ type Config struct {
 	PruneEvery time.Duration
 	// Cloudflare is the cloudflare driver's settings.
 	Cloudflare Cloudflare
+	// SMTP is the smtp driver's settings.
+	SMTP SMTP
 	// Webhook is how events are delivered to endpoints.
 	Webhook Webhook
 	// Console is the management console.
@@ -165,7 +167,7 @@ func (c Config) AbandonedAfter() time.Duration {
 }
 
 // Drivers are the values CAIRNPOST_DRIVER takes.
-var Drivers = []string{"capture", "cloudflare"}
+var Drivers = []string{"capture", "cloudflare", "smtp"}
 
 // Load reads the environment through getenv and refuses what cannot run.
 func Load(getenv func(string) string) (Config, error) {
@@ -236,6 +238,9 @@ func Load(getenv func(string) string) (Config, error) {
 		AccountID: strings.TrimSpace(getenv("CAIRNPOST_CLOUDFLARE_ACCOUNT_ID")),
 		APIToken:  strings.TrimSpace(getenv("CAIRNPOST_CLOUDFLARE_API_TOKEN")),
 		QueueID:   strings.TrimSpace(getenv("CAIRNPOST_CLOUDFLARE_QUEUE_ID")),
+	}
+	if c.SMTP, err = smtpOf(getenv, c.Driver == "smtp"); err != nil {
+		return c, err
 	}
 	if c.EventsPoll, err = duration(getenv, "CAIRNPOST_EVENTS_POLL", 5*time.Second); err != nil {
 		return c, err
