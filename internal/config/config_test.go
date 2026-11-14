@@ -183,6 +183,8 @@ func TestConsoleSettings(t *testing.T) {
 		{"CAIRNPOST_CONSOLE_PLAIN_HTTP", "yes please"}, {"CAIRNPOST_MAX_KEYS", "100001"}, {"CAIRNPOST_MAX_KEYS", "many"},
 		{"CAIRNPOST_DNS_TIMEOUT", "500ms"}, {"CAIRNPOST_DNS_TIMEOUT", "2m"}, {"CAIRNPOST_DNS_TIMEOUT", "soon"},
 		{"CAIRNPOST_CONSOLE_TIMEZONE", "Mars/Olympus"}, {"CAIRNPOST_MAX_RECIPIENTS", "0"}, {"CAIRNPOST_MAX_RECIPIENTS", "1001"},
+		{"CAIRNPOST_MAX_ATTACHMENTS", "-1"}, {"CAIRNPOST_MAX_ATTACHMENTS", "101"}, {"CAIRNPOST_MAX_ATTACHMENT_BYTES", "0"},
+		{"CAIRNPOST_MAX_ATTACHMENT_BYTES", "67108865"},
 	} {
 		if _, err := Load(env(append(base, bad[0], bad[1])...)); err == nil || !strings.Contains(err.Error(), bad[0]) {
 			t.Errorf("%s=%s: %v", bad[0], bad[1], err)

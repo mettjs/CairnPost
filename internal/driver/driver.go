@@ -25,6 +25,21 @@ type Message struct {
 	HTML     string
 	Text     string
 	Headers  map[string]string
+	// Attachments are the files that go with it, in the caller's order.
+	Attachments []Attachment
+}
+
+// Attachment is a file sent with an email. Its name, type and content
+// id were checked to be safe as header values: one line each, no
+// control characters.
+type Attachment struct {
+	Filename string
+	// Type is its media type, always set.
+	Type string
+	// ContentID, when set, makes it part of the HTML body, which shows
+	// it by this name ("cid:"); "" is a file beside the email.
+	ContentID string
+	Content   []byte
 }
 
 // Driver hands a message to an upstream.

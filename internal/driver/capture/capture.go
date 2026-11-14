@@ -17,11 +17,19 @@ import (
 // Name is the driver's name.
 const Name = "capture"
 
-// Captured is an email as it was handed over.
+// Captured is an email as it was handed over, but for its files: of
+// those it holds what each was, not its bytes.
 type Captured struct {
 	ID string
 	At time.Time
 	driver.Message
+	Files []File
+}
+
+// File is what an attachment was.
+type File struct {
+	Filename, Type, ContentID string
+	Size                      int
 }
 
 // Driver keeps the last keep emails.
@@ -54,7 +62,12 @@ func (d *Driver) Send(_ context.Context, m driver.Message) (string, error) {
 	id := "capture-" + hex.EncodeToString(b)
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.held = append(d.held, Captured{ID: id, At: d.now(), Message: m})
+	c := Captured{ID: id, At: d.now(), Message: m}
+	for _, a := range m.Attachments {
+		c.Files = append(c.Files, File{Filename: a.Filename, Type: a.Type, ContentID: a.ContentID, Size: len(a.Content)})
+	}
+	c.Attachments = nil // a file's bytes are let go
+	d.held = append(d.held, c)
 	if len(d.held) > d.keep {
 		d.held = d.held[len(d.held)-d.keep:]
 	}

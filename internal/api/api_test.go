@@ -1,7 +1,9 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -523,5 +525,36 @@ func TestAnEmailToSeveralIsOneIdWithEachAddress(t *testing.T) {
 	}
 	if code, name, _ := r.do("POST", "/emails", r.send, "", `{"from":"app@example.com","to":null,"subject":"s","text":"t"}`); code != 422 || name != "validation_error" {
 		t.Errorf("with no to: %d %s", code, name)
+	}
+}
+
+// A send carries its files in base64 and may be larger for them than
+// any other request; what is not base64 is refused by the file's place.
+func TestASendCarriesItsFiles(t *testing.T) {
+	r := newRigWith(t, func(d *api.Deps) { d.MaxEmailBytes = 64 << 10 })
+	large := base64.StdEncoding.EncodeToString(make([]byte, 20<<10))
+	code, _, sent := r.do("POST", "/emails", r.send, "", `{"from":"app@example.com","to":"ana@example.org","subject":"s","html":"<img src=cid:logo>",
+		"attachments":[{"filename":"big.bin","content":"`+large+`"},
+			{"filename":"logo.png","content":"AAEC","content_type":"image/png","content_id":"logo"}]}`)
+	if code != 200 || sent["id"] == "" {
+		t.Fatalf("the send: %d %v", code, sent)
+	}
+	got := r.drv.held[len(r.drv.held)-1].Attachments
+	if len(got) != 2 || len(got[0].Content) != 20<<10 || got[0].Type != "application/octet-stream" ||
+		got[1].ContentID != "logo" || got[1].Type != "image/png" || !bytes.Equal(got[1].Content, []byte{0, 1, 2}) {
+		t.Fatalf("the driver was handed %d files", len(got))
+	}
+	code, name, said := r.do("POST", "/emails", r.send, "", `{"from":"app@example.com","to":"ana@example.org","subject":"s","text":"t",
+		"attachments":[{"filename":"a.txt","content":"AAEC"},{"filename":"SECRETNAME.txt","content":"not base64!"}]}`)
+	if msg, _ := said["message"].(string); code != 422 || name != "validation_error" || !strings.Contains(msg, "Attachment 2") || strings.Contains(msg, "SECRETNAME") {
+		t.Fatalf("what is not base64: %d %s %v", code, name, said)
+	}
+	// Any other request is still held to the smaller size.
+	if code, name, _ := r.do("POST", "/suppressions", r.admin, "", `{"domain":"example.com","address":"a@example.org","note":"`+strings.Repeat("n", 8<<10)+`"}`); code != 413 || name != "request_too_large" {
+		t.Fatalf("a large body elsewhere: %d %s", code, name)
+	}
+	if code, name, _ := r.do("POST", "/emails", r.send, "", `{"from":"app@example.com","to":"ana@example.org","subject":"s","text":"t",
+		"attachments":[{"filename":"a.bin","content":"`+base64.StdEncoding.EncodeToString(make([]byte, 64<<10))+`"}]}`); code != 413 || name != "request_too_large" {
+		t.Fatalf("a send over its size: %d %s", code, name)
 	}
 }

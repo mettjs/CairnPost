@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -41,6 +43,13 @@ type sendBody struct {
 	HTML    string            `json:"html"`
 	Text    string            `json:"text"`
 	Headers map[string]string `json:"headers"`
+	// Attachments are files, each with its bytes in base64.
+	Attachments []struct {
+		Filename    string `json:"filename"`
+		Content     string `json:"content"`
+		ContentType string `json:"content_type"`
+		ContentID   string `json:"content_id"`
+	} `json:"attachments"`
 }
 
 // sendEmail is POST /emails: one email, to one address or several. It
@@ -49,14 +58,24 @@ type sendBody struct {
 // suppressed, if any were.
 func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 	var body sendBody
-	if !a.body(w, r, &body, "The body must be JSON with from, to, subject and html or text; "+
-		"cc, bcc, reply_to and headers are optional. No other field is supported.") {
+	if !a.bodyUpTo(w, r, &body, "The body must be JSON with from, to, subject and html or text; "+
+		"cc, bcc, reply_to, headers and attachments are optional. No other field is supported.", max(a.MaxEmailBytes, a.MaxBodyBytes)) {
 		return
+	}
+	var files []mail.Attachment
+	for i, f := range body.Attachments {
+		raw, err := base64.StdEncoding.DecodeString(f.Content)
+		if err != nil {
+			a.failSend(w, "", &mail.Invalid{Field: "attachments",
+				Reason: fmt.Sprintf(`Attachment %d: "content" must be the file's bytes in base64.`, i+1)})
+			return
+		}
+		files = append(files, mail.Attachment{Filename: f.Filename, Type: f.ContentType, ContentID: f.ContentID, Content: raw})
 	}
 	c := callerOf(r)
 	sent, err := a.Mail.Send(r.Context(), c.key, c.presented, mail.Request{
 		From: body.From, To: body.To, Cc: body.Cc, Bcc: body.Bcc, ReplyTo: body.ReplyTo, Subject: body.Subject,
-		HTML: body.HTML, Text: body.Text, Headers: body.Headers,
+		HTML: body.HTML, Text: body.Text, Headers: body.Headers, Attachments: files,
 		IdemKey: r.Header.Get("Idempotency-Key"),
 	})
 	if err != nil {
@@ -175,6 +194,8 @@ type CapturedEmail struct {
 	HTML     string            `json:"html,omitempty"`
 	Text     string            `json:"text,omitempty"`
 	Headers  map[string]string `json:"headers,omitempty"`
+	// Attachments say what each file was; its bytes are not held.
+	Attachments []mail.File `json:"attachments,omitempty"`
 }
 
 // captured is GET /capture/emails: the emails kept instead of sent, newest

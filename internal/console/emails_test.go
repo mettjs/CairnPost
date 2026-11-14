@@ -17,7 +17,8 @@ func (r *rig) sent(from, to, subject string) store.Message {
 	r.t.Helper()
 	ctx := context.Background()
 	receipt, err := r.mail.Send(ctx, r.sendKey, r.send, mail.Request{From: from, To: []string{to}, Subject: subject,
-		Text: "the body of " + subject, HTML: "<script>alert('" + subject + "')</script>", Headers: map[string]string{"X-Entity": "e-" + subject}})
+		Text: "the body of " + subject, HTML: "<script>alert('" + subject + "')</script>", Headers: map[string]string{"X-Entity": "e-" + subject},
+		Attachments: []mail.Attachment{{Filename: "file-of-" + subject + ".pdf", Content: []byte("FILEBYTES-" + subject)}}})
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -207,13 +208,17 @@ func TestAnEmailIsShownAsItWasWritten(t *testing.T) {
 	}
 	for _, want := range []string{"ana@example.org", "app@example.com", ">Bounced</span>", "The receiving server refused it.",
 		">Delayed</span>", "<code>451</code>", "for good", "said-first", "said-&lt;b&gt;last&lt;/b&gt;",
-		"subject-one", "the body of subject-one", "&lt;script&gt;alert(", "X-Entity: e-subject-one", "Kept until", "UTC"} {
+		"subject-one", "the body of subject-one", "&lt;script&gt;alert(", "X-Entity: e-subject-one", "Kept until", "UTC",
+		"file-of-subject-one.pdf", "application/pdf, 21 bytes", "What a file held is never kept."} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page lacks %q", want)
 		}
 	}
 	if strings.Contains(page, "<script>alert") || strings.Contains(page, "<b>last") {
 		t.Fatal("what an email said was put in the page as markup")
+	}
+	if strings.Contains(page, "FILEBYTES") {
+		t.Fatal("a file's bytes were shown")
 	}
 	if at := order(page, ">Delayed</span>", "said-first"); at[0] > at[1] {
 		t.Error("events are not oldest first")

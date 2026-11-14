@@ -104,7 +104,12 @@ func (a *app) failSend(w http.ResponseWriter, id string, err error) {
 // body reads a request's JSON into v, and answers false, having said why,
 // when it cannot. shape is the sentence saying what the body must be.
 func (a *app) body(w http.ResponseWriter, r *http.Request, v any, shape string) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, a.MaxBodyBytes))
+	return a.bodyUpTo(w, r, v, shape, a.MaxBodyBytes)
+}
+
+// bodyUpTo is body for a route that takes more than the others.
+func (a *app) bodyUpTo(w http.ResponseWriter, r *http.Request, v any, shape string, most int64) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, most))
 	// A field CairnPost does not know is refused, never dropped: an email
 	// sent without the cc its caller asked for is worse than no email.
 	dec.DisallowUnknownFields()

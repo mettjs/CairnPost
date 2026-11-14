@@ -36,6 +36,11 @@ type Config struct {
 	// email may go to, counting "to", "cc" and "bcc". Default 50, which
 	// is what Cloudflare takes.
 	MaxRecipients int
+	// MaxAttachments is CAIRNPOST_MAX_ATTACHMENTS: how many files one
+	// email may carry, 0 for none. MaxAttachmentBytes is
+	// CAIRNPOST_MAX_ATTACHMENT_BYTES: how large they may be in all.
+	MaxAttachments     int
+	MaxAttachmentBytes int64
 	// CaptureKeep is CAIRNPOST_CAPTURE_KEEP: how many emails the capture
 	// driver holds in memory. Default 100.
 	CaptureKeep int
@@ -192,6 +197,19 @@ func Load(getenv func(string) string) (Config, error) {
 		return c, fmt.Errorf("config: CAIRNPOST_MAX_RECIPIENTS must be between 1 and 1000 (got %d)", most)
 	}
 	c.MaxRecipients = int(most)
+	if most, err = number(getenv, "CAIRNPOST_MAX_ATTACHMENTS", 10); err != nil {
+		return c, err
+	}
+	if most < 0 || most > 100 {
+		return c, fmt.Errorf("config: CAIRNPOST_MAX_ATTACHMENTS must be between 0 and 100 (got %d)", most)
+	}
+	c.MaxAttachments = int(most)
+	if c.MaxAttachmentBytes, err = number(getenv, "CAIRNPOST_MAX_ATTACHMENT_BYTES", 10<<20); err != nil {
+		return c, err
+	}
+	if c.MaxAttachmentBytes < 1 || c.MaxAttachmentBytes > 64<<20 {
+		return c, fmt.Errorf("config: CAIRNPOST_MAX_ATTACHMENT_BYTES must be between 1 and %d (got %d)", 64<<20, c.MaxAttachmentBytes)
+	}
 	// A retry must not be let through while the first try can still be
 	// answered, and a key must outlive the wait for that answer.
 	if c.InDoubtWindow <= c.SendTimeout {

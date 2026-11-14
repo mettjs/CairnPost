@@ -45,6 +45,7 @@ var helpers = template.FuncMap{
 	"outcomes": outcomes,
 	"kind":     func(kind string) string { return kindWords[kind] },
 	"minus":    func(a, b int) int { return a - b },
+	"size":     size,
 	// A reason an address is suppressed for, as a label and in a sentence.
 	"why":     why,
 	"because": because,

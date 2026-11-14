@@ -47,9 +47,11 @@ type Deps struct {
 	Gauges   func(ctx context.Context, domain string) []metrics.Sample
 	// Driver and Version are said by GET /health.
 	Driver, Version string
-	// MaxBodyBytes bounds a request body.
-	MaxBodyBytes int64
-	Log          *slog.Logger
+	// MaxBodyBytes bounds a request body. MaxEmailBytes bounds that of
+	// a send, which carries its attachments; 0 is MaxBodyBytes.
+	MaxBodyBytes  int64
+	MaxEmailBytes int64
+	Log           *slog.Logger
 }
 
 // New returns the handler for every route.

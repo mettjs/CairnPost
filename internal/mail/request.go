@@ -22,6 +22,8 @@ type Request struct {
 	HTML        string
 	Text        string
 	Headers     map[string]string
+	// Attachments are the files to send with it.
+	Attachments []Attachment
 	// IdemKey is the Idempotency-Key header, "" for none.
 	IdemKey string
 }
@@ -122,7 +124,7 @@ func recipients(r Request, most int) (to, cc, bcc []string, err error) {
 }
 
 // check validates a request. Its error is always an *Invalid.
-func check(r Request, mostRecipients int) (checked, error) {
+func check(r Request, opt Options) (checked, error) {
 	from, err := netmail.ParseAddress(r.From)
 	if err != nil {
 		return checked{}, &Invalid{"from", `"from" must be an address: "Name <you@example.com>" or "you@example.com".`}
@@ -135,7 +137,7 @@ func check(r Request, mostRecipients int) (checked, error) {
 	if len(address.Wire(from)) > maxAddress {
 		return checked{}, &Invalid{"from", `The address in "from" must be at most 320 bytes.`}
 	}
-	to, cc, bcc, err := recipients(r, mostRecipients)
+	to, cc, bcc, err := recipients(r, opt.MaxRecipients)
 	if err != nil {
 		return checked{}, err
 	}
@@ -168,9 +170,13 @@ func check(r Request, mostRecipients int) (checked, error) {
 			return checked{}, &Invalid{"headers", fmt.Sprintf("The %q header must be one line of at most 2048 bytes.", name)}
 		}
 	}
+	files, err := attachments(r, opt.MaxAttachments, opt.MaxAttachmentBytes)
+	if err != nil {
+		return checked{}, err
+	}
 	return checked{
 		msg: driver.Message{From: address.Wire(from), FromName: from.Name, To: to, Cc: cc, Bcc: bcc, ReplyTo: reply,
-			Subject: r.Subject, HTML: r.HTML, Text: r.Text, Headers: r.Headers},
+			Subject: r.Subject, HTML: r.HTML, Text: r.Text, Headers: r.Headers, Attachments: files},
 		domain: store.DomainOf(from.Address),
 	}, nil
 }

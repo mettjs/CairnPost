@@ -68,6 +68,34 @@ type sendBody struct {
 	HTML    string            `json:"html,omitempty"`
 	Text    string            `json:"text,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// Attachments carry their bytes in base64, as encoding/json writes
+	// a []byte.
+	Attachments []file `json:"attachments,omitempty"`
+}
+
+// file is an attachment as Cloudflare takes it.
+type file struct {
+	Content     []byte `json:"content"`
+	Filename    string `json:"filename"`
+	Type        string `json:"type"`
+	Disposition string `json:"disposition"`
+}
+
+// errInline is an attachment the HTML body shows. How Cloudflare's send
+// call names such a file's content id is not known, and a guess that is
+// wrong would send an email whose pictures are missing: it is refused.
+var errInline = fmt.Errorf("cloudflare: an attachment with a content id cannot be sent through this provider yet: %w", driver.ErrRejected)
+
+// files are a message's attachments as Cloudflare takes them.
+func files(m driver.Message) ([]file, error) {
+	var out []file
+	for _, a := range m.Attachments {
+		if a.ContentID != "" {
+			return nil, errInline
+		}
+		out = append(out, file{Content: a.Content, Filename: a.Filename, Type: a.Type, Disposition: "attachment"})
+	}
+	return out, nil
 }
 
 // sendResult names the recipient in exactly one of its lists.
@@ -81,9 +109,13 @@ type sendResult struct {
 
 // Send implements driver.Driver.
 func (d *Driver) Send(ctx context.Context, m driver.Message) (string, error) {
+	attached, err := files(m)
+	if err != nil {
+		return "", err
+	}
 	a, err := d.ask(ctx, http.MethodPost, "/email/sending/send", sendBody{
 		From: sender{Address: m.From, Name: m.FromName}, To: m.To, Cc: m.Cc, Bcc: m.Bcc, ReplyTo: m.ReplyTo,
-		Subject: m.Subject, HTML: m.HTML, Text: m.Text, Headers: m.Headers,
+		Subject: m.Subject, HTML: m.HTML, Text: m.Text, Headers: m.Headers, Attachments: attached,
 	})
 	if err != nil {
 		return "", err

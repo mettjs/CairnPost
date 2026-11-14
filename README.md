@@ -88,8 +88,23 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent and old records pruned. |
 
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both;
-`cc`, `bcc`, `reply_to` and `headers` are optional. Any other field is
-refused, never silently dropped.
+`cc`, `bcc`, `reply_to`, `headers` and `attachments` are optional. Any
+other field is refused, never silently dropped.
+
+**Attachments.** `attachments` is a list of files, each
+`{"filename", "content", "content_type", "content_id"}`: `content` is the
+file's bytes in base64, and `content_type` is told from the filename when
+left out. Give a file a `content_id` and the HTML body can show it
+(`<img src="cid:logo">` for `"content_id": "logo"`); without one it is a
+file beside the email. An email carries 10 files and 10 MiB of them in
+all unless `CAIRNPOST_MAX_ATTACHMENTS` and `CAIRNPOST_MAX_ATTACHMENT_BYTES`
+say otherwise, and a send's body may be that much larger than any other
+request's. A file is part of the request an `Idempotency-Key` remembers.
+**What a file holds is never kept and never logged**: it is handed to the
+mail provider and let go. Its name, type and size are kept only where
+what emails say is. Large files take time to hand on: a server that sends
+them wants a `CAIRNPOST_SEND_TIMEOUT` to match, and a request must arrive
+whole within 30 seconds.
 
 **Several addresses.** `to`, `cc` and `bcc` each take one address or a list
 of them: 50 in all unless `CAIRNPOST_MAX_RECIPIENTS` says otherwise, one
@@ -272,7 +287,8 @@ The pruner runs every `CAIRNPOST_PRUNE_EVERY`, and `GET /health` says
 
 **What an email said** is not kept unless `CAIRNPOST_CONTENT_RETENTION` is
 set, to a time of 30 days at most. While it is, the subject, bodies, reply
-address, sender's name and headers of each email are stored when it is sent,
+address, sender's name and headers of each email, and the name, type and
+size of each file with it, are stored when it is sent,
 and `GET /emails/{id}` shows them as `content`, with `kept_until`, to an
 admin key: one bound to a sending domain sees that domain's emails' only,
 and a key that may only send never does, even for its own emails. So is
@@ -299,7 +315,7 @@ The status tells a program what to do:
 | 404 | `not_found` | There is no such email, endpoint or suppression, or it is not this key's to see. |
 | 404 | `route_not_found` | There is nothing at this path: the path or the server's address is wrong. |
 | 405 | `method_not_allowed` | The path is there, and does not take this method. `Allow` names the ones it takes. |
-| 413 | `request_too_large` | The body is over `CAIRNPOST_MAX_BODY_BYTES`. |
+| 413 | `request_too_large` | The body is over `CAIRNPOST_MAX_BODY_BYTES`, or a send's is over that and its files' allowance. |
 | 429 | `rate_limit_exceeded` | The provider's limit is reached; nothing was sent. Retry after `Retry-After`. |
 | 502 | `upstream_unknown` | The provider did not answer; the email may have gone. Retry with the same key. This is the only answer that leaves it open. |
 | 503 | `upstream_unavailable`, `unavailable` | Nothing was sent. Retry later. |
@@ -344,6 +360,13 @@ measured against the live service:
   is refused, check that the domain is onboarded.
 - A wrong token or account id is never the email's fault: sends answer 503,
   nothing is dropped, and the server's log names Cloudflare's status.
+- Cloudflare takes 25 MiB for a whole email, files included and counted
+  as they travel, in base64, which is a third larger than the files are.
+  Keep `CAIRNPOST_MAX_ATTACHMENT_BYTES` under about 18 MiB.
+- A file with a `content_id` is refused (422 `rejected_by_upstream`): how
+  Cloudflare's send call takes a file the HTML shows has not been
+  measured, and a wrong guess would send emails with their pictures
+  missing.
 
 Not measured: what Cloudflare answers once the day's allowance is spent.
 So CairnPost does not depend on it: when a send is refused it asks
@@ -351,7 +374,8 @@ Cloudflare for the allowance, and if that is spent the send answers 429
 with the time until it resets.
 
 **`capture`** sends nothing. It keeps the last emails in memory and shows
-them at `GET /capture/emails`: for development and tests.
+them at `GET /capture/emails`: for development and tests. Of a file it
+holds the name, type and size, not what is in it.
 
 ## Metrics
 
@@ -496,7 +520,8 @@ server runs. `tail` shows the last delivery events and then each new one
 (`-domain` for one sending domain's, `-last` for how many to begin with,
 `-once` to stop after them); it ends by itself if the database stays
 away. `send` takes `-to`, `-cc` and `-bcc`, each
-one address or several with commas between. A key has a scope, `send` or `admin`, and may be bound to one
+one address or several with commas between, and `-attach` once for each
+file to send with it. A key has a scope, `send` or `admin`, and may be bound to one
 sending domain with `--domain`.
 
 `domains check` reads public DNS only: it needs no database and no
@@ -531,6 +556,8 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. It is also how long a send may stay `sending` before it is taken to be abandoned (by a server that stopped in the middle of it) and set to `unknown`: looked for that often, so within twice this time, and never sooner than `CAIRNPOST_SEND_TIMEOUT` plus a minute. |
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
+| `CAIRNPOST_MAX_ATTACHMENTS` | `10` | How many files one email may carry (0 to 100; 0 takes none). |
+| `CAIRNPOST_MAX_ATTACHMENT_BYTES` | `10485760` | How large an email's files may be in all, as they are, not as they travel (up to 64 MiB). A server holds a send's files in memory while it is sent: several times this for each send under way. |
 | `CAIRNPOST_MAX_RECIPIENTS` | `50` | How many addresses one email may name, counting `to`, `cc` and `bcc` (1 to 1000). Set it to what the provider takes or below. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
 | `CAIRNPOST_DNS_TIMEOUT` | `6s` | The most one check of a domain's DNS records may take, in the console and in `domains check`: a second at least, a minute at most. Raise it where the first DNS server is slow to answer. |

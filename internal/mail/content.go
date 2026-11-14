@@ -18,6 +18,27 @@ type Words struct {
 	HTML     string            `json:"html,omitempty"`
 	Text     string            `json:"text,omitempty"`
 	Headers  map[string]string `json:"headers,omitempty"`
+	// Attachments say what files went with it: a name is the email's
+	// words too. A file's bytes are never kept.
+	Attachments []File `json:"attachments,omitempty"`
+}
+
+// File is what an attachment was, without its bytes.
+type File struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	// ContentID is set for a file the HTML body shows.
+	ContentID string `json:"content_id,omitempty"`
+	Size      int    `json:"size"`
+}
+
+// filesOf says what a message's attachments were.
+func filesOf(m driver.Message) []File {
+	var out []File
+	for _, a := range m.Attachments {
+		out = append(out, File{Filename: a.Filename, ContentType: a.Type, ContentID: a.ContentID, Size: len(a.Content)})
+	}
+	return out
 }
 
 // Content is what an email said, as it is shown. It is kept only when the
@@ -44,13 +65,16 @@ func (s *Service) contentOf(m driver.Message) func() []byte {
 	if s.opt.KeepContent == 0 {
 		return nil
 	}
+	// Said now: what is kept must not hold on to the files' bytes.
+	files := filesOf(m)
+	m.Attachments = nil
 	return func() []byte {
 		var out bytes.Buffer
 		enc := json.NewEncoder(&out)
 		enc.SetEscapeHTML(false) // a body is kept as it was written
 		// Strings and a map of strings always encode.
 		_ = enc.Encode(Words{FromName: m.FromName, ReplyTo: m.ReplyTo, Subject: m.Subject,
-			HTML: m.HTML, Text: m.Text, Headers: m.Headers})
+			HTML: m.HTML, Text: m.Text, Headers: m.Headers, Attachments: files})
 		return out.Bytes()
 	}
 }

@@ -25,7 +25,8 @@ func contentRig(t *testing.T, s *memstore.Store, keep time.Duration) *rig {
 }
 
 const worded = `{"from":"Billing <app@example.com>","to":"ana@example.org","reply_to":"help@example.com",
-	"subject":"Your code is 4821","text":"Use 4821","html":"<b>4821</b>","headers":{"X-Trace":"t-1"}}`
+	"subject":"Your code is 4821","text":"Use 4821","html":"<b>4821</b>","headers":{"X-Trace":"t-1"},
+	"attachments":[{"filename":"receipt.pdf","content":"JVBERi0x"}]}`
 
 // What an email said is kept only where the operator chose to keep it, and
 // shown only to an admin key that may see the sending domain, only while
@@ -44,6 +45,12 @@ func TestWhatAnEmailSaidIsShownToAnAdminWhileItIsKept(t *testing.T) {
 		c["from_name"] != "Billing" || c["reply_to"] != "help@example.com" || c["kept_until"] != "2030-01-02T00:00:00Z" ||
 		c["headers"].(map[string]any)["X-Trace"] != "t-1" {
 		t.Fatalf("an admin key was shown %v", got["content"])
+	}
+	// Of a file, what it was: never its bytes.
+	files, _ := c["attachments"].([]any)
+	if file, _ := files[0].(map[string]any); len(files) != 1 || file["filename"] != "receipt.pdf" || file["content_type"] != "application/pdf" ||
+		file["size"] != float64(6) || file["content"] != nil {
+		t.Fatalf("the files shown: %v", files)
 	}
 	// The application's own key is not: the setting is for the operator.
 	if code, _, got := r.do("GET", path, r.send, "", ""); code != 200 || got["content"] != nil {
