@@ -1,6 +1,6 @@
 {{define "title"}}Email{{end}}
 {{define "main"}}
-<p class="back"><a href="{{.Root}}/emails">Emails</a></p>
+<p class="back"><a href="{{.Root}}/emails{{with .Data.For}}?for={{.}}{{end}}">Emails</a></p>
 <h1 class="long">Email to {{.Data.Email.Recipient}}</h1>
 <p class="lede"><span class="state state-{{tone .Data.Email.State}}">{{label .Data.Email.State}}</span> {{meaning .Data.Email.State}}</p>
 

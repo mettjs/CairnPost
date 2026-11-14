@@ -19,9 +19,10 @@ type liftView struct {
 	// "", of any.
 	All    bool
 	Reason string
-	// In is the sending domain the list was narrowed to, and List where
-	// that list is: both lead back to it.
-	In, List string
+	// In is the sending domain the list was narrowed to, For the handle
+	// of the address it was narrowed to, and List where that list is:
+	// all lead back to it.
+	In, For, List string
 }
 
 // liftSuppression lets an address be sent to again from a sending
@@ -32,7 +33,7 @@ func (c *console) liftSuppression(w http.ResponseWriter, r *http.Request) {
 		c.fail(w, r, http.StatusUnprocessableEntity, "That is more than this form takes.")
 		return
 	}
-	in, list := c.narrowed(r)
+	in, handle, list := c.narrowed(r)
 	address := strings.TrimSpace(r.PostFormValue("address"))
 	// The domain it acts on is settled first: it is the one asked about,
 	// lifted and logged.
@@ -51,7 +52,7 @@ func (c *console) liftSuppression(w http.ResponseWriter, r *http.Request) {
 			c.flash(w, "lifted-already")
 			http.Redirect(w, r, list, http.StatusSeeOther)
 		default:
-			c.render(w, r, http.StatusOK, "lift", liftView{Domain: domain, Address: found[0].Address, In: in, List: list})
+			c.render(w, r, http.StatusOK, "lift", liftView{Domain: domain, Address: found[0].Address, In: in, For: handle, List: list})
 		}
 		return
 	}
@@ -88,8 +89,8 @@ func (c *console) liftSuppressions(w http.ResponseWriter, r *http.Request) {
 		refuse(http.StatusUnprocessableEntity, "That is more than this form takes.")
 		return
 	}
-	var list string
-	v.Domain, list = c.narrowed(r)
+	var handle, list string
+	v.Domain, handle, list = c.narrowed(r)
 	asked, reason := strings.TrimSpace(r.PostFormValue("domain")), r.PostFormValue("reason")
 	if v.Lift.Reason = reason; len(asked) <= 400 {
 		v.Lift.Domain = strings.ToValidUTF8(asked, "")
@@ -108,7 +109,7 @@ func (c *console) liftSuppressions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.PostFormValue("confirm") == "" {
-		c.render(w, r, http.StatusOK, "lift", liftView{Domain: domain, All: true, Reason: reason, In: v.Domain, List: list})
+		c.render(w, r, http.StatusOK, "lift", liftView{Domain: domain, All: true, Reason: reason, In: v.Domain, For: handle, List: list})
 		return
 	}
 	n, err := c.suppressed(r).LiftAll(r.Context(), domain, reason)

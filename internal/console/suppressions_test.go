@@ -42,29 +42,35 @@ func TestASuppressedAddressIsFound(t *testing.T) {
 		}
 	}
 	for typed, want := range map[string]string{"ANA@EXAMPLE.ORG": plain.ID, "Ana <ana@example.org>": plain.ID, `"ANA B"@Example.org`: quoted.ID} {
-		rec := b.do("POST", "/suppressions/find", url.Values{"to": {typed}})
-		if rec.Code != 303 || rec.Header().Get("Location") != "/console/suppressions" || len(rec.Result().Cookies()) != 0 {
-			t.Fatalf("%q: %d %s", typed, rec.Code, rec.Header().Get("Location"))
-		}
-		page = b.do("GET", "/suppressions", nil).Body.String()
+		narrowed, _ := b.narrow("/suppressions/find", url.Values{"to": {typed}})
+		page = b.do("GET", narrowed, nil).Body.String()
 		if !strings.Contains(page, "/emails/"+want) || strings.Count(page, `name="address"`) != 2 || !strings.Contains(page, "Suppressions of <code>") {
 			t.Errorf("%q: the address's suppression is not what is shown", typed)
 		}
 	}
-	// The emails page is narrowed to the same address, and shows both
-	// again when either is asked to.
-	b.do("POST", "/suppressions/find", url.Values{"to": {`"ana b"@example.org`}})
-	if page = b.do("GET", "/emails", nil).Body.String(); !strings.Contains(page, "/emails/"+quoted.ID) || strings.Contains(page, "/emails/"+plain.ID) {
-		t.Fatal("the emails are not narrowed to the address looked for")
+	// The page leads to the emails sent to the same address, and those to
+	// its suppressions, by the handle alone.
+	narrowed, quotedHandle := b.narrow("/suppressions/find", url.Values{"to": {`"ana b"@example.org`}})
+	if page = b.do("GET", narrowed, nil).Body.String(); !strings.Contains(page, `href="/console/emails?for=`+quotedHandle+`"`) {
+		t.Fatalf("the suppressions do not lead to the address's emails: %s", page)
 	}
-	b.do("POST", "/suppressions/find", url.Values{"to": {"bo@example.org"}, "domain": {"Example.com"}})
-	page = b.do("GET", "/suppressions?domain=Example.com", nil).Body.String()
-	if !strings.Contains(page, "This address is not suppressed for that domain: emails to it are sent.") {
-		t.Fatalf("an address that is not suppressed: %s", page)
+	page = b.do("GET", "/emails?for="+quotedHandle, nil).Body.String()
+	if !strings.Contains(page, "/emails/"+quoted.ID) || strings.Contains(page, "/emails/"+plain.ID) ||
+		!strings.Contains(page, `href="/console/suppressions?for=`+quotedHandle+`"`) {
+		t.Fatal("the emails are not narrowed to the address looked for, or do not lead back")
 	}
-	b.do("POST", "/emails/find", url.Values{"clear": {"1"}})
+	narrowed, _ = b.narrow("/suppressions/find", url.Values{"to": {"bo@example.org"}, "domain": {"Example.com"}})
+	page = b.do("GET", narrowed, nil).Body.String()
+	if !strings.HasPrefix(narrowed, "/suppressions?domain=example.com&for=") ||
+		!strings.Contains(page, "This address is not suppressed for that domain: emails to it are sent.") {
+		t.Fatalf("an address that is not suppressed, at %s: %s", narrowed, page)
+	}
+	// Show all leads to the whole list, and a page with no handle is it.
+	if rec := b.do("POST", "/suppressions/find", url.Values{"clear": {"1"}, "to": {"bo@example.org"}, "for": {quotedHandle}}); rec.Header().Get("Location") != "/console/suppressions" {
+		t.Fatalf("show all leads to %s", rec.Header().Get("Location"))
+	}
 	if page = b.do("GET", "/suppressions", nil).Body.String(); !strings.Contains(page, "ana@example.org") || !strings.Contains(page, "Suppressed addresses") {
-		t.Fatal("show all on one page did not show all on the other")
+		t.Fatal("the page with no handle is not the whole list")
 	}
 	for _, typed := range []string{"ana", "<script>", strings.Repeat("a", 1<<20) + "@example.org"} {
 		if rec := b.do("POST", "/suppressions/find", url.Values{"to": {typed}}); rec.Code != 422 || !strings.Contains(rec.Body.String(), "Give one whole address") ||
@@ -81,20 +87,22 @@ func TestASuppressedAddressIsFound(t *testing.T) {
 	// any other, however odd: what the list holds, it shows.
 	odd := r.sent("app@example.com", "\"a\tb\"@example.org", "three")
 	r.heard(odd, store.EventBounced, "5.1.1", "")
-	b.do("POST", "/suppressions/find", url.Values{"to": {"\"A\tB\"@Example.org"}})
-	if rec = b.do("GET", "/suppressions", nil); rec.Code != 200 || !strings.Contains(rec.Body.String(), "/emails/"+odd.ID) {
+	narrowed, oddHandle := b.narrow("/suppressions/find", url.Values{"to": {"\"A\tB\"@Example.org"}})
+	if rec = b.do("GET", narrowed, nil); rec.Code != 200 || !strings.Contains(rec.Body.String(), "/emails/"+odd.ID) ||
+		!strings.Contains(rec.Body.String(), `name="for" value="`+oddHandle+`"`) {
 		t.Fatalf("an odd address that is suppressed: %d %s", rec.Code, rec.Body)
 	}
-	lift := url.Values{"domain": {"example.com"}, "address": {"\"a\tb\"@example.org"}}
-	if rec = b.do("POST", "/suppressions/lift", lift); rec.Code != 200 || !strings.Contains(rec.Body.String(), `name="confirm"`) {
-		t.Fatalf("lifting it does not ask: %d", rec.Code)
+	// Lifting from the narrowed list leads back to it, narrowed still.
+	lift := url.Values{"domain": {"example.com"}, "address": {"\"a\tb\"@example.org"}, "for": {oddHandle}}
+	if rec = b.do("POST", "/suppressions/lift", lift); rec.Code != 200 || !strings.Contains(rec.Body.String(), `name="confirm"`) ||
+		!strings.Contains(rec.Body.String(), `name="for" value="`+oddHandle+`"`) || !strings.Contains(rec.Body.String(), `href="`+console.Root+narrowed+`"`) {
+		t.Fatalf("lifting it does not ask, or forgets where it came from: %d %s", rec.Code, rec.Body)
 	}
 	lift.Set("confirm", "1")
 	if page := b.follow("POST", "/suppressions/lift", lift).Body.String(); !strings.Contains(page, "The suppression was lifted.") ||
 		!strings.Contains(page, "This address is not suppressed") {
 		t.Fatalf("an odd address was not lifted: %s", page)
 	}
-	b.do("POST", "/suppressions/find", url.Values{"clear": {"1"}})
 	for _, formOnly := range []string{"find", "lift", "lift-all"} {
 		if rec := b.do("GET", "/suppressions/"+formOnly, nil); rec.Code != 303 || rec.Header().Get("Location") != "/console/suppressions" {
 			t.Errorf("GET %s: %d", formOnly, rec.Code)
@@ -319,5 +327,89 @@ func TestALongListOfSuppressionsSaysThereIsMore(t *testing.T) {
 	page := r.call("GET", "/suppressions", r.signIn(r.admin), nil).Body.String()
 	if strings.Count(page, `name="address" value="u`) != 500 || !strings.Contains(page, "These are the first 500") || strings.Contains(page, "u500@example.org") {
 		t.Fatalf("%d rows", strings.Count(page, `name="address" value="u`))
+	}
+}
+
+// Two tabs of one sign-in each keep what they looked for: the address is
+// named in each page's own URL by a handle, so narrowing one list does
+// not narrow the other's. A handle is the session's own, and a session
+// keeps only so many.
+func TestTwoTabsKeepTheirOwnSearch(t *testing.T) {
+	r := newRig(t, nil)
+	b := r.signedIn(r.admin)
+	ana := r.sent("app@example.com", "ana@example.org", "one")
+	bo := r.sent("app@example.com", "bo@example.org", "two")
+	first, anaHandle := b.narrow("/emails/find", url.Values{"to": {"ana@example.org"}})
+	second, boHandle := b.narrow("/emails/find", url.Values{"to": {"bo@example.org"}})
+	for at, want := range map[string][2]string{first: {ana.ID, bo.ID}, second: {bo.ID, ana.ID}} {
+		// Each tab, asked for again after the other searched, is as it was.
+		page := b.do("GET", at, nil).Body.String()
+		if !strings.Contains(page, "/emails/"+want[0]) || strings.Contains(page, "/emails/"+want[1]) {
+			t.Errorf("the tab at %s does not show its own search", at)
+		}
+	}
+	// The same address looked for again has the same handle.
+	if _, again := b.narrow("/suppressions/find", url.Values{"to": {"ana@example.org"}}); again != anaHandle || anaHandle == boHandle {
+		t.Fatalf("handles: %s, again %s, the other %s", anaHandle, again, boHandle)
+	}
+	// A handle means nothing to another sign-in, or made up: the list is
+	// shown whole, and nothing is said of the address.
+	other := r.signedIn(r.admin)
+	for who, page := range map[string]string{
+		"another sign-in": other.do("GET", "/emails?for="+anaHandle, nil).Body.String(),
+		"a made-up one":   b.do("GET", "/emails?for=0123456789abcdef", nil).Body.String(),
+		"no handle":       b.do("GET", "/emails?for=ana@example.org", nil).Body.String(),
+	} {
+		if !strings.Contains(page, "/emails/"+ana.ID) || !strings.Contains(page, "/emails/"+bo.ID) || !strings.Contains(page, "All emails") {
+			t.Errorf("%s: the list is not whole", who)
+		}
+	}
+	// Opening an email from a narrowed list, and coming back from it,
+	// keeps the search; so does a form's own address asked for again.
+	page := b.do("GET", first, nil).Body.String()
+	if !strings.Contains(page, `href="/console/emails/`+ana.ID+`?for=`+anaHandle+`"`) ||
+		!strings.Contains(page, `action="/console/emails/find?for=`+anaHandle+`"`) {
+		t.Fatalf("the narrowed list's links and form do not carry its handle: %s", page)
+	}
+	if page = b.do("GET", "/emails/"+ana.ID+"?for="+anaHandle, nil).Body.String(); !strings.Contains(page, `href="/console/emails?for=`+anaHandle+`"`) {
+		t.Fatal("the email's way back does not lead to the narrowed list")
+	}
+	if page = b.do("GET", "/emails/"+ana.ID+"?for=ana@example.org", nil).Body.String(); !strings.Contains(page, `href="/console/emails"`) {
+		t.Fatal("what is no handle is passed on by the email's page")
+	}
+	for _, form := range []string{"/emails/find", "/suppressions/find", "/suppressions/lift", "/suppressions/lift-all"} {
+		want := "/console" + strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(form, "/find"), "/lift-all"), "/lift") + "?for=" + anaHandle
+		if rec := b.do("GET", form+"?for="+anaHandle, nil); rec.Code != 303 || rec.Header().Get("Location") != want {
+			t.Errorf("GET %s leads to %s, want %s", form, rec.Header().Get("Location"), want)
+		}
+	}
+	// A session keeps the addresses looked for or shown last. A tab in
+	// use stays narrowed however many others are looked for; one left
+	// alone says its search is no longer kept, and shows the whole list.
+	for i := range 25 {
+		b.narrow("/emails/find", url.Values{"to": {fmt.Sprintf("someone%d@example.org", i)}})
+		if page := b.do("GET", first, nil).Body.String(); !strings.Contains(page, "Emails to <code>ana@example.org</code>") {
+			t.Fatalf("a tab in use lost its search after %d others", i+1)
+		}
+	}
+	if page = b.do("GET", second, nil).Body.String(); !strings.Contains(page, "All emails") ||
+		!strings.Contains(page, "The address this page was narrowed to is no longer kept") {
+		t.Fatalf("a search the session no longer keeps: %s", page)
+	}
+	if page = b.do("GET", "/suppressions?for="+boHandle, nil).Body.String(); !strings.Contains(page, "is no longer kept") {
+		t.Fatal("the suppressions do not say a search is no longer kept")
+	}
+	if page = b.do("GET", "/emails", nil).Body.String(); strings.Contains(page, "no longer kept") {
+		t.Fatal("a list never narrowed says a search is no longer kept")
+	}
+	// Show all forgets the address on the server, not only on the page.
+	if rec := b.do("POST", "/emails/find", url.Values{"clear": {"1"}, "for": {anaHandle}}); rec.Header().Get("Location") != "/console/emails" {
+		t.Fatalf("show all leads to %s", rec.Header().Get("Location"))
+	}
+	if page = b.do("GET", first, nil).Body.String(); !strings.Contains(page, "is no longer kept") {
+		t.Fatal("show all did not forget the address")
+	}
+	if strings.Contains(r.logged.String(), "example.org") {
+		t.Fatalf("the log holds an address: %s", r.logged.String())
 	}
 }

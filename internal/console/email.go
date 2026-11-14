@@ -23,6 +23,9 @@ type emailView struct {
 	// SaidUnread says what receiving servers said may be kept but could
 	// not be read.
 	SaidUnread bool
+	// For is the handle of the address the list it was opened from was
+	// narrowed to, "" for none: the way back leads to that list.
+	For string
 }
 
 // eventRow is one thing that happened, and what the receiving server
@@ -68,5 +71,6 @@ func (c *console) emailPage(w http.ResponseWriter, r *http.Request) {
 		}
 		slices.SortFunc(v.Headers, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
 	}
+	v.For = handleOf(r)
 	c.render(w, r, http.StatusOK, "email", v)
 }

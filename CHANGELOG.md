@@ -72,7 +72,8 @@ Every change a user of CairnPost can notice is written here. The format is
   and `CAIRNPOST_CONSOLE_PLAIN_HTTP` set it up.
 - The console lists the emails on record, newest first, narrowed to a
   state or a recipient, and shows what happened to each and, where content
-  is kept, what it said.
+  is kept, what it said. A recipient looked for is never in a page's
+  URL, which carries a handle for it, and each tab keeps its own search.
 - The console shows the suppression list, finds an address on it, adds
   one by hand and lifts one or a sending domain's, asking first.
 - `cairnpost domains check DOMAIN` and the console's Domains page look up

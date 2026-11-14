@@ -340,17 +340,21 @@ on the page that made it.
   webhook endpoints only.
 - Emails are listed newest first, a hundred to a page, and can be narrowed
   to a state and to one recipient. The address you look for is kept with
-  your session on the server, not in the page's address, so it is in no
-  proxy's log and not in the browser's history, and it is forgotten when
-  the session ends. The list never shows a subject.
+  your session on the server; the page's address carries only a random
+  handle for it. So the address is in no proxy's log and not in the
+  browser's history, it is forgotten when the session ends or when you
+  ask to see everything again, and two tabs each keep their own search.
+  A session keeps the twenty addresses looked for or shown last; a page
+  narrowed to an older one says so and shows the whole list. The list
+  never shows a subject.
 - The suppression list shows who is not sent to and why, with the email
   it happened to: the first 500 in order of sending domain and address,
   narrowed to a domain or an address (`cairnpost suppressions list` on
   the server shows them all). An address is suppressed by hand or sent to again from
   there, and a sending domain's suppressions can be lifted together; both
-  ask first. Looking for an address narrows the emails and the
-  suppressions alike, so one search answers "was it sent, did it arrive,
-  is it blocked".
+  ask first. Each list, narrowed to an address, leads to the other
+  narrowed to the same one, so one search answers "was it sent, did it
+  arrive, is it blocked".
 - A webhook endpoint is made, changed, turned off and on, tested and
   removed there. Its signing secret is shown once, on the page that made
   it, and can be changed, after asking, for a new one shown once. An

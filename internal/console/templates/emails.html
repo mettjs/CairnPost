@@ -5,7 +5,9 @@
 
 <section aria-label="Narrow the list">
   {{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
-  <form class="row find" method="post" action="{{.Root}}/emails/find">
+  {{if .Data.Forgotten}}<p class="notice" role="status">The address this page was narrowed to is no longer kept, so every email is shown. Look for it again to narrow the list.</p>{{end}}
+  <form class="row find" method="post" action="{{.Root}}/emails/find{{with .Data.For}}?for={{.}}{{end}}">
+    <input type="hidden" name="for" value="{{.Data.For}}">
     <div class="field">
       <label for="to">Sent to</label>
       <input id="to" name="to" value="{{if .Data.Typed}}{{.Data.Typed}}{{else}}{{.Data.To}}{{end}}" spellcheck="false" autocapitalize="off" autocomplete="off" inputmode="email">
@@ -36,7 +38,7 @@
       <tbody>
       {{range .Data.Emails}}
       <tr>
-        <td data-label="To"><a href="{{$.Root}}/emails/{{.ID}}">{{.Recipient}}</a></td>
+        <td data-label="To"><a href="{{$.Root}}/emails/{{.ID}}{{with $.Data.For}}?for={{.}}{{end}}">{{.Recipient}}</a></td>
         <td data-label="From" class="wrap">{{.Sender}}</td>
         <td data-label="State"><span class="state state-{{tone .State}}">{{label .State}}</span></td>
         <td data-label="Sent"><time datetime="{{stamp .CreatedAt}}">{{when .CreatedAt}}</time></td>
@@ -46,9 +48,10 @@
     </table>
   </div>
   {{end}}
+  {{if .Data.To}}<p class="hint"><a href="{{.Root}}/suppressions?for={{.Data.For}}">See whether this address is suppressed</a>.</p>{{end}}
   {{if or .Data.Older .Data.Paged}}
   <p class="pager">
-    {{if .Data.Paged}}<a href="{{.Root}}/emails{{if .Data.State}}?state={{.Data.State}}{{end}}">Newest</a>{{end}}
+    {{if .Data.Paged}}<a href="{{.Data.Newest}}">Newest</a>{{end}}
     {{if .Data.Older}}<a href="{{.Data.Older}}">Older</a>{{end}}
   </p>
   {{end}}

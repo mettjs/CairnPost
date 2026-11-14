@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/store"
@@ -9,8 +10,9 @@ import (
 
 // session is a console session: whose it is and when it ends.
 type session struct {
-	keyID, lookingFor string
-	started, expires  time.Time
+	keyID            string
+	lookups          []lookup
+	started, expires time.Time
 }
 
 // CreateSession implements store.Sessions.
@@ -40,22 +42,62 @@ func (s *Store) SessionKey(_ context.Context, hash []byte, ttl time.Duration) (s
 	return store.Key{}, time.Time{}, store.ErrNotFound
 }
 
-// LookFor implements store.Sessions.
-func (s *Store) LookFor(_ context.Context, hash []byte, address string) error {
+// lookup is an address a session looks for, under its handle.
+type lookup struct {
+	handle, address string
+	used            int // the order it was last looked for in
+}
+
+// Remember implements store.Sessions.
+func (s *Store) Remember(_ context.Context, hash []byte, handle, address string, keep int) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held, ok := s.sessions[string(hash)]
+	if !ok {
+		return "", nil
+	}
+	s.seq++
+	at := slices.IndexFunc(held.lookups, func(l lookup) bool { return l.address == address })
+	if at < 0 {
+		held.lookups = append(held.lookups, lookup{handle: handle, address: address})
+		at = len(held.lookups) - 1
+	}
+	held.lookups[at].used = s.seq
+	kept := held.lookups[at].handle
+	// The ones looked for last stay.
+	slices.SortFunc(held.lookups, func(a, b lookup) int { return b.used - a.used })
+	if len(held.lookups) > keep {
+		held.lookups = held.lookups[:keep]
+	}
+	s.sessions[string(hash)] = held
+	return kept, nil
+}
+
+// Recall implements store.Sessions.
+func (s *Store) Recall(_ context.Context, hash []byte, handle string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := s.sessions[string(hash)]
+	for i, l := range held.lookups {
+		if l.handle == handle {
+			// Asked for is looked for: it is not the one that goes next.
+			s.seq++
+			held.lookups[i].used = s.seq
+			return l.address, nil
+		}
+	}
+	return "", nil
+}
+
+// Forget implements store.Sessions.
+func (s *Store) Forget(_ context.Context, hash []byte, handle string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if held, ok := s.sessions[string(hash)]; ok {
-		held.lookingFor = address
+		held.lookups = slices.DeleteFunc(held.lookups, func(l lookup) bool { return l.handle == handle })
 		s.sessions[string(hash)] = held
 	}
 	return nil
-}
-
-// LookingFor implements store.Sessions.
-func (s *Store) LookingFor(_ context.Context, hash []byte) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sessions[string(hash)].lookingFor, nil
 }
 
 // DeleteSession implements store.Sessions.

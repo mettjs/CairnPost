@@ -8,7 +8,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/store"
@@ -57,18 +59,48 @@ func (s *Service) Key(ctx context.Context, token string) (store.Key, error) {
 	return k, err
 }
 
-// LookFor keeps the address a session's owner is looking for, "" for
-// none. It ends with the session, however that ends.
-func (s *Service) LookFor(ctx context.Context, token, address string) error {
-	return s.store.LookFor(ctx, hashOf(token), address)
-}
+// lookups is how many addresses a session keeps: the ones looked for,
+// or shown, last. A page that names an older one says it is no longer
+// kept, and shows the whole list.
+const lookups = 20
 
-// LookingFor answers that address, "" for none.
-func (s *Service) LookingFor(ctx context.Context, token string) (string, error) {
-	if token == "" {
+// handleShape is what a handle LookFor made looks like.
+var handleShape = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// LookFor keeps an address a session's owner looks for and answers the
+// handle it is kept under, to name it by where the address itself must
+// not be written: in a page's URL. "" for no address. It ends with the
+// session, however that ends.
+func (s *Service) LookFor(ctx context.Context, token, address string) (string, error) {
+	if token == "" || address == "" {
 		return "", nil
 	}
-	return s.store.LookingFor(ctx, hashOf(token))
+	raw := make([]byte, 8)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("session: no randomness: %w", err)
+	}
+	return s.store.Remember(ctx, hashOf(token), hex.EncodeToString(raw), address, lookups)
+}
+
+// IsHandle reports whether a string could be a handle LookFor made.
+func IsHandle(s string) bool { return handleShape.MatchString(s) }
+
+// LookingFor answers the address a session keeps under a handle, "" for
+// none: a handle of another session, one no longer kept, or no handle.
+func (s *Service) LookingFor(ctx context.Context, token, handle string) (string, error) {
+	if token == "" || !IsHandle(handle) {
+		return "", nil
+	}
+	return s.store.Recall(ctx, hashOf(token), handle)
+}
+
+// Forget drops the address a session keeps under a handle: whoever
+// looked for it asked to see everything again.
+func (s *Service) Forget(ctx context.Context, token, handle string) error {
+	if token == "" || !IsHandle(handle) {
+		return nil
+	}
+	return s.store.Forget(ctx, hashOf(token), handle)
 }
 
 // End ends a token's session.
