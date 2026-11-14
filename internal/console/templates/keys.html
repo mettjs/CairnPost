@@ -3,33 +3,26 @@
 <h1>API keys</h1>
 <p class="lede">A key lets an application send through this server. An admin key can also manage it, here or over the API.{{if .Data.Bound}} You are signed in with a key that manages <code>{{.Data.Bound}}</code>, so you see and make that domain's keys only.{{end}}</p>
 
-{{with .Data.Made}}
-<section class="once" aria-labelledby="made">
-  <h2 id="made">The key "{{.Name}}" was made</h2>
-  <p>Copy it now. It is shown this once and cannot be read again.</p>
-  <div class="secret">
-    <code id="new-key">{{$.Data.MadeFull}}</code>
-    <button class="quiet" type="button" data-copy="new-key">Copy</button>
-  </div>
-</section>
-{{end}}
+{{template "subtabs" .Data.Tabs}}
 
-<section aria-labelledby="new">
-  <h2 id="new">Make a key</h2>
+{{if eq .Data.Tab "new"}}
+<section aria-labelledby="new" class="narrow">
+  <h2 id="new" class="sr">Make a key</h2>
   {{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
-  <form class="row" method="post" action="{{.Root}}/keys">
+  <form class="stack" method="post" action="{{.Root}}/keys">
     <div class="field">
       <label for="name">Name</label>
       <input id="name" name="name" value="{{.Data.Form.Name}}" required>
       <p class="hint">What will use it, such as "billing service".</p>
     </div>
-    <div class="field">
-      <label for="scope">May</label>
-      <select id="scope" name="scope">
-        <option value="send" {{if eq .Data.Form.Scope "send"}}selected{{end}}>Send email</option>
-        <option value="admin" {{if eq .Data.Form.Scope "admin"}}selected{{end}}>Send and manage</option>
-      </select>
-    </div>
+    <fieldset class="field">
+      <legend>May</legend>
+      <div class="seg">
+        <label><input type="radio" name="scope" value="send" {{if ne .Data.Form.Scope "admin"}}checked{{end}}><span>Send email</span></label>
+        <label><input type="radio" name="scope" value="admin" {{if eq .Data.Form.Scope "admin"}}checked{{end}}><span>Send and manage</span></label>
+      </div>
+      <p class="hint">A key that manages can also sign in here and use the whole API.</p>
+    </fieldset>
     <div class="field">
       <label for="domain">Sending domain</label>
       {{if .Data.Bound}}
@@ -44,12 +37,24 @@
   </form>
 </section>
 
+{{else}}
+{{with .Data.Made}}
+<section class="once" aria-labelledby="made">
+  <h2 id="made">The key "{{.Name}}" was made</h2>
+  <p>Copy it now. It is shown this once and cannot be read again.</p>
+  <div class="secret">
+    <code id="new-key">{{$.Data.MadeFull}}</code>
+    <button class="quiet" type="button" data-copy="new-key">Copy</button>
+  </div>
+</section>
+{{end}}
+
 <section aria-labelledby="all">
-  <h2 id="all">Keys</h2>
+  <h2 id="all" class="sr">Keys</h2>
   {{if .Data.Unread}}
   <p class="problem" role="alert">The keys could not be read. Reload the page to try again.</p>
   {{else if not .Data.Keys}}
-  <p class="empty">There are no keys yet. Make one above.</p>
+  <p class="empty"><b>There are no keys yet.</b> <a href="{{.Root}}/keys?tab=new">Make a key</a></p>
   {{else}}
   <div class="scroll" tabindex="0" role="region" aria-labelledby="all">
     <table>
@@ -61,8 +66,8 @@
         <td data-label="Key"><code>{{.Prefix}}</code></td>
         <td data-label="May">{{if eq .Scope "admin"}}Send and manage{{else}}Send{{end}}</td>
         <td data-label="Sending domain">{{if .Domain}}<code>{{.Domain}}</code>{{else}}Any{{end}}</td>
-        <td data-label="Made"><time datetime="{{stamp .CreatedAt}}" title="{{when .CreatedAt}}">{{day .CreatedAt}}</time></td>
-        <td data-label="State">{{if .RevokedAt}}<time datetime="{{stamp .RevokedAt}}" title="{{when .RevokedAt}}">Revoked {{day .RevokedAt}}</time>{{else}}Active{{end}}</td>
+        <td data-label="Made"><time datetime="{{stamp .CreatedAt}}" title="{{when $.Zone .CreatedAt}}">{{day $.Zone .CreatedAt}}</time></td>
+        <td data-label="State">{{if .RevokedAt}}<time datetime="{{stamp .RevokedAt}}" title="{{when $.Zone .RevokedAt}}">Revoked {{day $.Zone .RevokedAt}}</time>{{else}}Active{{end}}</td>
         <td class="act">{{if not .RevokedAt}}<a href="{{$.Root}}/keys/{{.Prefix}}/revoke">Revoke</a>{{end}}</td>
       </tr>
       {{end}}
@@ -72,4 +77,5 @@
   {{if .Data.More}}<p class="hint">These are the 500 newest keys. <code>cairnpost keys list</code> on the server shows them all.</p>{{end}}
   {{end}}
 </section>
+{{end}}
 {{end}}

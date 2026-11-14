@@ -26,14 +26,20 @@ type endpointView struct {
 	Deliveries []store.Delivery
 	State      string
 	// After is the cursor this page of them follows, "" for the newest.
-	After  string
-	States []string
+	After string
+	// Chips narrow the deliveries to a state.
+	Chips  []chip
 	Older  string
 	Paged  bool
 	Unread bool
 	// PauseAfter is how long an endpoint may fail before it is paused,
 	// in words; "" when it never is.
 	PauseAfter string
+	// Owed says how many webhooks it is owed, "" for none or not known.
+	Owed string
+	// Tab is the part shown: "" what it was sent, "settings" the rest.
+	Tab  string
+	Tabs tabs
 }
 
 // endpoint answers the endpoint a request names, if the signed-in key
@@ -63,15 +69,24 @@ func formOf(e store.Endpoint) hookForm {
 // cursorShape is what a cursor of a list of deliveries can look like.
 var cursorShape = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
+// settingsOf is the part of an endpoint's page where it is changed.
+func settingsOf(id string) string { return endpointAt(id, "", "", "settings") }
+
 // endpointURL is an endpoint's page, at a page of its deliveries: those
 // in a state if that is one, after a cursor if that could be one.
-func endpointURL(id, state, after string) string {
+func endpointURL(id, state, after string) string { return endpointAt(id, state, after, "") }
+
+// endpointAt is endpointURL at a part of the page, if that is one.
+func endpointAt(id, state, after, tab string) string {
 	at, q := Root+"/webhooks/"+url.PathEscape(id), url.Values{}
 	if slices.Contains(store.DeliveryStates, state) {
 		q.Set("state", state)
 	}
 	if cursorShape.MatchString(after) {
 		q.Set("after", after)
+	}
+	if tab == "settings" {
+		q.Set("tab", tab)
 	}
 	if len(q) > 0 {
 		at += "?" + q.Encode()
@@ -82,7 +97,7 @@ func endpointURL(id, state, after string) string {
 // listed is the page of deliveries a form was sent from, which what the
 // form does leads back to.
 func listed(r *http.Request) string {
-	return endpointURL(r.PathValue("id"), r.PostFormValue("in"), r.PostFormValue("at"))
+	return endpointAt(r.PathValue("id"), r.PostFormValue("in"), r.PostFormValue("at"), r.PostFormValue("tab"))
 }
 
 func (c *console) endpointPage(w http.ResponseWriter, r *http.Request) {
@@ -95,14 +110,32 @@ func (c *console) endpointPage(w http.ResponseWriter, r *http.Request) {
 func (c *console) endpointShown(w http.ResponseWriter, r *http.Request, code int, v endpointView) {
 	q := r.URL.Query()
 	after := q.Get("after")
-	v.States, v.Paged, v.After = store.DeliveryStates, after != "", after
+	v.Paged, v.After = after != "", after
 	if c.PauseAfter > 0 {
 		v.PauseAfter = span(c.PauseAfter)
 	}
 	if v.State = q.Get("state"); !slices.Contains(store.DeliveryStates, v.State) {
 		v.State = "" // a state nobody chose from the page narrows nothing
 	}
-	list, next, err := c.Webhooks.Deliveries(r.Context(), who(r).Domain, v.Endpoint.ID, v.State, after, shownDeliveries)
+	forced := ""
+	if v.Problem != "" {
+		forced = "settings"
+	}
+	v.Tab = tabOf(r, forced, "settings")
+	keep := url.Values{}
+	if v.State != "" {
+		keep.Set("state", v.State)
+	}
+	v.Tabs = tabsOf("This endpoint", "/webhooks/"+url.PathEscape(v.Endpoint.ID), keep, v.Tab,
+		tab{Label: "What it was sent"}, tab{Key: "settings", Label: "Settings"})
+	var (
+		list []store.Delivery
+		next string
+		err  error
+	)
+	if v.Tab == "" { // the settings list nothing
+		list, next, err = c.Webhooks.Deliveries(r.Context(), who(r).Domain, v.Endpoint.ID, v.State, after, shownDeliveries)
+	}
 	var invalid *webhook.Invalid
 	switch {
 	case errors.As(err, &invalid):
@@ -115,6 +148,12 @@ func (c *console) endpointShown(w http.ResponseWriter, r *http.Request, code int
 		c.Log.Error("console: an endpoint's deliveries could not be read", "error", err)
 		v.Unread = true
 	}
+	if owed, err := c.Webhooks.Owed(r.Context(), []store.Endpoint{v.Endpoint}); err != nil {
+		c.Log.Error("console: what an endpoint is owed could not be read", "error", err)
+	} else {
+		v.Owed = owedSays(owed[v.Endpoint.ID], v.Endpoint)
+	}
+	v.Chips = deliveryChips(v.Endpoint.ID, v.State)
 	if v.Deliveries = list; next != "" {
 		v.Older = endpointURL(v.Endpoint.ID, v.State, next)
 	}
@@ -157,6 +196,7 @@ func (c *console) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 	default:
 		c.Log.Info("console: a webhook endpoint was changed", "by", who(r).Prefix, "endpoint", e.ID)
 		c.flash(w, "endpoint-changed")
-		http.Redirect(w, r, endpointURL(e.ID, "", ""), http.StatusSeeOther)
+		// Back to where it was changed.
+		http.Redirect(w, r, settingsOf(e.ID), http.StatusSeeOther)
 	}
 }

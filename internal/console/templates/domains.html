@@ -3,12 +3,27 @@
 <h1>Domains</h1>
 <p class="lede">The domains this server sends from: each one a key is bound to, or an email on record was sent from. Open one to see whether its DNS is ready.{{if .Data.Bound}} You are signed in with a key that manages <code>{{.Data.Bound}}</code>, so you see that one only.{{end}}</p>
 
+{{if not .Data.Bound}}{{template "subtabs" .Data.Tabs}}{{end}}
+
+{{if eq .Data.Tab "check"}}
+<section aria-labelledby="other" class="narrow">
+  <h2 id="other" class="sr">Check a domain</h2>
+  <p class="lede">Any domain can be checked, also one nothing was sent from yet.</p>
+  {{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
+  <form class="stack" method="get" action="{{.Root}}/domains">
+    <input type="hidden" name="tab" value="check">
+    <div class="field"><label for="check">Domain</label>
+    <input id="check" name="check" value="{{.Data.Typed}}" required spellcheck="false" autocapitalize="off" autocomplete="off"></div>
+    <button type="submit">Check DNS</button>
+  </form>
+</section>
+{{else}}
 <section aria-labelledby="all">
-  <h2 id="all">Sending domains</h2>
+  <h2 id="all" class="sr">Sending domains</h2>
   {{if .Data.Unread}}
   <p class="problem" role="alert">The domains could not be read. Reload the page to try again.</p>
   {{else if not .Data.Domains}}
-  <p class="empty">No email has been sent yet and no key is bound to a domain. Check a domain below before the first email goes out from it.</p>
+  <p class="empty">No email has been sent yet and no key is bound to a domain. {{if not .Data.Bound}}<a href="{{.Root}}/domains?tab=check">Check a domain</a> before the first email goes out from it.{{end}}</p>
   {{else}}
   <div class="scroll" tabindex="0" role="region" aria-labelledby="all">
     <table>
@@ -18,27 +33,16 @@
       <tr>
         <td data-label="Domain" class="wrap">{{if isHost .Name}}<a href="{{$.Root}}/domains/{{.Name}}">{{.Name}}</a>{{else}}{{.Name}} <span class="by">Not a name that can be looked up</span>{{end}}</td>
         <td data-label="Keys bound to it">{{if .Keys}}{{.Keys}}{{else}}None{{end}}</td>
-        <td data-label="Last sent from">{{with .LastSent}}<time datetime="{{stamp .}}">{{when .}}</time>{{else}}Nothing on record{{end}}</td>
+        <td data-label="Last sent from">{{with .LastSent}}<time datetime="{{stamp .}}">{{when $.Zone .}}</time>{{else}}Nothing on record{{end}}</td>
         <td class="act">{{if isHost .Name}}<a href="{{$.Root}}/domains/{{.Name}}">Check DNS</a>{{end}}</td>
       </tr>
       {{end}}
       </tbody>
     </table>
   </div>
-  {{if .Data.More}}<p class="hint">These are the first {{.Data.Most}}, in order of name. Any other can be checked by name below.</p>{{end}}
+  {{if .Data.More}}<p class="hint">These are the first {{.Data.Most}}, in order of name. Any other can be checked by name.</p>{{end}}
   {{end}}
 </section>
 
-{{if not .Data.Bound}}
-<section aria-labelledby="other">
-  <h2 id="other">Check a domain</h2>
-  <p class="lede">Any domain can be checked, also one nothing was sent from yet.</p>
-  {{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
-  <form class="narrowing" method="get" action="{{.Root}}/domains">
-    <label for="check">Domain</label>
-    <input id="check" name="check" value="{{.Data.Typed}}" required spellcheck="false" autocapitalize="off" autocomplete="off">
-    <button type="submit">Check DNS</button>
-  </form>
-</section>
 {{end}}
 {{end}}

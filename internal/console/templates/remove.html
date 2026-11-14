@@ -5,7 +5,7 @@
   <p class="long">Nothing more is sent to <code>{{.Data.URL}}</code>, and the webhooks it is still owed are dropped with it. This cannot be undone. To stop it for a while, turn it off instead: what it is already owed waits, though it is told nothing of what happens while it is off.</p>
   <form class="actions" method="post" action="{{.Root}}/webhooks/{{.Data.ID}}/delete">
     <button class="danger" type="submit">Remove endpoint</button>
-    <a href="{{.Root}}/webhooks/{{.Data.ID}}">Keep it</a>
+    <a href="{{.Root}}/webhooks/{{.Data.ID}}?tab=settings">Keep it</a>
   </form>
 </section>
 {{end}}

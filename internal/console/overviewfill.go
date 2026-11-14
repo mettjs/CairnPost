@@ -19,6 +19,9 @@ func (v *overview) fill(r stats.Report) {
 	if t.Unanswered > 0 {
 		v.Unanswered = count(t.Unanswered)
 	}
+	if n := t.Waiting(); n > 0 && v.Outcomes {
+		v.Waiting = count(n)
+	}
 	sent := figure{Key: "sent", Label: "Sent", Value: count(t.Sent), Sub: "in the last " + r.Period.Name}
 	if change, known := r.Change(); known && change != 0 {
 		sent.Trend, sent.Sub = "up", fmt.Sprintf("%.1f%% more than the %s before", change, r.Period.Name)
@@ -30,6 +33,7 @@ func (v *overview) fill(r stats.Report) {
 		v.outcome("delivered", "Delivered", t, t.Delivered, "%.1f%%", "arrived"),
 		v.outcome("bounced", "Bounced", t, t.Bounced, "%.1f%%", "were refused"),
 		v.outcome("complained", "Marked as spam", t, t.Complained, "%.2f%%", "were marked as spam")}
+	v.Zone = zoneName(r.Now)
 	v.Sent, v.Bad = sentChart(r, 820), outcomeChart(r, 640)
 	for i := len(r.Points) - 1; i >= 0; i-- {
 		v.Steps = append(v.Steps, stepRow{stepName(r.Points[i].At, r.Period.Daily(), true), r.Points[i].Tally})
@@ -68,18 +72,18 @@ func (v *overview) outcome(key, label string, t stats.Tally, n int, format, did 
 
 // attention picks the endpoints somebody should look at, paused ones
 // first, and counts the others: those on and answering, and those off.
-func attention(ends []store.Endpoint, pauseAfter time.Duration) (look []hookRow, fine, off int) {
+func attention(ends []store.Endpoint, pauseAfter time.Duration, zone *time.Location) (look []hookRow, fine, off int) {
 	var failing []hookRow
 	for _, e := range ends {
 		state := webhook.StateOf(e)
 		switch {
 		case state == webhook.StatePaused:
 			look = append(look, hookRow{Endpoint: e, Label: endpointStates[state][0], Tone: endpointStates[state][1], Paused: true,
-				Says: "It failed every try for too long. Nothing is sent to it; what it is owed is kept."})
+				Says: "It failed every try for too long. Nothing is sent to it; what it is owed is sent when it is resumed."})
 		case state == webhook.StateOff:
 			off++
 		case e.FailingSince != nil:
-			says := "Every try has failed since " + when(*e.FailingSince) + "."
+			says := "Every try has failed since " + when(e.FailingSince.In(zone)) + "."
 			if pauseAfter > 0 {
 				says += " It is paused if this goes on."
 			}

@@ -20,6 +20,9 @@ type domainsView struct {
 	Problem, Typed string
 	Most           int
 	Unread, More   bool
+	// Tab is the part shown: "" the list, "check" the form.
+	Tab  string
+	Tabs tabs
 }
 
 // domainsPage lists the sending domains, and leads to the check of one
@@ -41,6 +44,18 @@ func (c *console) domainsPage(w http.ResponseWriter, r *http.Request) {
 		c.Log.Error("console: the sending domains could not be read", "error", err)
 		v.Unread = true
 	}
+	forced := ""
+	if v.Problem != "" {
+		forced = "check"
+	}
+	if v.Tab = tabOf(r, forced, "check"); v.Bound != "" {
+		v.Tab = "" // a bound key checks its own domain alone
+	}
+	shown := tab{Label: "Sending domains", N: len(v.Domains)}
+	if v.More {
+		shown.N = 0
+	}
+	v.Tabs = tabsOf("Domains", "/domains", nil, v.Tab, shown, tab{Key: "check", Label: "Check another"})
 	c.render(w, r, code, "domains", v)
 }
 

@@ -19,7 +19,8 @@ type emailsView struct {
 	// To and State are what the list is narrowed to, "" for not; For is
 	// the handle that names To in this page's links and forms.
 	To, State, For string
-	States         []string
+	// Chips narrow the list to a state.
+	Chips []chip
 	// Problem says why the form was refused; Typed is what was typed.
 	Problem, Typed string
 	Unread         bool
@@ -39,7 +40,7 @@ func (c *console) emailsPage(w http.ResponseWriter, r *http.Request) {
 // emailsShown is the page with the emails the signed-in key may read,
 // newest first.
 func (c *console) emailsShown(w http.ResponseWriter, r *http.Request, code int, v emailsView, before string) {
-	v.States, v.Paged = store.States, before != ""
+	v.Paged = before != ""
 	if v.State != "" && !slices.Contains(store.States, v.State) {
 		// A state nobody chose from the form: a URL written by hand. The
 		// list is shown without it.
@@ -62,7 +63,7 @@ func (c *console) emailsShown(w http.ResponseWriter, r *http.Request, code int, 
 		list = list[:shownEmails]
 		v.Older = emailsAt(v.State, list[shownEmails-1].ID, v.For)
 	}
-	v.Emails, v.Newest = list, emailsAt(v.State, "", v.For)
+	v.Emails, v.Newest, v.Chips = list, emailsAt(v.State, "", v.For), emailChips(v.State, v.For)
 	c.render(w, r, code, "emails", v)
 }
 
@@ -80,17 +81,14 @@ func emailsAt(state, before, handle string) string {
 }
 
 // findEmails narrows the list: to an address, kept with the session and
-// named in the URL by its handle, and to a state, kept in the URL. An
-// empty form shows every email again.
+// named in the URL by its handle; the state it is narrowed to, kept in
+// the URL, stays as it is.
 func (c *console) findEmails(w http.ResponseWriter, r *http.Request) {
 	if !form(w, r) {
 		c.emailsShown(w, r, http.StatusUnprocessableEntity, emailsView{Problem: notAnAddress}, "")
 		return
 	}
-	state := r.PostFormValue("state")
-	if r.PostFormValue("clear") != "" {
-		state = ""
-	}
+	state := r.PostFormValue("state") // kept: "clear" forgets the address alone
 	handle, typed, err := c.look(r)
 	if errors.Is(err, errNotAnAddress) {
 		c.emailsShown(w, r, http.StatusUnprocessableEntity, emailsView{State: state, Typed: typed, Problem: notAnAddress}, "")

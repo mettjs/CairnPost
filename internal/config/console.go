@@ -24,6 +24,11 @@ type Console struct {
 	// emails, in percent, that bounced at which the console marks the
 	// domain. Default 5; "off" marks none, and is 0.
 	BounceWarn float64
+	// Zone is CAIRNPOST_CONSOLE_TIMEZONE: the time zone the console says
+	// times in, and cuts its hours and days in, for a browser that does
+	// not say its own; by name ("Europe/Berlin", "UTC"). Default: the
+	// system's own, which TZ sets.
+	Zone *time.Location
 }
 
 func console(getenv func(string) string) (Console, error) {
@@ -41,8 +46,26 @@ func console(getenv func(string) string) (Console, error) {
 	if c.PlainHTTP, err = flag(getenv, "CAIRNPOST_CONSOLE_PLAIN_HTTP", false); err != nil {
 		return c, err
 	}
-	c.BounceWarn, err = bounceWarn(getenv)
+	if c.BounceWarn, err = bounceWarn(getenv); err != nil {
+		return c, err
+	}
+	c.Zone, err = zone(getenv)
 	return c, err
+}
+
+// zone reads CAIRNPOST_CONSOLE_TIMEZONE: a time zone's name, or nothing
+// for the system's own.
+func zone(getenv func(string) string) (*time.Location, error) {
+	const name = "CAIRNPOST_CONSOLE_TIMEZONE"
+	v := strings.TrimSpace(getenv(name))
+	if v == "" {
+		return time.Local, nil
+	}
+	at, err := time.LoadLocation(v)
+	if err != nil {
+		return nil, fmt.Errorf("config: %s must name a time zone, such as Europe/Berlin or UTC (got %q)", name, v)
+	}
+	return at, nil
 }
 
 // bounceWarn reads CAIRNPOST_BOUNCE_WARN: a percentage ("5", "2.5", with

@@ -139,12 +139,32 @@ func (s *Store) ResumeEndpoint(_ context.Context, id string) (store.Endpoint, bo
 	}
 	// What was given up while it failed is owed again.
 	for _, d := range s.deliveries {
-		if d.EndpointID == id && d.State == store.DeliveryFailed && d.AttemptedAt != nil && !d.AttemptedAt.Before(*e.FailingSince) {
+		if d.EndpointID == id && givenUp(e, d) {
 			d.State, d.NextAt = store.DeliveryPending, s.Now()
 		}
 	}
 	e.FailingSince, e.PausedAt = nil, nil
 	return s.shown(e), true, nil
+}
+
+// givenUp reports whether a delivery of an endpoint is owed again when
+// the endpoint is resumed: given up since the failing that paused it.
+func givenUp(e *store.Endpoint, d *delivery) bool {
+	return e.PausedAt != nil && d.State == store.DeliveryFailed && d.AttemptedAt != nil && !d.AttemptedAt.Before(*e.FailingSince)
+}
+
+// Owed implements store.Webhooks.
+func (s *Store) Owed(_ context.Context, ids []string, most int) (map[string]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]int{}
+	for _, d := range s.deliveries {
+		e := s.endpoint(d.EndpointID)
+		if e != nil && slices.Contains(ids, e.ID) && (d.State == store.DeliveryPending || givenUp(e, d)) {
+			out[e.ID] = min(out[e.ID]+1, most)
+		}
+	}
+	return out, nil
 }
 
 // EndpointAnswered implements store.Webhooks.

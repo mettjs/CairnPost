@@ -24,13 +24,16 @@ var assetFiles embed.FS
 // pages is each page's template, parsed with the layout it sits in.
 type pages map[string]*template.Template
 
+// helpers are what a template may call. A time is said in the zone the
+// page hands over with it.
 var helpers = template.FuncMap{
-	// when is a time as a person reads it, in UTC, which it names.
-	"when": when,
+	// when is a time as a person reads it, in a time zone, which it
+	// names.
+	"when": func(zone *time.Location, t time.Time) string { return when(t.In(zone)) },
 	"plus": func(a, b int) int { return a + b },
-	// day is the date alone, where the hour is in the way; stamp the time
-	// as a machine reads it.
-	"day":   func(t time.Time) string { return t.UTC().Format("2 Jan 2006") },
+	// day is the date alone, where the hour is in the way; stamp the
+	// time as a machine reads it.
+	"day":   func(zone *time.Location, t time.Time) string { return t.In(zone).Format("2 Jan 2006") },
 	"stamp": func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
 	// An email's state, as a person reads it.
 	"label":    func(state string) string { return wordsOf(state).Label },
@@ -53,8 +56,18 @@ var helpers = template.FuncMap{
 	"stateOf": func(kind string) string { return store.StateOf[kind] },
 }
 
-// when is a time as a person reads it, in UTC, which it names.
-func when(t time.Time) string { return t.UTC().Format("2 Jan 2006, 15:04 UTC") }
+// when is a time as a person reads it, in the time zone it is in, which
+// it names.
+func when(t time.Time) string { return t.Format("2 Jan 2006, 15:04 ") + zoneName(t) }
+
+// zoneName is what a time's zone is called: its own short name ("CET"),
+// or how far it is from UTC ("UTC+05:30") where it has none.
+func zoneName(t time.Time) string {
+	if name := t.Format("MST"); name[0] != '+' && name[0] != '-' {
+		return name
+	}
+	return "UTC" + t.Format("-07:00")
+}
 
 // parse reads every page at start: a template that does not parse stops
 // the server, not a request.
@@ -87,6 +100,8 @@ type view struct {
 	Version string
 	// Assets is the word in the stylesheet's and the script's URLs.
 	Assets string
+	// Zone is the time zone the page's times are said in.
+	Zone *time.Location
 	// Pulse is how the server stands, said on every page.
 	Pulse pulse
 	Data  any
@@ -95,7 +110,7 @@ type view struct {
 // render writes a page. It is rendered whole before any of it is sent, so
 // a page that fails is an error page and not half a page.
 func (c *console) render(w http.ResponseWriter, r *http.Request, code int, page string, data any) {
-	v := view{Page: page, Root: Root, Version: c.Version, Assets: c.assets, Pulse: pulseOf(c.parts()), Data: data}
+	v := view{Page: page, Root: Root, Version: c.Version, Assets: c.assets, Pulse: pulseOf(c.parts()), Zone: c.zoneOf(r), Data: data}
 	// What the request before asked this page to say is said by a page
 	// that was asked for, not by the answer to a form.
 	if r.Method == http.MethodGet && code < 400 {

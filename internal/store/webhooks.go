@@ -121,6 +121,12 @@ type Webhooks interface {
 	// more try each. It answers whether the endpoint was paused; one that
 	// was not is left as it is. ErrNotFound for none.
 	ResumeEndpoint(ctx context.Context, id string) (Endpoint, bool, error)
+	// Owed answers how many webhooks each of some endpoints is owed:
+	// those waiting to be tried and, for a paused one, those given up
+	// since its failing began, which ResumeEndpoint makes wait again.
+	// Counting stops at most for each. An endpoint owed none, or that is
+	// not there, is not in the answer.
+	Owed(ctx context.Context, ids []string, most int) (map[string]int, error)
 	// EndpointAnswered records that an endpoint answered something that
 	// is no delivery (a webhook sent to try it out): it is no longer
 	// failing. A paused endpoint stays paused, and its failing is kept.

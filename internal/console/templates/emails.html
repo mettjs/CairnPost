@@ -3,30 +3,23 @@
 <h1>Emails</h1>
 <p class="lede">Every email sent through this server that is still on record, newest first.{{if .Who.Domain}} You are signed in with a key that manages <code>{{.Who.Domain}}</code>, so you see that domain's emails only.{{end}}</p>
 
-<section aria-label="Narrow the list">
-  {{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
-  {{if .Data.Forgotten}}<p class="notice" role="status">The address this page was narrowed to is no longer kept, so every email is shown. Look for it again to narrow the list.</p>{{end}}
-  <form class="row find" method="post" action="{{.Root}}/emails/find{{with .Data.For}}?for={{.}}{{end}}">
+{{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
+{{if .Data.Forgotten}}<p class="notice" role="status">The address this page was narrowed to is no longer kept, so every email is shown. Look for it again to narrow the list.</p>{{end}}
+
+<div class="toolbar">
+  <nav aria-label="Narrow to a state">{{template "chips" .Data.Chips}}</nav>
+  <form class="search" method="post" action="{{.Root}}/emails/find{{with .Data.For}}?for={{.}}{{end}}" role="search">
     <input type="hidden" name="for" value="{{.Data.For}}">
-    <div class="field">
-      <label for="to">Sent to</label>
-      <input id="to" name="to" value="{{if .Data.Typed}}{{.Data.Typed}}{{else}}{{.Data.To}}{{end}}" spellcheck="false" autocapitalize="off" autocomplete="off" inputmode="email">
-      <p class="hint">A whole address. Leave empty for any.</p>
-    </div>
-    <div class="field">
-      <label for="state">State</label>
-      <select id="state" name="state">
-        <option value="">Any</option>
-        {{range .Data.States}}<option value="{{.}}" {{if eq . $.Data.State}}selected{{end}}>{{label .}}</option>{{end}}
-      </select>
-    </div>
-    <button type="submit">Show</button>
-    {{if or .Data.To .Data.State}}<button class="quiet" type="submit" name="clear" value="1">Show all</button>{{end}}
+    <input type="hidden" name="state" value="{{.Data.State}}">
+    <label class="sr" for="to">Sent to</label>
+    <input id="to" name="to" value="{{if .Data.Typed}}{{.Data.Typed}}{{else}}{{.Data.To}}{{end}}" placeholder="Sent to a whole address" spellcheck="false" autocapitalize="off" autocomplete="off" inputmode="email">
+    <button type="submit">Find</button>
+    {{if .Data.To}}<button class="quiet" type="submit" name="clear" value="1">Clear</button>{{end}}
   </form>
-</section>
+</div>
 
 <section aria-labelledby="list">
-  <h2 id="list">{{if .Data.To}}Emails to <code>{{.Data.To}}</code>{{else if .Data.State}}{{label .Data.State}}{{else}}All emails{{end}}{{if and .Data.To .Data.State}}, {{label .Data.State}}{{end}}</h2>
+  <h2 id="list" class="sr">{{if .Data.To}}Emails to <code>{{.Data.To}}</code>{{else if .Data.State}}{{label .Data.State}}{{else}}All emails{{end}}{{if and .Data.To .Data.State}}, {{label .Data.State}}{{end}}</h2>
   {{if .Data.Unread}}
   <p class="problem" role="alert">The emails could not be read. Reload the page to try again.</p>
   {{else if not .Data.Emails}}
@@ -41,7 +34,7 @@
         <td data-label="To"><a href="{{$.Root}}/emails/{{.ID}}{{with $.Data.For}}?for={{.}}{{end}}">{{.Recipient}}</a></td>
         <td data-label="From" class="wrap">{{.Sender}}</td>
         <td data-label="State"><span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{label .State}}</span></td>
-        <td data-label="Sent"><time datetime="{{stamp .CreatedAt}}">{{when .CreatedAt}}</time></td>
+        <td data-label="Sent"><time datetime="{{stamp .CreatedAt}}">{{when $.Zone .CreatedAt}}</time></td>
       </tr>
       {{end}}
       </tbody>

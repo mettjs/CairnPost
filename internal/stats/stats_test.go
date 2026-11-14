@@ -42,7 +42,7 @@ func at(daysAgo, hour int, domain string, in map[string]int) store.Counted {
 func TestWhatCountsAsSentAndDelivered(t *testing.T) {
 	got := tally(map[string]int{store.StateSending: 9, store.StateUnknown: 9, store.StateFailed: 9,
 		store.StateSent: 1, store.StateDeferred: 2, store.StateDelivered: 30, store.StateBounced: 4, store.StateComplained: 3})
-	if got != (Tally{Sent: 40, Delivered: 33, Bounced: 4, Complained: 3, Failed: 9, Unanswered: 18}) || got.Tried() != 67 {
+	if got != (Tally{Sent: 40, Delivered: 33, Bounced: 4, Complained: 3, Failed: 9, Unanswered: 18}) || got.Tried() != 67 || got.Waiting() != 3 {
 		t.Fatalf("%+v", got)
 	}
 	if got.Share(4) != 10 || (Tally{}).Share(0) != 0 {
@@ -61,7 +61,7 @@ func TestAPeriodIsCutInStepsWithThePeriodBefore(t *testing.T) {
 		at(13, 0, "example.com", map[string]int{store.StateDelivered: 6}),    // its first day
 		at(14, 23, "example.com", map[string]int{store.StateDelivered: 100}), // older than both
 	}}
-	r, err := New(c, 5).Report(context.Background(), "", Periods[1])
+	r, err := New(c, 5).Report(context.Background(), "", Periods[1], nil)
 	if err != nil || len(r.Points) != 7 || c.hours < 14*24 || c.domain != "" {
 		t.Fatalf("%d points, %d hours asked, %v", len(r.Points), c.hours, err)
 	}
@@ -78,7 +78,7 @@ func TestAPeriodIsCutInStepsWithThePeriodBefore(t *testing.T) {
 		t.Fatalf("%v %v", change, known)
 	}
 	// Hours: the one under way is the last of twenty-four.
-	r, err = New(c, 5).Report(context.Background(), "", Periods[0])
+	r, err = New(c, 5).Report(context.Background(), "", Periods[0], nil)
 	if err != nil || len(r.Points) != 24 || !r.Points[23].At.Equal(now.Truncate(time.Hour)) ||
 		r.Points[22].Bounced != 1 || r.Points[18].Delivered != 5 || r.Total.Sent != 6 {
 		t.Fatalf("%+v %v", r.Points, err)
@@ -97,7 +97,7 @@ func TestADomainWarnsAtTheLineOnceEnoughWasSent(t *testing.T) {
 		at(1, 1, "fine.example.com", map[string]int{store.StateDelivered: 196, store.StateBounced: 4}),
 		at(1, 1, "idle.example.com", map[string]int{store.StateFailed: 3}),
 	}}
-	r, err := New(c, 5).Report(context.Background(), "", Periods[1])
+	r, err := New(c, 5).Report(context.Background(), "", Periods[1], nil)
 	if err != nil || len(r.Domains) != 3 {
 		t.Fatalf("%+v %v", r.Domains, err)
 	}
@@ -111,15 +111,15 @@ func TestADomainWarnsAtTheLineOnceEnoughWasSent(t *testing.T) {
 			t.Errorf("%d: %+v, want %+v", i, d, want[i])
 		}
 	}
-	if r, _ = New(c, 0).Report(context.Background(), "", Periods[1]); r.Domains[0].High || r.WarnAt != 0 {
+	if r, _ = New(c, 0).Report(context.Background(), "", Periods[1], nil); r.Domains[0].High || r.WarnAt != 0 {
 		t.Fatal("a warning that is off still warned")
 	}
-	r, err = New(c, 5).Report(context.Background(), "fine.example.com", Periods[2])
+	r, err = New(c, 5).Report(context.Background(), "fine.example.com", Periods[2], nil)
 	if err != nil || c.domain != "fine.example.com" || len(r.Domains) != 1 || r.Total.Sent != 200 {
 		t.Fatalf("%+v asked of %q: %v", r.Domains, c.domain, err)
 	}
 	c.err = errors.New("down")
-	if _, err := New(c, 5).Report(context.Background(), "", Periods[1]); err == nil {
+	if _, err := New(c, 5).Report(context.Background(), "", Periods[1], nil); err == nil {
 		t.Fatal("a store that failed was read as nothing sent")
 	}
 }
@@ -143,7 +143,7 @@ func TestSteadySendingIsNoChange(t *testing.T) {
 		c.rows = append(c.rows, store.Counted{Hour: h, Domain: "example.com", In: map[string]int{store.StateDelivered: 40}})
 	}
 	for _, p := range Periods {
-		r, err := New(c, 0).Report(context.Background(), "", p)
+		r, err := New(c, 0).Report(context.Background(), "", p, nil)
 		if change, known := r.Change(); err != nil || !known || change != 0 {
 			t.Errorf("%s: %v %v %v", p.Key, change, known, err)
 		}

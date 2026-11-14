@@ -34,7 +34,8 @@ func (z resolver) LookupMX(_ context.Context, name string) ([]*net.MX, error) {
 func TestSendingDomainsAreListed(t *testing.T) {
 	r := newRig(t, nil)
 	b := r.signedIn(r.admin)
-	if page := b.do("GET", "/domains", nil).Body.String(); !strings.Contains(page, "No email has been sent yet") || !strings.Contains(page, `name="check"`) {
+	if page := b.do("GET", "/domains", nil).Body.String(); !strings.Contains(page, "No email has been sent yet") || !strings.Contains(page, `/domains?tab=check"`) ||
+		!strings.Contains(b.do("GET", "/domains?tab=check", nil).Body.String(), `name="check"`) {
 		t.Fatalf("an empty list: %s", page)
 	}
 	r.sent("app@Mail.Example.com", "ana@example.org", "one")

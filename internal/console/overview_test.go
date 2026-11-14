@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	_ "time/tzdata" // a zone by name, wherever the tests run
 
 	"github.com/mettjs/cairnpost/internal/console"
 	"github.com/mettjs/cairnpost/internal/stats"
@@ -213,7 +214,8 @@ func TestTheOverviewLeadsToWhatNeedsALook(t *testing.T) {
 	miss(false)
 	page := b.do("GET", "/", nil).Body.String()
 	if !strings.Contains(page, "Failing</span>") || !strings.Contains(page, "Every try has failed since 1 Jan 2030, 00:00 UTC. It is paused if this goes on.") ||
-		!strings.Contains(page, "1 endpoint is on and answering.") || strings.Contains(page, ">Resume<") {
+		!strings.Contains(page, "1 endpoint is on and answering.") || strings.Contains(page, ">Resume<") ||
+		!strings.Contains(page, "<b>1</b> owed") {
 		t.Fatalf("a failing endpoint: %s", page)
 	}
 	r.now = r.now.Add(49 * time.Hour)
@@ -221,9 +223,26 @@ func TestTheOverviewLeadsToWhatNeedsALook(t *testing.T) {
 	b = r.signedIn(r.admin)
 	page = b.do("GET", "/", nil).Body.String()
 	if !strings.Contains(page, "Paused</span>") || !strings.Contains(page, `action="/console/webhooks/`+id+`/resume"`) ||
-		!strings.Contains(page, ">Resume<") {
+		!strings.Contains(page, ">Resume<") || !strings.Contains(page, "<b>1</b> owed") {
 		t.Fatalf("a paused endpoint: %s", page)
 	}
+	// Resumed and answered, it is owed nothing, and the page says no number.
+	if _, _, err := r.s.ResumeEndpoint(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	due, err := r.s.TakeDeliveries(ctx, 10, 10, nil, time.Minute)
+	if err != nil || len(due) != 1 || r.s.DeliveryDone(ctx, due[0].Delivery.ID, 204) != nil {
+		t.Fatalf("%d taken once resumed: %v", len(due), err)
+	}
+	if page = b.do("GET", "/", nil).Body.String(); strings.Contains(page, "owed</span>") || !strings.Contains(page, "Nothing needs a look.") {
+		t.Fatalf("once it took what it was owed: %s", page)
+	}
+	// Paused again, for what follows.
+	r.heard(r.sent("app@example.com", "bo@example.org", "again"), store.EventBounced, "5.1.1", "")
+	miss(false)
+	r.now = r.now.Add(49 * time.Hour)
+	miss(true)
+	b = r.signedIn(r.admin)
 	// An endpoint that is turned off is not one that is fine.
 	if page = b.follow("POST", "/webhooks/"+id+"/enabled", url.Values{"enabled": {"off"}}).Body.String(); !strings.Contains(page, "</svg>Off</span>") {
 		t.Fatalf("turning it off: %s", page)
@@ -247,5 +266,83 @@ func TestTheOverviewLeadsToWhatNeedsALook(t *testing.T) {
 	}
 	if page := b.do("GET", "/", nil).Body.String(); !strings.Contains(page, `id="server" open`) {
 		t.Error("the first page does not open what is not working")
+	}
+}
+
+// Every time is said in the console's time zone, which is named, and
+// the first page's hours and days are that zone's.
+func TestTimesAreSaidInTheConsolesZone(t *testing.T) {
+	r := newRig(t, func(d *console.Deps) { d.Zone = time.FixedZone("", -(3*3600 + 1800)) })
+	b, l := r.signedIn(r.admin), listen(t)
+	r.made(b, url.Values{"url": {l.URL + "/hook"}})
+	r.heard(r.sent("app@example.com", "ana@example.org", "one"), store.EventBounced, "5.1.1", "")
+	due, err := r.s.TakeDeliveries(context.Background(), 10, 10, nil, time.Minute)
+	if err != nil || len(due) != 1 {
+		t.Fatalf("%d taken: %v", len(due), err)
+	}
+	if _, err := r.s.DeliveryMissed(context.Background(), due[0].Delivery.ID, due[0].Delivery.Attempts, 503, "status", 0, false, 0); err != nil {
+		t.Fatal(err)
+	}
+	page := b.do("GET", "/?period=24h", nil).Body.String()
+	for _, want := range []string{"Every try has failed since 31 Dec 2029, 20:30 UTC-03:30.", "Hours and days are in UTC-03:30.",
+		"31 Dec, 20:30 UTC-03:30"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the first page lacks %q", want)
+		}
+	}
+	if page = b.do("GET", "/emails", nil).Body.String(); !strings.Contains(page, "31 Dec 2029, 20:30 UTC-03:30") || !strings.Contains(page, `datetime="2030-01-01T00:00:00Z"`) {
+		t.Errorf("the emails are not in the zone, or their machine time is: %s", page)
+	}
+}
+
+// A browser that says its own time zone is answered in it; a word that
+// names none is answered in the console's.
+func TestABrowsersOwnZoneIsFollowed(t *testing.T) {
+	r := newRig(t, nil)
+	b := r.signedIn(r.admin)
+	r.sent("app@example.com", "ana@example.org", "one")
+	b.jar["cairnpost_console_zone"] = "Asia/Tokyo"
+	if page := b.do("GET", "/emails", nil).Body.String(); !strings.Contains(page, "1 Jan 2030, 09:00 JST") {
+		t.Errorf("the emails are not in the browser's zone: %s", page)
+	}
+	if page := b.do("GET", "/?period=24h", nil).Body.String(); !strings.Contains(page, "Hours and days are in JST.") {
+		t.Error("the first page's hours are not the browser's")
+	}
+	for _, none := range []string{"Mars/Olympus", "../../etc/passwd", "Local", "a b", strings.Repeat("a", 65)} {
+		b.jar["cairnpost_console_zone"] = none
+		if page := b.do("GET", "/emails", nil).Body.String(); !strings.Contains(page, "1 Jan 2030, 00:00 UTC") {
+			t.Errorf("%q: not answered in the console's zone", none)
+		}
+	}
+}
+
+// What narrows a page is kept by its parts, and what a form does leads
+// back to the part it was sent from.
+func TestAPagesPartsKeepWhatNarrowsIt(t *testing.T) {
+	r := newRig(t, nil)
+	b, l := r.signedIn(r.admin), listen(t)
+	r.heard(r.sent("app@example.com", "ana@example.org", "one"), store.EventBounced, "5.1.1", "")
+	narrowed, handle := b.narrow("/suppressions/find", url.Values{"to": {"ana@example.org"}, "domain": {"example.com"}})
+	page := b.do("GET", narrowed, nil).Body.String()
+	for _, want := range []string{"/console/suppressions?domain=example.com&amp;for=" + handle + "&amp;tab=add", "&amp;for=" + handle + "&amp;tab=lift"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the narrowed list lacks %q", want)
+		}
+	}
+	if page = b.do("GET", "/suppressions?domain=example.com&for="+handle+"&tab=add", nil).Body.String(); !strings.Contains(page, `name="in" value="example.com"`) ||
+		!strings.Contains(page, `name="note"`) || strings.Contains(page, "<table") {
+		t.Errorf("the form's part: %s", page)
+	}
+	// Clearing the address keeps the state the list is narrowed to.
+	if rec := b.do("POST", "/emails/find", url.Values{"state": {"bounced"}, "to": {"ana@example.org"}, "clear": {"1"}}); rec.Header().Get("Location") != "/console/emails?state=bounced" {
+		t.Errorf("clearing the address led to %q", rec.Header().Get("Location"))
+	}
+	// Turned off from its settings, an endpoint's page comes back there.
+	id := r.made(b, url.Values{"url": {l.URL + "/hook"}})
+	if rec := b.do("POST", "/webhooks/"+id+"/enabled", url.Values{"enabled": {"off"}, "tab": {"settings"}}); rec.Header().Get("Location") != "/console/webhooks/"+id+"?tab=settings" {
+		t.Errorf("turning it off from the settings led to %q", rec.Header().Get("Location"))
+	}
+	if page = b.do("GET", "/webhooks/"+id+"?tab=nothing", nil).Body.String(); !strings.Contains(page, "Nothing has been sent to it yet") {
+		t.Error("a part that is none is not the first part")
 	}
 }

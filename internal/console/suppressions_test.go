@@ -44,7 +44,7 @@ func TestASuppressedAddressIsFound(t *testing.T) {
 	for typed, want := range map[string]string{"ANA@EXAMPLE.ORG": plain.ID, "Ana <ana@example.org>": plain.ID, `"ANA B"@Example.org`: quoted.ID} {
 		narrowed, _ := b.narrow("/suppressions/find", url.Values{"to": {typed}})
 		page = b.do("GET", narrowed, nil).Body.String()
-		if !strings.Contains(page, "/emails/"+want) || strings.Count(page, `name="address"`) != 2 || !strings.Contains(page, "Suppressions of <code>") {
+		if !strings.Contains(page, "/emails/"+want) || strings.Count(page, `name="address"`) != 1 || !strings.Contains(page, "Suppressions of <code>") {
 			t.Errorf("%q: the address's suppression is not what is shown", typed)
 		}
 	}
@@ -248,7 +248,7 @@ func TestADomainsSuppressionsAreLiftedTogether(t *testing.T) {
 	}
 	// A refused form keeps what was asked.
 	if page := b.do("POST", "/suppressions/lift-all", url.Values{"domain": {"a@b"}, "reason": {"bounce"}}).Body.String(); !strings.Contains(page, `value="a@b"`) ||
-		!strings.Contains(page, `value="bounce" selected`) {
+		!strings.Contains(page, `value="bounce" checked`) {
 		t.Fatal("a refused form came back empty")
 	}
 	if left, _, _ := sup.List(ctx, "", "", 10); len(left) != 1 || left[0].Domain != "b.example.com" {

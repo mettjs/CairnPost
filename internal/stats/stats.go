@@ -18,33 +18,6 @@ import (
 // before its bounce rate can warn: one bounce of three is not a rate.
 const MinSent = 50
 
-// Period is a stretch of time the numbers are shown over, cut in steps.
-type Period struct {
-	// Key names it in a URL; Name is how it reads after "the last".
-	Key, Name string
-	// Steps is how many steps it has, each Hours long: an hour or a day.
-	Steps, Hours int
-}
-
-// Periods is every period, shortest first.
-var Periods = []Period{{"24h", "24 hours", 24, 1}, {"7d", "7 days", 7, 24}, {"30d", "30 days", 30, 24}}
-
-// Default is the period shown when none is asked for.
-var Default = Periods[1]
-
-// PeriodOf is the period a key names, and whether it names one.
-func PeriodOf(key string) (Period, bool) {
-	for _, p := range Periods {
-		if p.Key == key {
-			return p, true
-		}
-	}
-	return Default, false
-}
-
-// Daily reports whether the period's steps are days.
-func (p Period) Daily() bool { return p.Hours == 24 }
-
 // Tally is what became of some emails.
 type Tally struct {
 	// Sent is how many the mail provider took: not those it refused, nor
@@ -58,6 +31,11 @@ type Tally struct {
 	// answered. Neither is in Sent.
 	Failed, Unanswered int
 }
+
+// Waiting is how many sent emails have no outcome yet: the mail provider
+// took them, and no receiving server has taken or refused them. With
+// Delivered and Bounced it makes up Sent.
+func (t Tally) Waiting() int { return t.Sent - t.Delivered - t.Bounced }
 
 // Tried is every email a send was begun for, whatever became of it.
 func (t Tally) Tried() int { return t.Sent + t.Failed + t.Unanswered }
@@ -116,6 +94,8 @@ type Report struct {
 	Domains []Domain
 	// WarnAt is the bounce rate, in percent, a domain warns at; 0 for never.
 	WarnAt float64
+	// Now is when the numbers were read, in the zone they are cut in.
+	Now time.Time
 }
 
 // Change is how much more was sent than in the period before, in percent
@@ -139,30 +119,59 @@ func New(s store.Counts, warnAt float64) *Service { return &Service{store: s, wa
 
 // Report answers a period's numbers: those of one sending domain for a
 // key bound to it, of every domain for "". Steps are hours and days of
-// UTC, and the last one is the one under way.
-func (s *Service) Report(ctx context.Context, bound string, p Period) (Report, error) {
-	// The period and the one before it, with an hour to spare.
-	rows, now, err := s.store.SendCounts(ctx, bound, 2*p.Steps*p.Hours+1)
+// zone (nil is UTC), and the last one is the one under way.
+//
+// Emails are counted by the hour of UTC. A day is the hours that begin
+// in it, so in a zone that is not whole hours from UTC a day's edge is
+// up to an hour off, and an hour reads as beginning at :30 or :45.
+func (s *Service) Report(ctx context.Context, bound string, p Period, zone *time.Location) (Report, error) {
+	if zone == nil {
+		zone = time.UTC
+	}
+	// The period and the one before it, with hours to spare for the one
+	// under way and for a day the clocks made longer.
+	rows, now, err := s.store.SendCounts(ctx, bound, 2*p.Steps*p.Hours+4)
 	if err != nil {
 		return Report{}, err
 	}
 	// The store's own time cuts the steps: it stamped the emails.
-	step := time.Duration(p.Hours) * time.Hour
-	first := now.UTC().Truncate(step).Add(-time.Duration(p.Steps-1) * step)
-	r := Report{Period: p, Points: make([]Point, p.Steps), WarnAt: s.warnAt}
-	for i := range r.Points {
-		r.Points[i].At = first.Add(time.Duration(i) * step)
+	now = now.In(zone)
+	whole := now.Truncate(time.Hour)
+	// starts is where each step of the period before, then of this one,
+	// begins, and where this one ends.
+	starts := make([]time.Time, 2*p.Steps+1)
+	for i := range starts {
+		starts[i] = p.back(now, 2*p.Steps-1-i)
 	}
-	// The hour under way is in neither side of the comparison.
-	whole, length := now.UTC().Truncate(time.Hour), time.Duration(p.Steps)*step
+	r := Report{Period: p, Points: make([]Point, p.Steps), WarnAt: s.warnAt, Now: now}
+	for i := range r.Points {
+		r.Points[i].At = starts[p.Steps+i]
+	}
+	// The same stretch one period earlier ends where this one's last
+	// whole hour was then: the hour under way is in neither.
+	then := whole.Add(-time.Duration(p.Steps) * time.Hour)
+	if p.Daily() {
+		then = whole.AddDate(0, 0, -p.Steps)
+	}
 	byDomain := map[string]Tally{}
 	for _, c := range rows {
+		// The step an hour is in is the last one that begins at or before it.
+		i, _ := slices.BinarySearchFunc(starts, c.Hour, func(start, hour time.Time) int {
+			if start.After(hour) {
+				return 1
+			}
+			return -1
+		})
+		i--
 		t := tally(c.In)
-		if !c.Hour.Before(first.Add(-length)) && c.Hour.Before(whole.Add(-length)) {
-			r.Before = r.Before.plus(t)
-		}
-		if i := int(c.Hour.Sub(first) / step); !c.Hour.Before(first) && i < p.Steps {
-			r.Points[i].Tally = r.Points[i].Tally.plus(t)
+		switch {
+		case i < 0 || i >= 2*p.Steps:
+		case i < p.Steps:
+			if c.Hour.Before(then) {
+				r.Before = r.Before.plus(t)
+			}
+		default:
+			r.Points[i-p.Steps].Tally = r.Points[i-p.Steps].Tally.plus(t)
 			r.Total = r.Total.plus(t)
 			byDomain[c.Domain] = byDomain[c.Domain].plus(t)
 			if c.Hour.Before(whole) {

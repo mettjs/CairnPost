@@ -38,6 +38,9 @@ type suppressionsView struct {
 	LiftProblem  string
 	Lift         struct{ Domain, Reason string }
 	Unread, More bool
+	// Tab is the part shown: "" the list, "add" or "lift" a form.
+	Tab  string
+	Tabs tabs
 	// Forgotten says the page named an address that is no longer kept.
 	Forgotten bool
 }
@@ -71,9 +74,25 @@ func (suppressionsView) boundTo(r *http.Request) string { return who(r).Domain }
 // of them all. v.Domain is a domain already checked.
 func (c *console) suppressionsShown(w http.ResponseWriter, r *http.Request, code int, v suppressionsView) {
 	v.Bound, v.Reasons, v.Shown = who(r).Domain, store.Reasons, shownSuppressions
+	forced := ""
+	switch {
+	case v.AddProblem != "":
+		forced = "add"
+	case v.LiftProblem != "":
+		forced = "lift"
+	}
+	v.Tab = tabOf(r, forced, "add", "lift")
 	to, handle, err := c.found(r)
 	v.Forgotten = forgotten(r, handle)
-	if v.To, v.For = to, handle; err == nil && to != "" {
+	q := url.Values{}
+	if v.Domain != "" {
+		q.Set("domain", v.Domain)
+	}
+	v.Tabs = tabsOf("Suppressions", "/suppressions", narrowedTo(q, handle), v.Tab,
+		tab{Label: "The list"}, tab{Key: "add", Label: "Suppress an address"}, tab{Key: "lift", Label: "Lift a domain's"})
+	if v.To, v.For = to, handle; v.Tab != "" {
+		// A form's part lists nothing: only what narrows the list is kept.
+	} else if err == nil && to != "" {
 		// An address has one row for a sending domain at most.
 		v.List, err = c.suppressed(r).Of(r.Context(), v.Domain, to)
 	} else if err == nil {
