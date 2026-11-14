@@ -158,7 +158,7 @@ func TestASendThatPanicsEndsTheBatchAndNotTheServer(t *testing.T) {
 	svc := mail.New(memstore.New(), d, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 		InDoubtWindow: time.Minute, BatchParallel: 1}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	out, err := svc.SendBatch(context.Background(), sender, "cp_x", "", to("ana", "ben", "cy"))
-	if err != nil || out[0].Err != nil || !errors.Is(out[1].Err, mail.ErrInDoubt) || !errors.Is(out[2].Err, mail.ErrInDoubt) || len(d.sent) != 1 {
+	if err != nil || out[0].Err != nil || !errors.Is(out[1].Err, mail.ErrInDoubt) || !errors.Is(out[2].Err, mail.ErrNotStarted) || len(d.sent) != 1 {
 		t.Fatalf("%+v %v, %d sent", out, err, len(d.sent))
 	}
 }
