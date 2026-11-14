@@ -51,7 +51,7 @@ func TestTheSendingDomainsAreThoseOfKeysAndOfMail(t *testing.T) {
 	ks.Revoke(ctx, gone.Prefix)
 	ks.Create(ctx, "d", store.ScopeSend, "")
 	for _, sender := range []string{"app@A.example.com", "app@b.example.com"} {
-		if _, err := db.Start(ctx, store.Start{KeyID: k.ID, Sender: sender, Recipient: "ana@example.org", Driver: "test",
+		if _, err := db.Start(ctx, store.Start{KeyID: k.ID, Sender: sender, Recipients: store.To("ana@example.org"), Driver: "test",
 			TTL: time.Hour, InDoubt: time.Minute}); err != nil {
 			t.Fatal(err)
 		}

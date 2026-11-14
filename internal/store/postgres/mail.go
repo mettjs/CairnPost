@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,25 +21,61 @@ func (db *DB) Message(ctx context.Context, id string) (store.Message, error) {
 	if !uuidShape.MatchString(id) {
 		return store.Message{}, store.ErrNotFound
 	}
-	m, err := message(ctx, db.pool, id)
+	m, err := email(ctx, db.pool, id)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return store.Message{}, fmt.Errorf("postgres: read a message: %w", err)
 	}
 	return m, err
 }
 
-// message reads one message by a well-formed id; store.ErrNotFound for none.
-func message(ctx context.Context, q querier, id string) (store.Message, error) {
+// messageColumns are a message's row, as scanMessage reads it.
+const messageColumns = `m.id::text, m.email_id::text, m.api_key_id::text, m.sender, m.recipient, m.kind, m.driver,
+	coalesce(m.upstream_id, ''), m.state, m.created_at, m.updated_at, m.left_out`
+
+func scanMessage(row pgx.Row) (store.Message, error) {
 	var m store.Message
-	err := q.QueryRow(ctx, `
-		SELECT id::text, api_key_id::text, sender, recipient, driver, coalesce(upstream_id, ''),
-		       state, created_at, updated_at
-		FROM messages WHERE id = $1::uuid`, id).Scan(
-		&m.ID, &m.KeyID, &m.Sender, &m.Recipient, &m.Driver, &m.UpstreamID, &m.State, &m.CreatedAt, &m.UpdatedAt)
+	err := row.Scan(&m.ID, &m.EmailID, &m.KeyID, &m.Sender, &m.Recipient, &m.Kind, &m.Driver, &m.UpstreamID, &m.State, &m.CreatedAt, &m.UpdatedAt, &m.LeftOut)
+	return m, err
+}
+
+// email reads an email by a well-formed id, with every address of it;
+// store.ErrNotFound for none. The id is the email's: its first row's.
+func email(ctx context.Context, q querier, id string) (store.Message, error) {
+	m, err := scanMessage(q.QueryRow(ctx, `SELECT `+messageColumns+` FROM messages m WHERE m.id = $1::uuid AND m.email_id = m.id`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.Message{}, store.ErrNotFound
 	}
+	if err != nil {
+		return store.Message{}, err
+	}
+	// By the id as the database writes it, whatever case it was asked in.
+	of, err := recipientsOf(ctx, q, []string{m.ID})
+	m.Recipients = of[m.ID]
 	return m, err
+}
+
+// recipientsOf answers every address of each of some emails, in the
+// order they were given at the send.
+func recipientsOf(ctx context.Context, q querier, emails []string) (map[string][]store.Recipient, error) {
+	out := map[string][]store.Recipient{}
+	if len(emails) == 0 {
+		return out, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT email_id::text, recipient, kind, state, updated_at FROM messages
+		WHERE email_id = ANY($1::uuid[]) ORDER BY email_id, id`, emails)
+	if err != nil {
+		return nil, err
+	}
+	var (
+		of string
+		r  store.Recipient
+	)
+	_, err = pgx.ForEachRow(rows, []any{&of, &r.Address, &r.Kind, &r.State, &r.UpdatedAt}, func() error {
+		out[of] = append(out[of], r)
+		return nil
+	})
+	return out, err
 }
 
 // Sent implements store.Mail.
@@ -52,7 +89,7 @@ func (db *DB) Sent(ctx context.Context, id, upstreamID string) error {
 		}
 		_, err := tx.Exec(ctx, `
 			UPDATE messages SET state = 'sent', upstream_id = nullif($2, ''), updated_at = now()
-			WHERE id = $1::uuid`, id, upstreamID)
+			WHERE email_id = $1::uuid`, id, upstreamID)
 		return err
 	})
 	if err != nil {
@@ -69,7 +106,7 @@ func (db *DB) Failed(ctx context.Context, id string) error {
 			return err
 		}
 		_, err := tx.Exec(ctx, `
-			UPDATE messages SET state = 'failed', updated_at = now() WHERE id = $1::uuid`, id)
+			UPDATE messages SET state = 'failed', updated_at = now() WHERE email_id = $1::uuid`, id)
 		return err
 	})
 	if err != nil {
@@ -92,7 +129,8 @@ type execer interface {
 }
 
 // markUnknown records that what became of messages is not known: each was
-// handed to the upstream and its answer never came. It is the one place
+// handed to the upstream and its answer never came. An id may be an
+// email's, for every address of it, or one address's row. It is the one place
 // that says so, whoever found out: the send itself, the next request under
 // its key, the pruner forgetting the key, or the sweep that finds it
 // abandoned.
@@ -104,30 +142,60 @@ type execer interface {
 func markUnknown(ctx context.Context, q execer, happened bool, ids ...string) error {
 	_, err := q.Exec(ctx, `
 		UPDATE messages SET state = 'unknown', updated_at = CASE WHEN $2 THEN now() ELSE updated_at END
-		WHERE id = ANY($1::uuid[]) AND state = 'sending'`, ids, happened)
+		WHERE (id = ANY($1::uuid[]) OR email_id = ANY($1::uuid[])) AND state = 'sending'`, ids, happened)
 	return err
 }
 
-// insertMessage records a message as sending and answers its id. It is the
-// one way a send starts, so it is where a suppressed recipient is refused:
-// it then records nothing and answers "". One statement does both.
+// insertMessage records an email as sending, a row for each address,
+// and answers its id with who it goes to. It is the one way a send
+// starts, so it is where a suppressed address is left out (store.Addressed):
+// the email goes to the others, and the addresses left out are kept
+// with it and answered. With nobody left it records nothing and
+// answers "".
 //
 // The list is read here, when the send starts, and not again: a send
 // started in the second or so before a bounce is recorded still goes.
-func insertMessage(ctx context.Context, tx pgx.Tx, s store.Start) (string, error) {
-	domain, address := store.SuppressionKey(s.Sender, s.Recipient)
-	var id string
-	err := tx.QueryRow(ctx, `
-		INSERT INTO messages (api_key_id, sender, recipient, driver, state, sender_domain)
-		SELECT $1::uuid, $2, $3, $4, 'sending', $5
-		WHERE NOT EXISTS (SELECT 1 FROM suppressions WHERE domain = $5 AND address = $6 AND lifted_at IS NULL)
-		RETURNING id::text`,
-		s.KeyID, s.Sender, s.Recipient, s.Driver, domain, address).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
+func insertMessage(ctx context.Context, tx pgx.Tx, s store.Start) (string, []store.Addressee, []string, error) {
+	domain := store.DomainOf(s.Sender)
+	folded := make([]string, len(s.Recipients))
+	for i, r := range s.Recipients {
+		_, folded[i] = store.SuppressionKey(s.Sender, r.Address)
 	}
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT w.address FROM unnest($2::text[]) AS w(address)
+		WHERE EXISTS (SELECT 1 FROM suppressions s WHERE s.domain = $1 AND s.address = w.address AND s.lifted_at IS NULL)`, domain, folded)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	listed, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return "", nil, nil, err
+	}
+	kept, dropped := store.Addressed(s.Recipients, func(a store.Addressee) bool {
+		_, key := store.SuppressionKey(s.Sender, a.Address)
+		return slices.Contains(listed, key)
+	})
+	if len(kept) == 0 {
+		return "", nil, dropped, nil
+	}
+	addresses, kinds := make([]string, len(kept)), make([]string, len(kept))
+	for i, a := range kept {
+		addresses[i], kinds[i] = a.Address, a.Kind
+	}
+	if dropped == nil {
+		dropped = []string{}
+	}
+	// The email's id is its first row's: made first, so it is the oldest.
+	var id string
+	err = tx.QueryRow(ctx, `
+		WITH email AS (SELECT uuidv7() AS id)
+		INSERT INTO messages (id, email_id, api_key_id, sender, recipient, kind, driver, state, sender_domain, left_out)
+		SELECT CASE WHEN w.n = 1 THEN email.id ELSE uuidv7() END, email.id, $1::uuid, $2, w.recipient, w.kind, $5, 'sending', $6,
+		       CASE WHEN w.n = 1 THEN $7::text[] ELSE '{}' END
+		FROM email, unnest($3::text[], $4::text[]) WITH ORDINALITY AS w(recipient, kind, n)
+		RETURNING email_id::text`, s.KeyID, s.Sender, addresses, kinds, s.Driver, domain, dropped).Scan(&id)
 	if err != nil || s.Content == nil {
-		return id, err
+		return id, kept, dropped, err
 	}
 	// With its message, in the one step: a message is never without the
 	// content it was to be kept with, and a send that is rolled back
@@ -135,7 +203,7 @@ func insertMessage(ctx context.Context, tx pgx.Tx, s store.Start) (string, error
 	_, err = tx.Exec(ctx, `
 		INSERT INTO message_contents (message_id, content, expires_at)
 		VALUES ($1::uuid, $2, now() + make_interval(secs => $3))`, id, s.Content(), s.KeepContent.Seconds())
-	return id, err
+	return id, kept, dropped, err
 }
 
 // Content implements store.Mail. Its age is read on the database's clock.

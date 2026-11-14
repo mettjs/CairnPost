@@ -62,7 +62,7 @@ func (db *DB) TakeDeliveries(ctx context.Context, max, perEndpoint int, busy []s
 		       e.id::text, e.url, e.secret, `+previousKeys+`,
 		       coalesce(ev.id::text, ''), coalesce(ev.kind, ''), coalesce(ev.permanent, false), coalesce(ev.code, ''),
 		       coalesce(ev.reason, ''), coalesce(ev.occurred_at, t.created_at), coalesce(ev.suppressed, false),
-		       coalesce(m.id::text, ''), coalesce(m.sender, ''), coalesce(m.recipient, ''), coalesce(m.created_at, t.created_at),
+		       coalesce(m.email_id::text, ''), coalesce(m.sender, ''), coalesce(m.recipient, ''), coalesce(m.created_at, t.created_at),
 		       coalesce(t.suppression_domain, ''), coalesce(t.suppression_address, ''), coalesce(t.suppression_reason, '')
 		FROM taken t
 		JOIN webhook_endpoints e ON e.id = t.endpoint_id

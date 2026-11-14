@@ -53,7 +53,7 @@ func start(k store.Key, idem, fingerprint string) store.Start {
 	// The recipient is the key's own, and each test makes its own key: the
 	// tests share a database, and an address one of them suppresses must
 	// not be one another sends to.
-	return store.Start{KeyID: k.ID, Sender: "app@example.com", Recipient: "ana-" + k.ID + "@example.org", Driver: "test",
+	return store.Start{KeyID: k.ID, Sender: "app@example.com", Recipients: store.To("ana-" + k.ID + "@example.org"), Driver: "test",
 		IdemKey: idem, Fingerprint: []byte(fingerprint), TTL: time.Hour, InDoubt: time.Hour}
 }
 
@@ -198,7 +198,7 @@ func sent(t *testing.T, db *postgres.DB, k store.Key, upstreamID string) string 
 	// A recipient of this message's own: one test's complaint must not
 	// suppress the address another test sends to.
 	s := start(k, "", "")
-	s.Recipient = fmt.Sprintf("to-%x@example.org", sha256.Sum256([]byte(upstreamID)))
+	s.Recipients = store.To(fmt.Sprintf("to-%x@example.org", sha256.Sum256([]byte(upstreamID))))
 	c, err := db.Start(context.Background(), s)
 	if err != nil || c.Outcome != store.Started {
 		t.Fatalf("the send did not start: %v %v", c.Outcome, err)
@@ -334,7 +334,7 @@ func TestASuppressedAddressIsRefusedHoweverTheSendWouldStart(t *testing.T) {
 	from, to := "app@"+k.ID+".example.com", "gone-"+k.ID+"@example.org"
 	claim := func(idem, fingerprint string) store.Start {
 		s := start(k, idem, fingerprint)
-		s.Sender, s.Recipient = from, to
+		s.Sender, s.Recipients = from, store.To(to)
 		return s
 	}
 	outcome := func(why string, s store.Start, want store.Outcome) store.Claim {
@@ -363,7 +363,7 @@ func TestASuppressedAddressIsRefusedHoweverTheSendWouldStart(t *testing.T) {
 	}
 	outcome("without a key", claim("", ""), store.Suppressed)
 	outcome("under a new key", claim("new", "a"), store.Suppressed)
-	outcome("typed in capitals", func() store.Start { s := claim("", ""); s.Recipient = strings.ToUpper(to); return s }(), store.Suppressed)
+	outcome("typed in capitals", func() store.Start { s := claim("", ""); s.Recipients = store.To(strings.ToUpper(to)); return s }(), store.Suppressed)
 	if replay := outcome("what was sent before", claim("before", "a"), store.Replay); replay.ID != sentBefore.ID {
 		t.Fatalf("replayed %s", replay.ID)
 	}
@@ -407,7 +407,7 @@ func TestALiftIsRememberedAndAPolicyRefusalSuppressesNobody(t *testing.T) {
 	send := func(up string) string {
 		t.Helper()
 		s := start(k, "", "")
-		s.Sender, s.Recipient = "app@"+domain, to
+		s.Sender, s.Recipients = "app@"+domain, store.To(to)
 		c, err := db.Start(ctx, s)
 		if err != nil || c.Outcome != store.Started {
 			t.Fatalf("%s did not start: %v %v", up, c.Outcome, err)
@@ -501,7 +501,7 @@ func TestABounceWithNoRecordSuppressesByItsOwnAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := start(k, "", "")
-	s.Sender, s.Recipient = "app@"+domain, "other-"+k.ID+"@example.org"
+	s.Sender, s.Recipients = "app@"+domain, store.To("other-"+k.ID+"@example.org")
 	c, err := db.Start(ctx, s)
 	if err != nil || c.Outcome != store.Started {
 		t.Fatalf("%v %v", c.Outcome, err)
@@ -546,5 +546,48 @@ func TestTheSuppressionListInOrderAndByPage(t *testing.T) {
 	rest, err := db.ListSuppressions(ctx, domain, &first[1], 2)
 	if err != nil || len(rest) != 1 || rest[0].Address != "c@example.org" {
 		t.Fatalf("%+v %v", rest, err)
+	}
+}
+
+// Events are answered in the order they were recorded, each with its
+// email's addresses: the last few, or those after one, of a sending
+// domain or of all.
+func TestEventsAreReadInTheOrderTheyWereRecorded(t *testing.T) {
+	ctx, db := context.Background(), open(t)
+	k := key(t, db)
+	domain := k.ID + ".example.com"
+	var ids []string
+	for _, n := range []string{"1", "2", "3"} {
+		up := "<t" + n + "-" + k.ID + ">"
+		ids = append(ids, sentFrom(t, db, k, "app@"+domain, up))
+		if _, err := db.RecordEvent(ctx, bounced(up, "5.1.1")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last, err := db.EventsAfter(ctx, "", 0, domain, 2)
+	if err != nil || len(last) != 2 || last[0].MessageID != ids[1] || last[1].MessageID != ids[2] ||
+		last[1].Sender != "app@"+domain || last[1].Recipient == "" || last[1].Kind != store.EventBounced {
+		t.Fatalf("the last two: %+v %v", last, err)
+	}
+	all, _ := db.EventsAfter(ctx, "", 0, domain, 10)
+	after, err := db.EventsAfter(ctx, all[0].ID, 0, domain, 10)
+	if err != nil || len(all) != 3 || len(after) != 2 || after[0].ID != all[1].ID {
+		t.Fatalf("after the first: %+v %v", after, err)
+	}
+	if none, err := db.EventsAfter(ctx, all[2].ID, 0, domain, 10); err != nil || len(none) != 0 {
+		t.Fatalf("after the last: %+v %v", none, err)
+	}
+	// Looking back from the last one answers the ones before it again.
+	if again, err := db.EventsAfter(ctx, all[2].ID, time.Minute, domain, 10); err != nil || len(again) != 3 || again[0].ID != all[0].ID {
+		t.Fatalf("looking back: %+v %v", again, err)
+	}
+	if other, err := db.EventsAfter(ctx, "", 0, "nothing."+domain, 10); err != nil || len(other) != 0 {
+		t.Fatalf("another domain's: %+v %v", other, err)
+	}
+	if every, err := db.EventsAfter(ctx, all[0].ID, 0, "", 2); err != nil || len(every) != 2 {
+		t.Fatalf("of every domain: %+v %v", every, err)
+	}
+	if odd, err := db.EventsAfter(ctx, "not an id", 0, domain, 10); err != nil || len(odd) != 0 {
+		t.Fatalf("after what is no id: %+v %v", odd, err)
 	}
 }

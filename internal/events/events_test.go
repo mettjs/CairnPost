@@ -72,7 +72,7 @@ func (r *rig) sent(upstreamID string) string { return r.sentTo(upstreamID, "ana@
 func (r *rig) sentTo(upstreamID, recipient string) string {
 	r.t.Helper()
 	c, err := r.store.Start(context.Background(), store.Start{KeyID: "k", Sender: "app@example.com",
-		Recipient: recipient, Driver: "fake"})
+		Recipients: store.To(recipient), Driver: "fake"})
 	if err != nil || c.Outcome != store.Started {
 		r.t.Fatalf("the send did not start: %v %v", c.Outcome, err)
 	}
@@ -228,7 +228,7 @@ func TestOfTwoOutcomesTheLaterStands(t *testing.T) {
 func TestAnEmailThatFailedAfterItWasTakenFreesItsKey(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
-	claim := store.Start{KeyID: "k", Sender: "app@example.com", Recipient: "ana@example.org", Driver: "fake",
+	claim := store.Start{KeyID: "k", Sender: "app@example.com", Recipients: store.To("ana@example.org"), Driver: "fake",
 		IdemKey: "once", Fingerprint: []byte("f"), TTL: time.Hour, InDoubt: time.Minute}
 	first, _ := r.store.Start(ctx, claim)
 	r.store.Sent(ctx, first.ID, "up-1")

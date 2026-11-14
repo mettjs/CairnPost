@@ -32,7 +32,7 @@ func (r *rig) days(n int) { r.now = r.now.Add(time.Duration(n) * 24 * time.Hour)
 // send records an email the upstream took under an id.
 func (r *rig) send(up, to, idem string) string {
 	r.t.Helper()
-	c, err := r.s.Start(context.Background(), store.Start{KeyID: "k", Sender: "app@example.com", Recipient: to,
+	c, err := r.s.Start(context.Background(), store.Start{KeyID: "k", Sender: "app@example.com", Recipients: store.To(to),
 		Driver: "test", IdemKey: idem, Fingerprint: []byte("f"), TTL: 24 * time.Hour, InDoubt: time.Minute})
 	if err != nil || c.Outcome != store.Started {
 		r.t.Fatalf("%s did not start: %v %v", up, c.Outcome, err)
@@ -190,7 +190,7 @@ func TestKeepingForEverPrunesKeysAndOldCountsOnly(t *testing.T) {
 // worded records an email whose words are kept for a time.
 func (r *rig) worded(to string, keep time.Duration) string {
 	r.t.Helper()
-	c, err := r.s.Start(context.Background(), store.Start{KeyID: "k", Sender: "app@example.com", Recipient: to,
+	c, err := r.s.Start(context.Background(), store.Start{KeyID: "k", Sender: "app@example.com", Recipients: store.To(to),
 		Driver: "test", Content: func() []byte { return []byte(`{"subject":"hello"}`) }, KeepContent: keep})
 	if err != nil || c.Outcome != store.Started {
 		r.t.Fatalf("did not start: %v %v", c.Outcome, err)

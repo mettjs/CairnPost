@@ -14,13 +14,14 @@ import (
 
 // Request is a send as a caller asks for it.
 type Request struct {
-	From    string
-	To      []string
-	ReplyTo string
-	Subject string
-	HTML    string
-	Text    string
-	Headers map[string]string
+	From string
+	// To, Cc and Bcc are who it goes to: one "to" at least.
+	To, Cc, Bcc []string
+	ReplyTo     string
+	Subject     string
+	HTML        string
+	Text        string
+	Headers     map[string]string
 	// IdemKey is the Idempotency-Key header, "" for none.
 	IdemKey string
 }
@@ -65,8 +66,63 @@ type checked struct {
 	domain string
 }
 
+// addressees are a message's addresses in the order they are kept: "to",
+// then "cc", then "bcc". The first "to" names the email.
+func addressees(m driver.Message) []store.Addressee {
+	var out []store.Addressee
+	for _, of := range []struct {
+		kind string
+		list []string
+	}{{store.KindTo, m.To}, {store.KindCc, m.Cc}, {store.KindBcc, m.Bcc}} {
+		for _, a := range of.list {
+			out = append(out, store.Addressee{Address: a, Kind: of.kind})
+		}
+	}
+	return out
+}
+
+// recipients reads the addresses of "to", "cc" and "bcc" into their wire
+// form: one "to" at least, most in all, none twice.
+func recipients(r Request, most int) (to, cc, bcc []string, err error) {
+	if len(r.To) == 0 {
+		return nil, nil, nil, &Invalid{"to", `"to" must be an address, or a list of them: an email goes to someone.`}
+	}
+	if n := len(r.To) + len(r.Cc) + len(r.Bcc); n > most {
+		return nil, nil, nil, &Invalid{"to", fmt.Sprintf(`An email goes to at most %d addresses, counting "to", "cc" and "bcc"; this one names %d.`, most, n)}
+	}
+	seen := map[string]bool{}
+	read := func(field string, typed []string) ([]string, error) {
+		var out []string
+		for _, one := range typed {
+			a, err := netmail.ParseAddress(one)
+			if err != nil {
+				return nil, &Invalid{field, fmt.Sprintf(`Every address in %q must be an address, such as "ana@example.org".`, field)}
+			}
+			wire := address.Wire(a)
+			if len(wire) > maxAddress {
+				return nil, &Invalid{field, fmt.Sprintf(`An address in %q must be at most 320 bytes.`, field)}
+			}
+			if folded := store.Fold(wire); seen[folded] {
+				return nil, &Invalid{field, `An address is named more than once in "to", "cc" and "bcc"; name each once.`}
+			} else {
+				seen[folded] = true
+			}
+			out = append(out, wire)
+		}
+		return out, nil
+	}
+	if to, err = read("to", r.To); err != nil {
+		return nil, nil, nil, err
+	}
+	if cc, err = read("cc", r.Cc); err != nil {
+		return nil, nil, nil, err
+	}
+	bcc, err = read("bcc", r.Bcc)
+	return to, cc, bcc, err
+}
+
 // check validates a request. Its error is always an *Invalid.
-func check(r Request) (checked, error) {
+func check(r Request, mostRecipients int) (checked, error) {
 	from, err := netmail.ParseAddress(r.From)
 	if err != nil {
 		return checked{}, &Invalid{"from", `"from" must be an address: "Name <you@example.com>" or "you@example.com".`}
@@ -76,18 +132,12 @@ func check(r Request) (checked, error) {
 		// in it would be a header of the caller's choosing.
 		return checked{}, &Invalid{"from", `The sender's name in "from" must not contain line breaks or control characters.`}
 	}
-	if len(r.To) != 1 {
-		return checked{}, &Invalid{"to", `"to" must be exactly one address: one request sends one email.`}
-	}
-	to, err := netmail.ParseAddress(r.To[0])
-	if err != nil {
-		return checked{}, &Invalid{"to", `"to" must be an address, such as "ana@example.org".`}
-	}
-	switch {
-	case len(address.Wire(from)) > maxAddress:
+	if len(address.Wire(from)) > maxAddress {
 		return checked{}, &Invalid{"from", `The address in "from" must be at most 320 bytes.`}
-	case len(address.Wire(to)) > maxAddress:
-		return checked{}, &Invalid{"to", `The address in "to" must be at most 320 bytes.`}
+	}
+	to, cc, bcc, err := recipients(r, mostRecipients)
+	if err != nil {
+		return checked{}, err
 	}
 	reply := ""
 	if r.ReplyTo != "" {
@@ -119,7 +169,7 @@ func check(r Request) (checked, error) {
 		}
 	}
 	return checked{
-		msg: driver.Message{From: address.Wire(from), FromName: from.Name, To: address.Wire(to), ReplyTo: reply,
+		msg: driver.Message{From: address.Wire(from), FromName: from.Name, To: to, Cc: cc, Bcc: bcc, ReplyTo: reply,
 			Subject: r.Subject, HTML: r.HTML, Text: r.Text, Headers: r.Headers},
 		domain: store.DomainOf(from.Address),
 	}, nil

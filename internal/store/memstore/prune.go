@@ -119,10 +119,21 @@ func (s *Store) PruneMessages(_ context.Context, before time.Time, limit int) (i
 	for _, row := range s.idems {
 		keyed[row.messageID] = true
 	}
+	// An email goes whole, once nothing has come of any address of it
+	// since. limit is of emails.
+	emails := 0
 	for id, m := range s.messages {
-		if len(gone) < limit && !m.UpdatedAt.After(before) && !keyed[id] {
-			gone[id] = true
-			delete(s.messages, id)
+		if emails == limit || m.EmailID != id || keyed[id] {
+			continue
+		}
+		rows := s.rows(id)
+		if slices.ContainsFunc(rows, func(row string) bool { return s.messages[row].UpdatedAt.After(before) }) {
+			continue
+		}
+		emails++
+		for _, row := range rows {
+			gone[row] = true
+			delete(s.messages, row)
 		}
 	}
 	// What hangs on a message goes with it; a suppression only lets go.
@@ -141,7 +152,7 @@ func (s *Store) PruneMessages(_ context.Context, before time.Time, limit int) (i
 			row.MessageID = ""
 		}
 	}
-	return len(gone), nil
+	return emails, nil
 }
 
 // PruneLifted implements store.Pruning.

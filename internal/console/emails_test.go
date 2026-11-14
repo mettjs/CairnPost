@@ -16,12 +16,12 @@ import (
 func (r *rig) sent(from, to, subject string) store.Message {
 	r.t.Helper()
 	ctx := context.Background()
-	id, err := r.mail.Send(ctx, r.sendKey, r.send, mail.Request{From: from, To: []string{to}, Subject: subject,
+	receipt, err := r.mail.Send(ctx, r.sendKey, r.send, mail.Request{From: from, To: []string{to}, Subject: subject,
 		Text: "the body of " + subject, HTML: "<script>alert('" + subject + "')</script>", Headers: map[string]string{"X-Entity": "e-" + subject}})
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	m, err := r.s.Message(ctx, id)
+	m, err := r.s.Message(ctx, receipt.ID)
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -260,6 +260,44 @@ func TestABoundKeyReadsItsDomainsEmails(t *testing.T) {
 	for _, m := range []store.Message{theirs, near} {
 		if rec := r.call("GET", "/emails/"+m.ID, session, nil); rec.Code != 404 || strings.Contains(rec.Body.String(), "ana@example.org") {
 			t.Fatalf("another domain's email: %d", rec.Code)
+		}
+	}
+}
+
+// An email that went to several addresses is one row of the list, and
+// its page says what became of it at each.
+func TestAnEmailToSeveralIsOneRowAndShowsEachAddress(t *testing.T) {
+	r := newRig(t, nil)
+	b := r.signedIn(r.admin)
+	if _, err := r.s.Suppress(context.Background(), store.Suppression{Domain: "example.com", Address: "gone@example.org", Reason: store.ReasonManual}); err != nil {
+		t.Fatal(err)
+	}
+	sent, err := r.mail.Send(context.Background(), r.sendKey, r.send, mail.Request{From: "app@example.com",
+		To: []string{"ana@example.org", "gone@example.org"}, Cc: []string{"bo@example.org"}, Bcc: []string{"cy@example.org"}, Subject: "s", Text: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := r.s.Message(context.Background(), sent.ID)
+	r.s.Sent(context.Background(), sent.ID, "up-several")
+	if _, err := r.s.RecordEvent(context.Background(), store.Event{Driver: m.Driver, UpstreamEventID: "e-several", UpstreamID: "up-several",
+		Kind: store.EventBounced, Permanent: true, Code: "5.1.1", At: r.now, Recipient: "bo@example.org"}); err != nil {
+		t.Fatal(err)
+	}
+	list := b.do("GET", "/emails", nil).Body.String()
+	if strings.Count(list, "/emails/"+sent.ID) != 1 || !strings.Contains(list, "and 2 more") || !strings.Contains(list, "</svg>1 Bounced</span>") ||
+		!strings.Contains(list, "</svg>2 Sent</span>") {
+		t.Fatalf("the list: %s", list)
+	}
+	// It is found by an address it was copied to.
+	narrowed, _ := b.narrow("/emails/find", url.Values{"to": {"cy@example.org"}})
+	if page := b.do("GET", narrowed, nil).Body.String(); !strings.Contains(page, "/emails/"+sent.ID) {
+		t.Error("not found by a hidden copy's address")
+	}
+	page := b.do("GET", "/emails/"+sent.ID, nil).Body.String()
+	for _, want := range []string{"Email to ana@example.org and 2 more", "Who it went to", ">Copy<", ">Hidden copy<", "cy@example.org",
+		`<span class="why">bo@example.org</span>`, "Each address has its own outcome.", "<dt>Not sent to</dt>", "gone@example.org"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the email's page lacks %q", want)
 		}
 	}
 }

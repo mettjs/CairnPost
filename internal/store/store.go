@@ -59,14 +59,52 @@ const (
 	StateUnknown = "unknown"
 )
 
-// Message is one email to one recipient, as it is kept: who, to whom, by
-// which upstream and what became of it. Never its subject or its body:
-// those are kept apart, and only when the operator chose to.
+// Kinds of recipient.
+const (
+	KindTo  = "to"
+	KindCc  = "cc"
+	KindBcc = "bcc"
+)
+
+// Addressee is an address an email is to go to, and as which kind.
+type Addressee struct{ Address, Kind string }
+
+// To is some addresses as an email's "to".
+func To(addresses ...string) []Addressee {
+	out := make([]Addressee, len(addresses))
+	for i, a := range addresses {
+		out[i] = Addressee{Address: a, Kind: KindTo}
+	}
+	return out
+}
+
+// Recipient is one address of an email and what became of the email
+// there: each address has its own outcome.
+type Recipient struct {
+	Address, Kind, State string
+	UpdatedAt            time.Time
+}
+
+// Message is an email as it is kept: who, to whom, by which upstream and
+// what became of it. Never its subject or its body: those are kept
+// apart, and only when the operator chose to.
+//
+// An email to several addresses is kept as one row for each, and a
+// Message is one of them: Recipient, Kind and State are that address's.
+// EmailID names the email, and is the ID of its first address's row.
+// Where a Message is answered as the email (Message, Record, Messages),
+// it is that first row, and Recipients holds every address.
 type Message struct {
 	ID         string
+	EmailID    string
 	KeyID      string
 	Sender     string
 	Recipient  string
+	Kind       string
+	Recipients []Recipient
+	// LeftOut are the addresses the email was asked to go to and did
+	// not, being suppressed when it was sent.
+	LeftOut    []string
 	Driver     string
 	UpstreamID string
 	State      string
@@ -89,7 +127,7 @@ const (
 	// sent. Only a finished send can mismatch: until then the key is in
 	// flight, whatever the request.
 	Mismatch
-	// Suppressed: the recipient is on the sending domain's suppression
+	// Suppressed: every recipient is on the sending domain's suppression
 	// list, so nothing is sent. Only a send that would start is refused: a
 	// request already sent is still a Replay. If the key's earlier try was
 	// left in doubt, the claim carries that try's message id.
@@ -104,14 +142,21 @@ type Claim struct {
 	ID string
 	// RetryAfter is, for InFlight, how long until a retry is let through.
 	RetryAfter time.Duration
+	// Recipients are, for Started, the addresses the email goes to and
+	// as what (see Addressed). Dropped are, for Started and Replay, the
+	// addresses left out because they are suppressed.
+	Recipients []Addressee
+	Dropped    []string
 }
 
 // Start is a send about to be made.
 type Start struct {
-	KeyID     string
-	Sender    string
-	Recipient string
-	Driver    string
+	KeyID  string
+	Sender string
+	// Recipients is every address the email is to go to, the first "to"
+	// first: at least one.
+	Recipients []Addressee
+	Driver     string
 	// IdemKey is the caller's Idempotency-Key, "" for none.
 	IdemKey     string
 	Fingerprint []byte
@@ -131,7 +176,8 @@ type Mail interface {
 	// Start records a message as sending and claims its Idempotency-Key, in
 	// one step, so that of two racing requests exactly one is Started.
 	Start(ctx context.Context, s Start) (Claim, error)
-	// Sent marks a message taken by the upstream and its key done.
+	// Sent marks an email taken by the upstream, for every address of
+	// it, and its key done. Lost and Failed are of the whole email too.
 	Sent(ctx context.Context, id, upstreamID string) error
 	// Lost marks a message whose upstream answer never came: its fate is
 	// unknown. Its key stays in flight until the in-doubt window passes.
@@ -139,9 +185,11 @@ type Mail interface {
 	// Failed marks a message the upstream certainly did not take, and frees
 	// its key so the next try sends at once.
 	Failed(ctx context.Context, id string) error
-	// Message answers ErrNotFound for an id no message has.
+	// Message answers an email by its id; ErrNotFound for an id no
+	// email has.
 	Message(ctx context.Context, id string) (Message, error)
-	// Messages lists messages, newest first.
+	// Messages lists emails, newest first: those with an address that
+	// fits the query, where it names an address or a state.
 	Messages(ctx context.Context, q MessageQuery) ([]Message, error)
 	// Content answers what a message said and until when it is shown: if
 	// it was kept, its own time is not up, and it has been kept for less

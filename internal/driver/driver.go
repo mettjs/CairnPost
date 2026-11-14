@@ -8,15 +8,18 @@ import (
 	"time"
 )
 
-// Message is one email to one recipient, as an upstream needs it.
+// Message is one email, as an upstream needs it.
 //
 // Every address is a bare address ("ana@example.org"), ready to be used as
 // it is; the sender's display name travels apart, as the caller wrote it,
-// for the driver to encode the way its upstream wants.
+// for the driver to encode the way its upstream wants. To holds one
+// address at least; no address is in two of To, Cc and Bcc.
 type Message struct {
 	From     string
 	FromName string // "" for none
-	To       string
+	To       []string
+	Cc       []string
+	Bcc      []string
 	ReplyTo  string // "" for none
 	Subject  string
 	HTML     string

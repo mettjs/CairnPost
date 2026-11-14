@@ -63,3 +63,29 @@ func happened(kind string) string {
 	}
 	return kind
 }
+
+// outcome is how many addresses of an email are in a state.
+type outcome struct {
+	State string
+	N     int
+}
+
+// outcomes are the states an email's addresses are in, in the order of
+// an email's life, each with how many are in it: what became of an
+// email that went to several.
+func outcomes(m store.Message) []outcome {
+	in := map[string]int{}
+	for _, r := range m.Recipients {
+		in[r.State]++
+	}
+	var out []outcome
+	for _, state := range store.States {
+		if in[state] > 0 {
+			out = append(out, outcome{state, in[state]})
+		}
+	}
+	return out
+}
+
+// kindWords names each kind of recipient.
+var kindWords = map[string]string{store.KindTo: "To", store.KindCc: "Copy", store.KindBcc: "Hidden copy"}

@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"time"
 
@@ -12,12 +13,7 @@ import (
 func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var m store.Message
-	for _, candidate := range s.messages {
-		if candidate.Driver == e.Driver && candidate.UpstreamID == e.UpstreamID && e.UpstreamID != "" {
-			m = candidate
-		}
-	}
+	m := s.about(e)
 	reason, suppresses := store.SuppressionFor(e.Kind, e.Permanent, e.Code)
 	// A lifted suppression comes back only for an email sent after the lift.
 	since := func(sent time.Time) func(time.Time) bool {
@@ -57,10 +53,11 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 	}
 	if suppresses {
 		domain, address := store.SuppressionKey(m.Sender, m.Recipient)
-		s.suppress(store.Suppression{Domain: domain, Address: address, Reason: reason, MessageID: m.ID}, since(m.CreatedAt))
+		// A suppression names the email, not the row of one address.
+		s.suppress(store.Suppression{Domain: domain, Address: address, Reason: reason, MessageID: m.EmailID}, since(m.CreatedAt))
 		// One in force by an event that could name no message is given this one.
 		if row := s.suppressed[slot(domain, address)]; row.lifted == nil && row.Reason == reason && row.MessageID == "" {
-			row.MessageID = m.ID
+			row.MessageID = m.EmailID
 		}
 		// Whether the address is on the list now is kept with the event.
 		e.Suppressed = s.inForce(domain, address)
@@ -71,15 +68,18 @@ func (s *Store) RecordEvent(_ context.Context, e store.Event) (store.Recorded, e
 	to := m.State
 	if store.Moves(m.State, e.Kind, newer) {
 		to = store.StateOf[e.Kind]
-		if to == store.StateFailed {
-			for at, row := range s.idems {
-				if row.messageID == m.ID {
-					delete(s.idems, at)
-				}
+	}
+	s.setState(m.ID, to, "")
+	// An email that went to nobody is free to be tried again under its
+	// key; one that failed at some addresses is not: it would go twice
+	// to the others.
+	if !slices.ContainsFunc(s.rows(m.EmailID), func(id string) bool { return s.messages[id].State != store.StateFailed }) {
+		for at, row := range s.idems {
+			if row.messageID == m.EmailID {
+				delete(s.idems, at)
 			}
 		}
 	}
-	s.setState(m.ID, to, "")
 	return store.Kept, nil
 }
 
@@ -100,11 +100,37 @@ func (s *Store) Details(_ context.Context, messageID string, keep time.Duration)
 	out := map[string]string{}
 	for _, e := range s.events {
 		d, kept := s.details[e.ID]
-		if _, shown := d.shown(s.Now(), keep); kept && shown && e.MessageID == messageID {
+		if _, shown := d.shown(s.Now(), keep); kept && shown && s.messages[e.MessageID].EmailID == messageID {
 			out[e.ID] = string(d.raw)
 		}
 	}
 	return out, nil
+}
+
+// about is the row an event is about: of the address it names, or the
+// only one of an email that went to one address. None ("" id) for an
+// address the email did not go to, and for an event that names none
+// about an email to several: there is no telling whose it is.
+func (s *Store) about(e store.Event) store.Message {
+	var first store.Message
+	if e.UpstreamID == "" {
+		return first
+	}
+	for _, m := range s.messages {
+		if m.Driver != e.Driver || m.UpstreamID != e.UpstreamID {
+			continue
+		}
+		if e.Recipient != "" && store.FoldASCII(m.Recipient) == store.FoldASCII(e.Recipient) {
+			return m
+		}
+		if m.ID == m.EmailID {
+			first = m
+		}
+	}
+	if first.ID != "" && len(s.rows(first.EmailID)) > 1 {
+		return store.Message{}
+	}
+	return first
 }
 
 // EventsOf implements store.Events.
@@ -113,10 +139,38 @@ func (s *Store) EventsOf(_ context.Context, messageID string) ([]store.Event, er
 	defer s.mu.Unlock()
 	var out []store.Event
 	for _, e := range s.events {
-		if e.MessageID == messageID {
+		if m := s.messages[e.MessageID]; m.EmailID == messageID {
+			e.Recipient = m.Recipient
 			out = append(out, e)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
+	return out, nil
+}
+
+// EventsAfter implements store.Events: events are kept in the order
+// they were recorded, and none comes into view late, so there is
+// nothing to look back for.
+func (s *Store) EventsAfter(_ context.Context, after string, _ time.Duration, domain string, limit int) ([]store.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []store.Event
+	seen := after == ""
+	for _, e := range s.events {
+		m := s.messages[e.MessageID]
+		if seen && (domain == "" || store.DomainOf(m.Sender) == domain) {
+			e.Sender, e.Recipient, e.MessageID = m.Sender, m.Recipient, m.EmailID
+			out = append(out, e)
+		}
+		if e.ID == after {
+			seen = true
+		}
+	}
+	switch {
+	case after == "" && len(out) > limit:
+		out = out[len(out)-limit:]
+	case after != "" && len(out) > limit:
+		out = out[:limit]
+	}
 	return out, nil
 }

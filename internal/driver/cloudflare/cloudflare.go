@@ -61,6 +61,8 @@ type sender struct {
 type sendBody struct {
 	From    sender            `json:"from"`
 	To      []string          `json:"to"`
+	Cc      []string          `json:"cc,omitempty"`
+	Bcc     []string          `json:"bcc,omitempty"`
 	ReplyTo string            `json:"reply_to,omitempty"`
 	Subject string            `json:"subject"`
 	HTML    string            `json:"html,omitempty"`
@@ -80,7 +82,7 @@ type sendResult struct {
 // Send implements driver.Driver.
 func (d *Driver) Send(ctx context.Context, m driver.Message) (string, error) {
 	a, err := d.ask(ctx, http.MethodPost, "/email/sending/send", sendBody{
-		From: sender{Address: m.From, Name: m.FromName}, To: []string{m.To}, ReplyTo: m.ReplyTo,
+		From: sender{Address: m.From, Name: m.FromName}, To: m.To, Cc: m.Cc, Bcc: m.Bcc, ReplyTo: m.ReplyTo,
 		Subject: m.Subject, HTML: m.HTML, Text: m.Text, Headers: m.Headers,
 	})
 	if err != nil {

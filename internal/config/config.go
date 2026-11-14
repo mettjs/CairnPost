@@ -32,6 +32,10 @@ type Config struct {
 	// MaxBodyBytes is CAIRNPOST_MAX_BODY_BYTES: the largest request body
 	// accepted. Default 1 MiB.
 	MaxBodyBytes int64
+	// MaxRecipients is CAIRNPOST_MAX_RECIPIENTS: how many addresses one
+	// email may go to, counting "to", "cc" and "bcc". Default 50, which
+	// is what Cloudflare takes.
+	MaxRecipients int
 	// CaptureKeep is CAIRNPOST_CAPTURE_KEEP: how many emails the capture
 	// driver holds in memory. Default 100.
 	CaptureKeep int
@@ -180,6 +184,14 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.MaxBodyBytes, err = number(getenv, "CAIRNPOST_MAX_BODY_BYTES", 1<<20); err != nil {
 		return c, err
 	}
+	most, err := number(getenv, "CAIRNPOST_MAX_RECIPIENTS", 50)
+	if err != nil {
+		return c, err
+	}
+	if most < 1 || most > 1000 {
+		return c, fmt.Errorf("config: CAIRNPOST_MAX_RECIPIENTS must be between 1 and 1000 (got %d)", most)
+	}
+	c.MaxRecipients = int(most)
 	// A retry must not be let through while the first try can still be
 	// answered, and a key must outlive the wait for that answer.
 	if c.InDoubtWindow <= c.SendTimeout {

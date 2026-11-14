@@ -31,9 +31,9 @@
       <tbody>
       {{range .Data.Emails}}
       <tr>
-        <td data-label="To"><a href="{{$.Root}}/emails/{{.ID}}{{with $.Data.For}}?for={{.}}{{end}}">{{.Recipient}}</a></td>
+        <td data-label="To"><a href="{{$.Root}}/emails/{{.ID}}{{with $.Data.For}}?for={{.}}{{end}}">{{.Recipient}}</a>{{if gt (len .Recipients) 1}} <span class="by">and {{minus (len .Recipients) 1}} more</span>{{end}}</td>
         <td data-label="From" class="wrap">{{.Sender}}</td>
-        <td data-label="State"><span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{label .State}}</span></td>
+        <td data-label="State">{{if gt (len .Recipients) 1}}{{range outcomes .}}<span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{.N}} {{label .State}}</span> {{end}}{{else}}<span class="state state-{{tone .State}}">{{template "ico" (tone .State)}}{{label .State}}</span>{{end}}</td>
         <td data-label="Sent"><time datetime="{{stamp .CreatedAt}}">{{when $.Zone .CreatedAt}}</time></td>
       </tr>
       {{end}}

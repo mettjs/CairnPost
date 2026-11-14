@@ -25,8 +25,8 @@ func (db *DB) Start(ctx context.Context, s store.Start) (store.Claim, error) {
 		err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) (err error) {
 			if s.IdemKey == "" {
 				c = store.Claim{Outcome: store.Started}
-				if c.ID, err = insertMessage(ctx, tx, s); c.ID == "" {
-					c.Outcome = store.Suppressed
+				if c.ID, c.Recipients, c.Dropped, err = insertMessage(ctx, tx, s); c.ID == "" {
+					c = store.Claim{Outcome: store.Suppressed}
 				}
 				return err
 			}
@@ -75,7 +75,10 @@ func claim(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
 	case state == "done" && !bytes.Equal(fingerprint, s.Fingerprint):
 		return store.Claim{Outcome: store.Mismatch}, nil
 	case state == "done":
-		return store.Claim{Outcome: store.Replay, ID: messageID}, nil
+		// Who was left out the first time is said again.
+		c := store.Claim{Outcome: store.Replay, ID: messageID}
+		err := tx.QueryRow(ctx, `SELECT left_out FROM messages WHERE id = $1::uuid`, messageID).Scan(&c.Dropped)
+		return c, err
 	}
 	return store.Claim{Outcome: store.InFlight, RetryAfter: time.Duration(wait * float64(time.Second))}, nil
 }
@@ -83,7 +86,7 @@ func claim(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
 // takeOver gives a key to a new send. The message it pointed at, if its
 // answer never came, is recorded as unknown.
 //
-// If the recipient has been suppressed since, nothing is sent and the key
+// If every recipient has been suppressed since, nothing is sent and the key
 // is let go. When the earlier try was left in doubt, its message's id is
 // answered with the refusal: its email may have gone, and its caller
 // should be able to ask.
@@ -91,7 +94,7 @@ func takeOver(ctx context.Context, tx pgx.Tx, s store.Start, old string, inDoubt
 	if err := markUnknown(ctx, tx, true, old); err != nil {
 		return store.Claim{}, err
 	}
-	id, err := insertMessage(ctx, tx, s)
+	id, kept, dropped, err := insertMessage(ctx, tx, s)
 	if err != nil {
 		return store.Claim{}, err
 	}
@@ -107,13 +110,13 @@ func takeOver(ctx context.Context, tx pgx.Tx, s store.Start, old string, inDoubt
 		UPDATE idempotency_keys
 		SET fingerprint = $3, message_id = $4::uuid, state = 'in_flight', created_at = now(), tried_at = now()
 		WHERE api_key_id = $1::uuid AND key = $2`, s.KeyID, s.IdemKey, s.Fingerprint, id)
-	return store.Claim{Outcome: store.Started, ID: id}, err
+	return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}, err
 }
 
 // claimNew takes a key nobody holds. If another request takes it first, the
 // insert waits for that request to commit and then inserts nothing.
 func claimNew(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error) {
-	id, err := insertMessage(ctx, tx, s)
+	id, kept, dropped, err := insertMessage(ctx, tx, s)
 	if err != nil {
 		return store.Claim{}, err
 	}
@@ -130,5 +133,5 @@ func claimNew(ctx context.Context, tx pgx.Tx, s store.Start) (store.Claim, error
 	if tag.RowsAffected() == 0 {
 		return store.Claim{}, errLostRace // rolls back the message just inserted
 	}
-	return store.Claim{Outcome: store.Started, ID: id}, nil
+	return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}, nil
 }

@@ -18,7 +18,7 @@ func TestEmailsAreCountedByStateAndStayCounted(t *testing.T) {
 	s.Now = func() time.Time { return now }
 	send := func(from, up string) string {
 		t.Helper()
-		c, err := s.Start(ctx, store.Start{KeyID: "k", Sender: from, Recipient: "to-" + up + "@example.org", Driver: "test",
+		c, err := s.Start(ctx, store.Start{KeyID: "k", Sender: from, Recipients: store.To("to-" + up + "@example.org"), Driver: "test",
 			TTL: time.Hour, InDoubt: time.Minute})
 		if err != nil || c.Outcome != store.Started {
 			t.Fatalf("%v %v", c.Outcome, err)

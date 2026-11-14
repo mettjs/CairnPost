@@ -12,6 +12,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/driver"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
+	"github.com/mettjs/cairnpost/internal/metrics"
 	"github.com/mettjs/cairnpost/internal/suppress"
 	"github.com/mettjs/cairnpost/internal/webhook"
 )
@@ -40,6 +41,10 @@ type Deps struct {
 	// Pruning reports whether the last pass of the pruner finished; nil
 	// when nothing is pruned.
 	Pruning func() bool
+	// Requests counts what the API answers, and Gauges answers how the
+	// server stands in numbers, both for GET /metrics; nil for neither.
+	Requests *metrics.Requests
+	Gauges   func(ctx context.Context, domain string) []metrics.Sample
 	// Driver and Version are said by GET /health.
 	Driver, Version string
 	// MaxBodyBytes bounds a request body.
@@ -55,6 +60,7 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST /emails", a.auth(false, a.sendEmail))
 	mux.Handle("GET /emails/{id}", a.auth(false, a.getEmail))
 	mux.Handle("GET /limits", a.auth(false, a.limits))
+	mux.Handle("GET /metrics", a.auth(true, a.metrics))
 	mux.Handle("GET /suppressions", a.auth(true, a.listSuppressions))
 	mux.Handle("POST /suppressions", a.auth(true, a.addSuppression))
 	mux.Handle("POST /suppressions/lift", a.auth(true, a.liftSuppressions))
@@ -86,6 +92,9 @@ func unrouted(mux *http.ServeMux) http.Handler {
 			mux.ServeHTTP(w, r)
 			return
 		}
+		// No route of this API took it, whatever a mux in front of the
+		// API matched: the request is logged and counted as unrouted.
+		r.Pattern = ""
 		// The mux knows which of the two it is, and says so in plain
 		// text: its answer is read, not sent.
 		probe := &unsent{header: http.Header{}}
@@ -140,6 +149,9 @@ func (a *app) logged(next http.Handler) http.Handler {
 			}
 			a.Log.Info("api: request", "method", r.Method, "route", r.Pattern, "status", s.code,
 				"ms", time.Since(began).Milliseconds())
+			if a.Requests != nil {
+				a.Requests.Observe(r.Pattern, s.code, time.Since(began))
+			}
 		}()
 		next.ServeHTTP(s, r)
 	})

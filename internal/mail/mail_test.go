@@ -3,8 +3,10 @@ package mail_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +60,8 @@ func request(idem string) mail.Request {
 }
 
 func (r *rig) send(req mail.Request) (string, error) {
-	return r.svc.Send(context.Background(), r.key, "cp_presented", req)
+	sent, err := r.svc.Send(context.Background(), r.key, "cp_presented", req)
+	return sent.ID, err
 }
 
 func (r *rig) state(t *testing.T, id string) string {
@@ -159,7 +162,8 @@ func TestACallerHangingUpDoesNotCutTheSendShort(t *testing.T) {
 	r := newRig(t)
 	ctx, hangUp := context.WithCancel(context.Background())
 	hangUp()
-	id, err := r.svc.Send(ctx, r.key, "cp_presented", request("k"))
+	sent, err := r.svc.Send(ctx, r.key, "cp_presented", request("k"))
+	id := sent.ID
 	if err != nil || r.drv.ctxErr != nil || r.state(t, id) != store.StateSent {
 		t.Fatalf("err %v, the driver's context: %v", err, r.drv.ctxErr)
 	}
@@ -172,7 +176,7 @@ func TestTheDriverGetsBareAddressesAndTheNameApart(t *testing.T) {
 	if _, err := r.send(req); err != nil {
 		t.Fatal(err)
 	}
-	if m := r.drv.last; m.From != "app@example.com" || m.FromName != "José Pérez" || m.To != `"a b"@example.org` {
+	if m := r.drv.last; m.From != "app@example.com" || m.FromName != "José Pérez" || len(m.To) != 1 || m.To[0] != `"a b"@example.org` {
 		t.Fatalf("the driver was handed %+v", m)
 	}
 }
@@ -244,7 +248,9 @@ func TestAKeyBoundToADomainSendsOnlyFromIt(t *testing.T) {
 func TestRequestsThatCanNeverBeSent(t *testing.T) {
 	cases := map[string]func(*mail.Request){
 		"from":            func(r *mail.Request) { r.From = "not an address" },
-		"to":              func(r *mail.Request) { r.To = []string{"a@example.org", "b@example.org"} },
+		"to":              func(r *mail.Request) { r.To = nil; r.Cc = []string{"a@example.org"} },
+		"cc":              func(r *mail.Request) { r.Cc = []string{"Ana <ANA@example.org>"} },
+		"bcc":             func(r *mail.Request) { r.Bcc = []string{"not an address"} },
 		"reply_to":        func(r *mail.Request) { r.ReplyTo = "nope" },
 		"subject":         func(r *mail.Request) { r.Subject = "two\nlines" },
 		"html":            func(r *mail.Request) { r.Text = "" },
@@ -321,5 +327,97 @@ func TestAnAddressHasALongestLength(t *testing.T) {
 	}
 	if _, err := mail.Recipient(long); err == nil {
 		t.Fatal("an address too long to be one is looked for")
+	}
+}
+
+// An email goes to every address of "to", "cc" and "bcc": one email, one
+// id, and each address with its own outcome.
+func TestAnEmailGoesToSeveralAddresses(t *testing.T) {
+	r := newRig(t)
+	req := request("k")
+	req.To, req.Cc, req.Bcc = []string{"Ana <ana@example.org>", "bo@example.org"}, []string{"cy@example.org"}, []string{"di@example.org"}
+	id, err := r.send(req)
+	if err != nil || r.drv.sends != 1 {
+		t.Fatalf("%v, %d sends", err, r.drv.sends)
+	}
+	if m := r.drv.last; !slices.Equal(m.To, []string{"ana@example.org", "bo@example.org"}) || !slices.Equal(m.Cc, []string{"cy@example.org"}) ||
+		!slices.Equal(m.Bcc, []string{"di@example.org"}) {
+		t.Fatalf("the driver was handed %+v", m)
+	}
+	m, err := r.store.Message(context.Background(), id)
+	if err != nil || m.Recipient != "ana@example.org" || len(m.Recipients) != 4 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	for i, want := range []store.Recipient{{Address: "ana@example.org", Kind: store.KindTo}, {Address: "bo@example.org", Kind: store.KindTo},
+		{Address: "cy@example.org", Kind: store.KindCc}, {Address: "di@example.org", Kind: store.KindBcc}} {
+		if got := m.Recipients[i]; got.Address != want.Address || got.Kind != want.Kind || got.State != store.StateSent {
+			t.Errorf("address %d: %+v", i, got)
+		}
+	}
+	// The same request again is the same email; with another address it
+	// is a different one, and the key says so.
+	if again, err := r.send(req); err != nil || again != id || r.drv.sends != 1 {
+		t.Fatalf("a repeat: %q %v, %d sends", again, err, r.drv.sends)
+	}
+	req.Bcc = []string{"ed@example.org"}
+	if _, err := r.send(req); !errors.Is(err, mail.ErrMismatch) {
+		t.Fatalf("with another address under the same key: %v", err)
+	}
+	// More than the most there may be is refused, counted over all three.
+	crowd := request("")
+	for i := range 30 {
+		crowd.Cc = append(crowd.Cc, fmt.Sprintf("c%d@example.org", i))
+		crowd.Bcc = append(crowd.Bcc, fmt.Sprintf("b%d@example.org", i))
+	}
+	var invalid *mail.Invalid
+	if _, err := r.send(crowd); !errors.As(err, &invalid) || !strings.Contains(invalid.Reason, "at most 50 addresses") {
+		t.Fatalf("61 addresses: %v", err)
+	}
+}
+
+// A suppressed address is left out and named; the email goes to the
+// others. Left with nobody in "to", someone takes that place. With
+// every address suppressed nothing is sent.
+func TestASuppressedAddressAmongSeveralIsLeftOut(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	for _, gone := range []string{"ana@example.org", "di@example.org"} {
+		if _, err := r.store.Suppress(ctx, store.Suppression{Domain: "example.com", Address: gone, Reason: store.ReasonManual}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := request("")
+	req.To, req.Cc, req.Bcc = []string{"ANA@example.org"}, []string{"cy@example.org", "bo@example.org"}, []string{"di@example.org"}
+	sent, err := r.svc.Send(ctx, r.key, "cp_presented", req)
+	if err != nil || !slices.Equal(sent.Suppressed, []string{"ANA@example.org", "di@example.org"}) {
+		t.Fatalf("%+v %v", sent, err)
+	}
+	if m := r.drv.last; !slices.Equal(m.To, []string{"cy@example.org"}) || !slices.Equal(m.Cc, []string{"bo@example.org"}) || len(m.Bcc) != 0 {
+		t.Fatalf("the driver was handed %+v", m)
+	}
+	// The copy that took the place of "to" is kept as "to", and who was
+	// left out is kept with the email.
+	m, _ := r.store.Message(ctx, sent.ID)
+	if m.Recipient != "cy@example.org" || m.Kind != store.KindTo || len(m.Recipients) != 2 ||
+		!slices.Equal(m.LeftOut, []string{"ANA@example.org", "di@example.org"}) {
+		t.Fatalf("what is kept: %+v", m)
+	}
+	req.To, req.Cc = []string{"ana@example.org"}, nil
+	if _, err := r.svc.Send(ctx, r.key, "cp_presented", req); !errors.Is(err, mail.ErrSuppressed) || r.drv.sends != 1 {
+		t.Fatalf("with every address suppressed: %v, %d sends", err, r.drv.sends)
+	}
+	// A hidden copy never takes the place of "to": the other hidden ones
+	// would see it. With nobody left in the open, nothing is sent.
+	req.Bcc = []string{"b1@example.org", "b2@example.org"}
+	if _, err := r.svc.Send(ctx, r.key, "cp_presented", req); !errors.Is(err, mail.ErrSuppressed) || r.drv.sends != 1 {
+		t.Fatalf("with hidden copies alone left: %v, %d sends", err, r.drv.sends)
+	}
+	// The same request again, under its key, says again who was left out.
+	keyed := request("k-left-out")
+	keyed.To = []string{"bo@example.org", "ana@example.org"}
+	first, err := r.svc.Send(ctx, r.key, "cp_presented", keyed)
+	again, err2 := r.svc.Send(ctx, r.key, "cp_presented", keyed)
+	if err != nil || err2 != nil || again.ID != first.ID || r.drv.sends != 2 || !slices.Equal(again.Suppressed, []string{"ana@example.org"}) {
+		t.Fatalf("a replay: %+v %+v %v %v, %d sends", first, again, err, err2, r.drv.sends)
 	}
 }

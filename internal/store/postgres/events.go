@@ -19,16 +19,26 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		// events about one email are applied one after the other.
 		var (
 			messageID, state  string
+			emailID           string
 			sender, recipient string
 			sentAt            time.Time
 			newer             bool
 		)
 		reason, suppresses := store.SuppressionFor(e.Kind, e.Permanent, e.Code)
+		// An email to several addresses has a row for each, all under the
+		// upstream's one id: the event is about the address it names. One
+		// that names an address the email was not sent to is about no
+		// row, and so is one that names none, unless the email went to
+		// one address: there is no telling whose it is, and it must not
+		// suppress the wrong one.
 		err := tx.QueryRow(ctx, `
-			SELECT m.id::text, m.state, m.sender, m.recipient, m.created_at,
+			SELECT m.id::text, m.email_id::text, m.state, m.sender, m.recipient, m.created_at,
 			       NOT EXISTS (SELECT 1 FROM events e WHERE e.message_id = m.id AND e.kind = m.state AND e.occurred_at >= $3)
-			FROM messages m WHERE m.driver = $1 AND m.upstream_id = $2 FOR UPDATE OF m`,
-			e.Driver, e.UpstreamID, e.At).Scan(&messageID, &state, &sender, &recipient, &sentAt, &newer)
+			FROM messages m WHERE m.driver = $1 AND m.upstream_id = $2
+			  AND (lower(m.recipient COLLATE "C") = lower($4 COLLATE "C")
+			       OR NOT EXISTS (SELECT 1 FROM messages o WHERE o.email_id = m.email_id AND o.id <> m.id))
+			ORDER BY (lower(m.recipient COLLATE "C") = lower($4 COLLATE "C")) DESC, m.id LIMIT 1 FOR UPDATE OF m`,
+			e.Driver, e.UpstreamID, e.At, e.Recipient).Scan(&messageID, &emailID, &state, &sender, &recipient, &sentAt, &newer)
 		if errors.Is(err, pgx.ErrNoRows) {
 			outcome = store.NoMessage
 			// The email has no record here: its send's answer was lost, or
@@ -75,8 +85,9 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		// A bounce for good, or a complaint, suppresses the address for the
 		// domain that sent, in the same step as the event that says so.
 		if suppresses {
+			// The suppression names the email, not the row of one address.
 			domain, address := store.SuppressionKey(sender, recipient)
-			if err := suppressByEvent(ctx, tx, domain, address, reason, messageID, sentAt); err != nil {
+			if err := suppressByEvent(ctx, tx, domain, address, reason, emailID, sentAt); err != nil {
 				return err
 			}
 			// Whether the address is on the list now is kept with the
@@ -95,14 +106,15 @@ func (db *DB) RecordEvent(ctx context.Context, e store.Event) (store.Recorded, e
 		if moves {
 			to = store.StateOf[e.Kind]
 		}
-		if moves && to == store.StateFailed {
-			// The email never went: its key is free for a retry, as after
-			// a refusal at send.
-			if _, err := tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE message_id = $1::uuid`, messageID); err != nil {
-				return err
-			}
+		if _, err = tx.Exec(ctx, `UPDATE messages SET state = $2, updated_at = now() WHERE id = $1::uuid`, messageID, to); err != nil || !moves || to != store.StateFailed {
+			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE messages SET state = $2, updated_at = now() WHERE id = $1::uuid`, messageID, to)
+		// An email that went to nobody is free to be tried again under
+		// its key, as after a refusal at send. One that failed at some
+		// addresses is not: it would go twice to the others.
+		_, err = tx.Exec(ctx, `
+			DELETE FROM idempotency_keys WHERE message_id = $1::uuid
+			  AND NOT EXISTS (SELECT 1 FROM messages WHERE email_id = $1::uuid AND state <> 'failed')`, emailID)
 		return err
 	})
 	if err != nil {
@@ -135,7 +147,7 @@ func (db *DB) Record(ctx context.Context, messageID string) (store.Message, []st
 	)
 	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
 		func(tx pgx.Tx) (err error) {
-			if m, err = message(ctx, tx, messageID); err != nil {
+			if m, err = email(ctx, tx, messageID); err != nil {
 				return err
 			}
 			events, err = eventsOf(ctx, tx, messageID)
@@ -159,7 +171,7 @@ func (db *DB) Details(ctx context.Context, messageID string, keep time.Duration)
 	rows, err := db.pool.Query(ctx, `
 		SELECT d.event_id::text, d.detail FROM event_details d
 		JOIN events e ON e.id = d.event_id JOIN messages m ON m.id = e.message_id
-		WHERE e.message_id = $1::uuid AND d.expires_at > now()
+		WHERE m.email_id = $1::uuid AND d.expires_at > now()
 		  AND m.created_at > now() - make_interval(secs => $2)`, messageID, keep.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("postgres: read a message's event details: %w", err)
@@ -182,16 +194,17 @@ type querier interface {
 
 func eventsOf(ctx context.Context, q querier, messageID string) ([]store.Event, error) {
 	rows, err := q.Query(ctx, `
-		SELECT id::text, message_id::text, driver, upstream_event_id, kind, permanent,
-		       coalesce(code, ''), coalesce(reason, ''), occurred_at
-		FROM events WHERE message_id = $1::uuid ORDER BY occurred_at, id`, messageID)
+		SELECT e.id::text, e.message_id::text, e.driver, e.upstream_event_id, e.kind, e.permanent,
+		       coalesce(e.code, ''), coalesce(e.reason, ''), e.occurred_at, m.recipient
+		FROM events e JOIN messages m ON m.id = e.message_id
+		WHERE m.email_id = $1::uuid ORDER BY e.occurred_at, e.id`, messageID)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (store.Event, error) {
 		var e store.Event
 		err := row.Scan(&e.ID, &e.MessageID, &e.Driver, &e.UpstreamEventID, &e.Kind, &e.Permanent,
-			&e.Code, &e.Reason, &e.At)
+			&e.Code, &e.Reason, &e.At, &e.Recipient)
 		return e, err
 	})
 }

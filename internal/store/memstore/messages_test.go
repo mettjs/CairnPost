@@ -13,7 +13,7 @@ import (
 // else.
 func TestARecipientIsMatchedWithAToZFolded(t *testing.T) {
 	ctx, s := context.Background(), memstore.New()
-	_, err := s.Start(ctx, store.Start{KeyID: "k", Sender: "app@example.com", Recipient: "\u00c4na@Example.org", Driver: "test",
+	_, err := s.Start(ctx, store.Start{KeyID: "k", Sender: "app@example.com", Recipients: store.To("\u00c4na@Example.org"), Driver: "test",
 		TTL: time.Hour, InDoubt: time.Minute})
 	if err != nil {
 		t.Fatal(err)

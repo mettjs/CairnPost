@@ -135,22 +135,56 @@ func (s *Store) Message(_ context.Context, id string) (store.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m, ok := s.messages[id]
-	if !ok {
+	if !ok || m.EmailID != id {
 		return store.Message{}, store.ErrNotFound
 	}
-	return m, nil
+	return s.email(m), nil
 }
 
-func (s *Store) newMessage(st store.Start) string {
-	now := s.Now()
-	m := store.Message{ID: s.next("msg"), KeyID: st.KeyID, Sender: st.Sender, Recipient: st.Recipient,
-		Driver: st.Driver, State: store.StateSending, CreatedAt: now, UpdatedAt: now}
-	s.messages[m.ID] = m
-	s.count(m, "", m.State)
-	if st.Content != nil {
-		s.contents[m.ID] = content{raw: bytes.Clone(st.Content()), sent: now, expires: now.Add(st.KeepContent)}
+// rows are the ids of an email's rows, a row for each address, in the
+// order the addresses were given: ids are made in order.
+func (s *Store) rows(email string) []string {
+	var ids []string
+	for id, m := range s.messages {
+		if m.EmailID == email {
+			ids = append(ids, id)
+		}
 	}
-	return m.ID
+	slices.Sort(ids)
+	return ids
+}
+
+// email is an email's first row with every address of it.
+func (s *Store) email(m store.Message) store.Message {
+	for _, id := range s.rows(m.EmailID) {
+		r := s.messages[id]
+		m.Recipients = append(m.Recipients, store.Recipient{Address: r.Recipient, Kind: r.Kind, State: r.State, UpdatedAt: r.UpdatedAt})
+	}
+	return m
+}
+
+// newMessage records an email as sending, a row for each address it
+// goes to (store.Addressed), and answers its id, those addresses and
+// the ones left out; "" when nobody is left.
+func (s *Store) newMessage(st store.Start) (string, []store.Addressee, []string) {
+	now, email := s.Now(), ""
+	kept, dropped := store.Addressed(st.Recipients, func(a store.Addressee) bool {
+		return s.inForce(store.SuppressionKey(st.Sender, a.Address))
+	})
+	for _, r := range kept {
+		m := store.Message{ID: s.next("msg"), KeyID: st.KeyID, Sender: st.Sender, Recipient: r.Address, Kind: r.Kind,
+			Driver: st.Driver, State: store.StateSending, CreatedAt: now, UpdatedAt: now}
+		if email == "" {
+			email, m.LeftOut = m.ID, dropped
+		}
+		m.EmailID = email
+		s.messages[m.ID] = m
+		s.count(m, "", m.State)
+	}
+	if email != "" && st.Content != nil {
+		s.contents[email] = content{raw: bytes.Clone(st.Content()), sent: now, expires: now.Add(st.KeepContent)}
+	}
+	return email, kept, dropped
 }
 
 // content is words kept: an email's, or a receiving server's about it.
@@ -182,6 +216,7 @@ func (s *Store) Content(_ context.Context, id string, keep time.Duration) ([]byt
 	return bytes.Clone(c.raw), until, nil
 }
 
+// setState moves one address's row.
 func (s *Store) setState(id, state, upstreamID string) {
 	m, kept := s.messages[id]
 	if !kept {
@@ -195,15 +230,25 @@ func (s *Store) setState(id, state, upstreamID string) {
 	s.messages[id] = m
 }
 
+// settle moves every address of an email: what the upstream answered a
+// send is the same for all of them. only, if set, is the state a row
+// must be in to be moved.
+func (s *Store) settle(email, state, upstreamID, only string) {
+	for _, id := range s.rows(email) {
+		if only == "" || s.messages[id].State == only {
+			s.setState(id, state, upstreamID)
+		}
+	}
+}
+
 // Start implements store.Mail.
 func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Only a send that would start is refused: a request already sent is
 	// still replayed.
-	suppressed := s.inForce(store.SuppressionKey(st.Sender, st.Recipient))
 	if st.IdemKey == "" {
-		return s.start(st, suppressed), nil
+		return s.start(st), nil
 	}
 	slot, now := st.KeyID+"\x00"+st.IdemKey, s.Now()
 	row, held := s.idems[slot]
@@ -215,13 +260,13 @@ func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 		// try's answer never came: this request sends, and the key's life
 		// starts again from now.
 		old := ""
-		if held && s.messages[row.messageID].State == store.StateSending {
-			s.setState(row.messageID, store.StateUnknown, "")
+		if held {
+			s.settle(row.messageID, store.StateUnknown, "", store.StateSending)
 		}
 		if held && !row.done {
 			old = row.messageID
 		}
-		c := s.start(st, suppressed)
+		c := s.start(st)
 		if c.Outcome == store.Suppressed {
 			delete(s.idems, slot)
 			c.ID = old
@@ -232,26 +277,27 @@ func (s *Store) Start(_ context.Context, st store.Start) (store.Claim, error) {
 	case row.done && !bytes.Equal(row.fingerprint, st.Fingerprint):
 		return store.Claim{Outcome: store.Mismatch}, nil
 	case row.done:
-		return store.Claim{Outcome: store.Replay, ID: row.messageID}, nil
+		// Who was left out the first time is said again.
+		return store.Claim{Outcome: store.Replay, ID: row.messageID, Dropped: s.messages[row.messageID].LeftOut}, nil
 	}
 	return store.Claim{Outcome: store.InFlight, RetryAfter: row.tried.Add(st.InDoubt).Sub(now)}, nil
 }
 
-// start records a message as sending, unless its recipient is suppressed.
-func (s *Store) start(st store.Start, suppressed bool) store.Claim {
-	if suppressed {
+// start records an email as sending, unless every address of it is
+// suppressed.
+func (s *Store) start(st store.Start) store.Claim {
+	id, kept, dropped := s.newMessage(st)
+	if id == "" {
 		return store.Claim{Outcome: store.Suppressed}
 	}
-	return store.Claim{Outcome: store.Started, ID: s.newMessage(st)}
+	return store.Claim{Outcome: store.Started, ID: id, Recipients: kept, Dropped: dropped}
 }
 
 // Lost implements store.Mail.
 func (s *Store) Lost(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.messages[id].State == store.StateSending {
-		s.setState(id, store.StateUnknown, "")
-	}
+	s.settle(id, store.StateUnknown, "", store.StateSending)
 	return nil
 }
 
@@ -259,7 +305,7 @@ func (s *Store) Lost(_ context.Context, id string) error {
 func (s *Store) Sent(_ context.Context, id, upstreamID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.setState(id, store.StateSent, upstreamID)
+	s.settle(id, store.StateSent, upstreamID, "")
 	for _, row := range s.idems {
 		if row.messageID == id {
 			row.done = true
@@ -272,7 +318,7 @@ func (s *Store) Sent(_ context.Context, id, upstreamID string) error {
 func (s *Store) Failed(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.setState(id, store.StateFailed, "")
+	s.settle(id, store.StateFailed, "", "")
 	for at, row := range s.idems {
 		if row.messageID == id {
 			delete(s.idems, at)

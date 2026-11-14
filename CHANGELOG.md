@@ -8,8 +8,14 @@ Every change a user of CairnPost can notice is written here. The format is
 
 ### Added
 
-- `POST /emails`: send one email to one recipient with an API key. A request
-  with an `Idempotency-Key` repeated with the same content is one email.
+- `POST /emails`: send one email with an API key. A request with an
+  `Idempotency-Key` repeated with the same content is one email.
+- Several addresses: `to`, `cc` and `bcc` take one address or a list (50 in
+  all, `CAIRNPOST_MAX_RECIPIENTS`). It is one email with one id, and
+  `GET /emails/{id}` says under `recipients` what became of it at each
+  address. A suppressed address among them is left out and named under
+  `suppressed`, in the answer and in `GET /emails/{id}`; the email is
+  refused when nobody in `to` or `cc` is left.
 - `GET /emails/{id}`: what became of an email (`sending`, `sent`, `deferred`,
   `delivered`, `bounced`, `complained`, `failed`, `unknown`) and each event
   that happened to it.
@@ -83,6 +89,11 @@ Every change a user of CairnPost can notice is written here. The format is
 - The console's pages are in parts, each with its own address: the list
   of a page first, its forms a tab away. A list is narrowed to a state by
   links above it.
+- `GET /metrics`: the server's numbers for Prometheus, with an admin key:
+  requests by route and status and how long they took, the last day's
+  emails by state, webhook endpoints by how they stand, the provider's
+  allowance, and whether each part of the server is working.
+- `cairnpost tail` shows what becomes of emails as it is recorded.
 - The console lists the emails on record, newest first, narrowed to a
   state or a recipient, and shows what happened to each and, where content
   is kept, what it said. A recipient looked for is never in a page's
