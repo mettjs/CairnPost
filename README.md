@@ -414,13 +414,11 @@ measured against the live service:
 - A wrong token or account id is never the email's fault: sends answer 503,
   nothing is dropped, and the server's log names Cloudflare's status.
 
-Not measured, but read from Cloudflare's documentation: sending files. It
-says a whole email may be 25 MiB, files included and counted as they
-travel, in base64, a third larger than the files are: keep
-`CAIRNPOST_MAX_ATTACHMENT_BYTES` under about 18 MiB. A file with a
-`content_id` is refused before anything is sent (422 `validation_error`):
-how the send call takes a file the HTML shows is not documented, and a
-wrong guess would send emails with their pictures missing.
+Files were measured to be taken, beside the email and shown in its HTML
+by a `content_id`; how large they may be is read from Cloudflare's
+documentation only. It says a whole email may be 25 MiB, files included
+and counted as they travel, in base64, a third larger than the files
+are: keep `CAIRNPOST_MAX_ATTACHMENT_BYTES` under about 18 MiB.
 
 Not measured either: what Cloudflare answers once the day's allowance is spent.
 So CairnPost does not depend on it: when a send is refused it asks

@@ -2,15 +2,14 @@ package cloudflare
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/mettjs/cairnpost/internal/driver"
 )
 
 // A file goes to Cloudflare in base64 with its name and type, as a
-// file beside the email. One the HTML shows is refused, and nothing is
-// asked of Cloudflare: its field for that is not known.
+// file beside the email; one the HTML shows goes as part of it, under
+// its content id.
 func TestAttachmentsGoAsCloudflareTakesThem(t *testing.T) {
 	s := &stand{status: 200, body: taken}
 	d := s.serve(t)
@@ -22,12 +21,16 @@ func TestAttachmentsGoAsCloudflareTakesThem(t *testing.T) {
 	files, _ := s.request["attachments"].([]any)
 	one, _ := files[0].(map[string]any)
 	if len(files) != 1 || one["filename"] != "invoice.pdf" || one["type"] != "application/pdf" ||
-		one["disposition"] != "attachment" || one["content"] != "JVBERi0x" {
+		one["disposition"] != "attachment" || one["content"] != "JVBERi0x" || one["content_id"] != nil {
 		t.Fatalf("the request's files: %v", files)
 	}
 	m.Attachments[0].ContentID = "logo"
-	if _, err := d.Send(context.Background(), m); !errors.Is(err, driver.ErrRejected) || s.sends != 1 {
-		t.Fatalf("a file the html shows: %v, %d sends", err, s.sends)
+	if _, err := d.Send(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	files, _ = s.request["attachments"].([]any)
+	if one, _ = files[0].(map[string]any); one["disposition"] != "inline" || one["content_id"] != "logo" {
+		t.Fatalf("a file the html shows: %v", one)
 	}
 	// With no files, the field is not sent.
 	if _, err := d.Send(context.Background(), message); err != nil {
