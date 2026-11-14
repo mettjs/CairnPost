@@ -96,8 +96,12 @@ func (s *Service) SendBatch(ctx context.Context, key store.Key, presented, idem 
 				}
 				out[i] = s.one(ctx, key, presented, batchKey(idem, i), ready[i])
 				var throttled *driver.Throttled
-				if errors.As(out[i].Err, &throttled) || errors.Is(out[i].Err, errBroke) {
+				switch {
+				case errors.As(out[i].Err, &throttled):
 					run.halt(out[i].Err)
+				case errors.Is(out[i].Err, errBroke):
+					// The others were never begun: nothing of them went.
+					run.halt(ErrNotStarted)
 				}
 			}
 		})
