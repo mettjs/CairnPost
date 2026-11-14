@@ -19,6 +19,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
+	"github.com/mettjs/cairnpost/internal/stats"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
 	"github.com/mettjs/cairnpost/internal/suppress"
@@ -69,7 +70,7 @@ func newRigOn(t *testing.T, adjust func(*rig, *console.Deps)) *rig {
 		slog.New(slog.NewTextHandler(&r.logged, nil)))
 	d := console.Deps{Keys: r.ks, Mail: r.mail, Suppress: suppress.New(r.s),
 		Webhooks: webhook.NewService(r.s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, 24*time.Hour, time.Now), Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
-		EventsOff: "Not read.", Log: slog.New(slog.NewTextHandler(&r.logged, nil))}
+		EventsOff: "Not read.", Stats: stats.New(r.s, 5), Log: slog.New(slog.NewTextHandler(&r.logged, nil))}
 	d.Domains = domains.New(r.s, &dnscheck.Checker{Resolver: resolver{r}, Timeout: time.Second}, "cloudflare", cloudflare.Records)
 	adjust(r, &d)
 	r.h = console.New(d)

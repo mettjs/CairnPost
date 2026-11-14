@@ -9,7 +9,7 @@ func (c *console) routes() *http.ServeMux {
 	mux.HandleFunc("GET "+Root+"/signin", c.signinPage)
 	mux.HandleFunc("POST "+Root+"/signin", c.signin)
 	mux.Handle("POST "+Root+"/signout", c.signed(c.signout))
-	mux.Handle("GET "+Root+"/{$}", c.signed(c.overview))
+	mux.Handle("GET "+Root+"/{$}", c.signed(c.overviewPage))
 	mux.Handle("GET "+Root+"/emails", c.signed(c.emailsPage))
 	mux.Handle("POST "+Root+"/emails/find", c.signed(c.findEmails))
 	// A refused search leaves this address in the browser: asked for

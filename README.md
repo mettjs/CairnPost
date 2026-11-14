@@ -12,8 +12,8 @@ Go, backed by Postgres.
 **Status: early.** It sends through Cloudflare Email Sending, reads what
 became of each email, and stops sending to addresses that bounce for good
 or complain, tells your application by signed webhooks, and deletes old
-records on a schedule. A console comes next. The [changelog](CHANGELOG.md) says what
-exists.
+records on a schedule, and comes with a console to watch and manage it.
+The [changelog](CHANGELOG.md) says what exists.
 
 ## What it is, and is not
 
@@ -30,8 +30,8 @@ exists.
 - It is for transactional email: it does not send newsletters or manage
   audiences.
 - It comes with a small console, served by the same binary at `/console`:
-  sign in with an admin key to see how the server is doing and manage its
-  API keys. More pages are being added.
+  sign in with an admin key to see how much was sent and what became of
+  it, and to manage emails, suppressions, webhooks, domains and API keys.
 - It leans on Go's standard library. Its one direct dependency is the
   Postgres driver, [pgx](https://github.com/jackc/pgx).
 
@@ -330,11 +330,27 @@ them at `GET /capture/emails`: for development and tests.
 ## Console
 
 The console is at `/console` on the same address as the API. Sign in with
-an admin key; a key that may only send is refused. It shows whether each
-part of the server is working, lists the emails on record and what became
-of each, manages the suppression list and the webhook endpoints, checks
-each sending domain's DNS, and lists, makes and revokes API keys. A new key is shown once,
+an admin key; a key that may only send is refused. Its first page shows
+how much was sent over the last 24 hours, 7 days or 30 days and what became
+of it; the others list the emails on record and what became of each,
+manage the suppression list and the webhook endpoints, check each sending
+domain's DNS, and list, make and revoke API keys. A new key is shown once,
 on the page that made it.
+
+- The first page counts an email in the hour or day it was sent (UTC),
+  whenever its outcome came, and compares the period, up to its last
+  whole hour, with the same stretch one period earlier. Emails the mail
+  provider refused, or gave no answer about, are said apart.
+  "Sent" is what the mail provider took; "delivered" includes emails
+  marked as spam after they arrived. The numbers come from the send
+  counts, so they reach back 30 days whatever `CAIRNPOST_RETENTION` is.
+  Where delivery events are not read, outcomes are said to be not known.
+- A sending domain is marked there when `CAIRNPOST_BOUNCE_WARN` percent
+  (5) or more of its emails in the period bounced, once it sent at least
+  50: fewer are not a rate. The page also shows the mail provider's
+  allowance, asked for at most once a minute, the webhook endpoints that
+  are failing or paused, and whether each part of the server is working,
+  which every page says in one line at the top.
 
 - A sign-in lasts `CAIRNPOST_CONSOLE_SESSION` (12 hours), ends when you
   sign out, and ends at once if the key is revoked. Make the setting
@@ -449,6 +465,7 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_DNS_SERVER` | the system's | The one DNS server those checks ask, as an IP address with or without a port (`1.1.1.1`). Set it where the machine's own resolver does not answer as the public internet does: a home router that makes up answers, or one that is silent about names that do not exist. |
 | `CAIRNPOST_CONSOLE` | `on` | Serve the console at `/console`. `off` leaves it out. |
 | `CAIRNPOST_CONSOLE_SESSION` | `12h` | How long a sign-in to the console lasts: a minute at least, 30 days at most. |
+| `CAIRNPOST_BOUNCE_WARN` | `5` | The share of a sending domain's emails, in percent, that bounced at which the console's first page marks the domain. `off` marks none. |
 | `CAIRNPOST_CONSOLE_PLAIN_HTTP` | `off` | Let the console's session cookie travel without TLS, for a console opened over plain http in development. |
 | `CAIRNPOST_MAX_KEYS` | `200` | How many keys that are not revoked one sending domain may have, and how many the keys bound to no domain may be. |
 | `CAIRNPOST_WEBHOOK_TIMEOUT` | `10s` | The most one try at delivering a webhook may take. |

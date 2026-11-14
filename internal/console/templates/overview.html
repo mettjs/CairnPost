@@ -1,19 +1,140 @@
 {{define "title"}}Overview{{end}}
 {{define "main"}}
-<h1>Overview</h1>
-<p class="lede">What this server is doing right now.</p>
-<dl class="parts">
-  {{range .Data.Parts}}
-  <div class="part">
-    <dt>{{.Name}}</dt>
-    <dd><span class="state state-{{.State}}">{{if eq .State "ok"}}Working{{else if eq .State "failing"}}Failing{{else}}Off{{end}}</span> {{.Says}}</dd>
+<div class="head">
+  <div>
+    <h1>Overview</h1>
+    <p class="lede">What this server sent, and what became of it.{{if .Who.Domain}} You are signed in with a key that manages <code>{{.Who.Domain}}</code>, so these are that domain's numbers.{{end}}</p>
   </div>
-  {{end}}
-</dl>
-<h2>This server</h2>
-<dl class="facts">
-  <div><dt>Mail provider</dt><dd><code>{{.Data.Driver}}</code></dd></div>
-  <div><dt>Version</dt><dd><code>{{.Version}}</code></dd></div>
-  <div><dt>Signed in as</dt><dd>{{.Who.Name}} <code>{{.Who.Prefix}}</code>{{if .Who.Domain}}, managing <code>{{.Who.Domain}}</code> only{{end}}</dd></div>
-</dl>
+  <nav class="switch" aria-label="Period">
+    {{range .Data.Periods}}<a href="{{$.Root}}/?period={{.Key}}" {{if eq .Key $.Data.Period.Key}}aria-current="true"{{end}}>{{.Name}}</a>{{end}}
+  </nav>
+</div>
+
+{{if or .Data.Failed .Data.Unanswered}}
+<p class="problem unsent" role="status">
+  {{if .Data.Failed}}<span class="state state-failing">{{template "ico" "failing"}}{{.Data.Failed}} not sent.</span> The mail provider refused them or could not send them. <a href="{{.Root}}/emails?state=failed">See them</a>{{end}}
+  {{if .Data.Unanswered}}{{if .Data.Failed}}<br>{{end}}{{.Data.Unanswered}} with no answer from the mail provider: under way, or never answered. <a href="{{.Root}}/emails?state=unknown">See those never answered</a>{{end}}
+</p>
 {{end}}
+
+<div class="board">
+  {{if .Data.Unread}}
+  <p class="problem" role="alert">The numbers could not be read. Reload the page to try again.</p>
+  {{else}}
+  <dl class="kpis">
+    {{range .Data.Figures}}
+    <div class="kpi kpi-{{.Key}}">
+      <dt>{{.Label}}</dt>
+      <dd><span class="value{{if .Unknown}} none{{end}}">{{.Value}}</span>
+        <span class="sub">{{if eq .Trend "up"}}<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 9l4-5 4 5z"/></svg>{{else if eq .Trend "down"}}<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 3l4 5 4-5z"/></svg>{{end}}{{.Sub}}</span></dd>
+    </div>
+    {{end}}
+  </dl>
+
+  <section class="sent" aria-labelledby="sent">
+    <h2 id="sent">Sent</h2>
+    {{if .Data.Quiet}}
+    <p class="empty">Nothing was sent in the last {{.Data.Period.Name}}. An email shows here as soon as one is.</p>
+    {{else}}
+    <div class="plot">{{template "chart" .Data.Sent}}</div>
+    <details class="astable">
+      <summary>Show the numbers as a table</summary>
+      <div class="scroll" tabindex="0" role="region" aria-label="The numbers as a table">
+        <table class="num">
+          <thead><tr><th scope="col">Sent in</th><th scope="col">Sent</th>{{if .Data.Outcomes}}<th scope="col">Delivered</th><th scope="col">Bounced</th><th scope="col">Marked as spam</th>{{end}}<th scope="col">Not sent</th></tr></thead>
+          <tbody>
+          {{range .Data.Steps}}<tr><td>{{.Name}}</td><td data-label="Sent">{{.Sent}}</td>{{if $.Data.Outcomes}}<td data-label="Delivered">{{.Delivered}}</td><td data-label="Bounced">{{.Bounced}}</td><td data-label="Marked as spam">{{.Complained}}</td>{{end}}<td data-label="Not sent">{{.Failed}}</td></tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    <p class="note">Hours and days are in UTC. An email is counted where it was sent, whenever its outcome came.</p>
+    {{end}}
+  </section>
+
+  {{if and .Data.Outcomes (not .Data.Quiet)}}
+  <section class="bad" aria-labelledby="bad">
+    <div class="panel-head">
+      <h2 id="bad">Bounces and complaints</h2>
+      <ul class="legend"><li><span class="key s2"></span>Bounced</li><li><span class="key s3"></span>Marked as spam</li></ul>
+    </div>
+    <div class="plot">{{template "chart" .Data.Bad}}</div>
+  </section>
+
+  <section class="domains" aria-labelledby="domains">
+    <h2 id="domains">Bounce rate by domain</h2>
+    <ul class="meters">
+      {{range .Data.Domains}}
+      <li>
+        <span class="name"><code>{{.Name}}</code>{{if .High}}<span class="state state-wait">{{template "ico" "wait"}}Above {{$.Data.WarnAt}}</span>{{end}}</span>
+        <span class="figure"><b>{{.Rate}}</b> {{.Bounced}} of {{.Sent}}</span>
+        {{template "track" .}}
+      </li>
+      {{end}}
+    </ul>
+    {{if .Data.MoreDomains}}<p class="more">The {{len .Data.Domains}} whose rate says most, of {{len .Data.Domains | plus .Data.MoreDomains}} that sent. <a href="{{.Root}}/domains">All domains</a></p>{{end}}
+  </section>
+  {{end}}
+  {{end}}
+
+  <section class="hooks" aria-labelledby="hooks">
+    <h2 id="hooks">Webhooks</h2>
+    {{if .Data.HooksUnread}}
+    <p class="problem" role="alert">The endpoints could not be read. Reload the page to try again.</p>
+    {{else if .Data.Hooks}}
+    <ul class="rows">
+      {{range .Data.Hooks}}
+      <li>
+        <span class="state state-{{.Tone}}">{{template "ico" .Tone}}{{.Label}}</span>
+        <span class="where"><a class="long" href="{{$.Root}}/webhooks/{{.ID}}">{{.URL}}</a><span class="says">{{.Says}}</span></span>
+        <span class="act">{{if .Paused}}<form method="post" action="{{$.Root}}/webhooks/{{.ID}}/resume"><button type="submit">Resume</button></form>{{end}}</span>
+      </li>
+      {{end}}
+    </ul>
+    <p class="more">{{if .Data.MoreHooks}}{{.Data.MoreHooks}} more need a look. {{end}}{{template "others" .Data}} <a href="{{.Root}}/webhooks">All webhooks</a></p>
+    {{else if .Data.Fine}}
+    <p class="empty"><span class="state state-ok">{{template "ico" "ok"}}Nothing needs a look.</span> {{template "others" .Data}} <a href="{{.Root}}/webhooks">All webhooks</a></p>
+    {{else if .Data.Off}}
+    <p class="empty"><span class="state state-off">{{template "ico" "off"}}No endpoint is on.</span> {{template "others" .Data}} No application is being told what becomes of emails. <a href="{{.Root}}/webhooks">All webhooks</a></p>
+    {{else}}
+    <p class="empty">No application is told what becomes of emails yet. <a href="{{.Root}}/webhooks#new">Make an endpoint</a></p>
+    {{end}}
+  </section>
+
+  <section class="quota" aria-labelledby="quota">
+    <h2 id="quota">Allowance</h2>
+    {{with .Data.Quota}}
+      {{if .Unread}}
+      <p class="empty">The mail provider did not say how much it will still send. Reload the page to ask again.</p>
+      {{else}}
+      <p class="big"><b>{{.Used}}</b> of {{.Limit}} used</p>
+      {{template "track" .}}
+      <p class="note">{{if .Over}}<span class="state state-failing">{{template "ico" "failing"}}The allowance is spent.</span> The mail provider refuses more until it starts again.{{else}}{{.Left}} left{{if .Per}} of the {{.Limit}} the mail provider sends a {{.Per}}{{end}}.{{end}}{{if .Resets}} It starts again {{.Resets}}.{{end}}</p>
+      {{end}}
+    {{else}}
+    <p class="empty">This mail provider has no allowance to tell.</p>
+    {{end}}
+  </section>
+
+  <details class="server" id="server"{{if .Pulse.Failing}} open{{end}}>
+    <summary><h2>This server</h2><span class="state state-{{if .Pulse.Failing}}failing{{else}}ok{{end}}">{{if .Pulse.Failing}}{{template "ico" "failing"}}{{else}}{{template "ico" "ok"}}{{end}}{{.Pulse.Says}}</span></summary>
+    <ul class="rows">
+      {{range .Data.Parts}}
+      <li>
+        <span class="state state-{{.State}}">{{template "ico" .State}}{{if eq .State "ok"}}Working{{else if eq .State "failing"}}Failing{{else}}Off{{end}}</span>
+        <span class="where"><b>{{.Name}}</b><span class="says">{{.Says}}</span></span>
+      </li>
+      {{end}}
+    </ul>
+    <dl class="facts">
+      <div><dt>Mail provider</dt><dd><code>{{.Data.Driver}}</code></dd></div>
+      <div><dt>Version</dt><dd><code>{{.Version}}</code></dd></div>
+      <div><dt>Signed in as</dt><dd>{{.Who.Name}} <code>{{.Who.Prefix}}</code>{{if .Who.Domain}}, managing <code>{{.Who.Domain}}</code> only{{end}}</dd></div>
+    </dl>
+  </details>
+</div>
+{{end}}
+
+{{/* How the endpoints that need no look stand: on and answering, and off. */}}
+{{define "others"}}{{if eq .Fine 1}}1 endpoint is on and answering.{{else if .Fine}}{{.Fine}} endpoints are on and answering.{{end}}{{if eq .Off 1}} 1 is turned off.{{else if .Off}} {{.Off}} are turned off.{{end}}{{end}}

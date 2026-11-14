@@ -2,7 +2,7 @@
 {{define "main"}}
 <p class="back"><a href="{{.Root}}/emails{{with .Data.For}}?for={{.}}{{end}}">Emails</a></p>
 <h1 class="long">Email to {{.Data.Email.Recipient}}</h1>
-<p class="lede"><span class="state state-{{tone .Data.Email.State}}">{{label .Data.Email.State}}</span> {{meaning .Data.Email.State}}</p>
+<p class="lede"><span class="state state-{{tone .Data.Email.State}}">{{template "ico" (tone .Data.Email.State)}}{{label .Data.Email.State}}</span> {{meaning .Data.Email.State}}</p>
 
 <dl class="facts">
   <div><dt>To</dt><dd class="long">{{.Data.Email.Recipient}}</dd></div>
@@ -24,7 +24,7 @@
     <li>
       <time datetime="{{stamp .At}}">{{when .At}}</time>
       <div>
-        <span class="state state-{{tone (stateOf .Kind)}}">{{happened .Kind}}</span>{{if .Permanent}} <span class="tag">for good</span>{{end}}
+        <span class="state state-{{tone (stateOf .Kind)}}">{{template "ico" (tone (stateOf .Kind))}}{{happened .Kind}}</span>{{if .Permanent}} <span class="tag">for good</span>{{end}}
         {{if or .Code .Reason}}<span class="why">{{if .Code}}<code>{{.Code}}</code>{{end}} {{.Reason}}</span>{{end}}
         {{if .Said}}<pre class="said" tabindex="0">{{.Said}}</pre>{{end}}
       </div>

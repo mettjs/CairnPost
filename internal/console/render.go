@@ -26,7 +26,8 @@ type pages map[string]*template.Template
 
 var helpers = template.FuncMap{
 	// when is a time as a person reads it, in UTC, which it names.
-	"when": func(t time.Time) string { return t.UTC().Format("2 Jan 2006, 15:04 UTC") },
+	"when": when,
+	"plus": func(a, b int) int { return a + b },
 	// day is the date alone, where the hour is in the way; stamp the time
 	// as a machine reads it.
 	"day":   func(t time.Time) string { return t.UTC().Format("2 Jan 2006") },
@@ -52,6 +53,9 @@ var helpers = template.FuncMap{
 	"stateOf": func(kind string) string { return store.StateOf[kind] },
 }
 
+// when is a time as a person reads it, in UTC, which it names.
+func when(t time.Time) string { return t.UTC().Format("2 Jan 2006, 15:04 UTC") }
+
 // parse reads every page at start: a template that does not parse stops
 // the server, not a request.
 func parse() pages {
@@ -61,11 +65,11 @@ func parse() pages {
 		panic(err)
 	}
 	for _, name := range names {
-		if name == "templates/layout.html" || name == "templates/hookform.html" {
+		if name == "templates/layout.html" || name == "templates/hookform.html" || name == "templates/parts.html" {
 			continue // parts of pages, not pages
 		}
 		page := name[len("templates/") : len(name)-len(".html")]
-		out[page] = template.Must(template.New("layout.html").Funcs(helpers).ParseFS(templateFiles, "templates/layout.html", "templates/hookform.html", name))
+		out[page] = template.Must(template.New("layout.html").Funcs(helpers).ParseFS(templateFiles, "templates/layout.html", "templates/hookform.html", "templates/parts.html", name))
 	}
 	return out
 }
@@ -83,13 +87,15 @@ type view struct {
 	Version string
 	// Assets is the word in the stylesheet's and the script's URLs.
 	Assets string
-	Data   any
+	// Pulse is how the server stands, said on every page.
+	Pulse pulse
+	Data  any
 }
 
 // render writes a page. It is rendered whole before any of it is sent, so
 // a page that fails is an error page and not half a page.
 func (c *console) render(w http.ResponseWriter, r *http.Request, code int, page string, data any) {
-	v := view{Page: page, Root: Root, Version: c.Version, Assets: c.assets, Data: data}
+	v := view{Page: page, Root: Root, Version: c.Version, Assets: c.assets, Pulse: pulseOf(c.parts()), Data: data}
 	// What the request before asked this page to say is said by a page
 	// that was asked for, not by the answer to a form.
 	if r.Method == http.MethodGet && code < 400 {

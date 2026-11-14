@@ -90,7 +90,7 @@ func TestAPausedEndpointSaysSoAndIsResumed(t *testing.T) {
 	miss(true)
 	b = r.signedIn(r.admin) // two days on, the sign-in is over
 	page := b.do("GET", at, nil).Body.String()
-	for _, want := range []string{`state-failing">Paused<`, "It is still owed everything that happens", ">Resume<", at + `/resume"`,
+	for _, want := range []string{`</svg>Paused</span>`, "It is still owed everything that happens", ">Resume<", at + `/resume"`,
 		">Turn off<", `name="enabled" value="off"`, "Try when resumed"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the paused endpoint's page lacks %q", want)
@@ -99,7 +99,7 @@ func TestAPausedEndpointSaysSoAndIsResumed(t *testing.T) {
 	if strings.Contains(page, "Every try since") {
 		t.Error("a paused endpoint is also said to be failing")
 	}
-	if list := b.do("GET", "/webhooks", nil).Body.String(); !strings.Contains(list, `<td data-label="State">Paused</td>`) {
+	if list := b.do("GET", "/webhooks", nil).Body.String(); !strings.Contains(list, `</svg>Paused</span></td>`) {
 		t.Fatalf("the list: %s", list)
 	}
 	mine, _ := r.s.ListDeliveries(ctx, id, "", "", 10)
@@ -107,17 +107,17 @@ func TestAPausedEndpointSaysSoAndIsResumed(t *testing.T) {
 		t.Fatalf("a retry while paused: %s", page)
 	}
 	// Turned off while paused it is off, and on again it is paused still.
-	if page = b.follow("POST", at+"/enabled", url.Values{"enabled": {"off"}}).Body.String(); !strings.Contains(page, `state-off">Off<`) ||
+	if page = b.follow("POST", at+"/enabled", url.Values{"enabled": {"off"}}).Body.String(); !strings.Contains(page, `</svg>Off</span>`) ||
 		!strings.Contains(page, "It was also paused for failing") || strings.Contains(page, ">Resume<") {
 		t.Fatalf("turned off while paused: %s", page)
 	}
 	if page = b.follow("POST", at+"/enabled", url.Values{"enabled": {"on"}}).Body.String(); !strings.Contains(page, "still paused for failing") ||
-		!strings.Contains(page, `state-failing">Paused<`) {
+		!strings.Contains(page, `</svg>Paused</span>`) {
 		t.Fatalf("turned on while paused: %s", page)
 	}
 	page = b.follow("POST", at+"/resume", url.Values{}).Body.String()
 	if e, _ := r.s.Endpoint(ctx, id); e.PausedAt != nil || e.FailingSince != nil || !strings.Contains(page, "The endpoint is resumed.") ||
-		!strings.Contains(page, `state-ok">On<`) || !strings.Contains(page, ">Turn off<") || strings.Contains(page, ">Resume<") {
+		!strings.Contains(page, `</svg>On</span>`) || !strings.Contains(page, ">Turn off<") || strings.Contains(page, ">Resume<") {
 		t.Fatalf("after resuming: %+v %s", e, page)
 	}
 	// Resumed again it says nothing changed; its own address asked for

@@ -1,0 +1,135 @@
+/* The first page: the numbers of a period, drawn by the server. Marks
+   wear the series colours; every word wears a text colour. */
+
+.head { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; align-items: end; margin-bottom: 2.25rem; }
+.head .lede { margin-bottom: 0; }
+
+.switch { display: inline-flex; border: 1px solid var(--rule); }
+.switch a {
+  padding: 0.55rem 1rem; white-space: nowrap; text-decoration: none;
+  font: 600 12px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--soft);
+}
+.switch a + a { border-left: 1px solid var(--rule); }
+.switch a:hover { color: var(--text); }
+.switch a[aria-current="true"] { background: var(--hi); color: var(--on-hi); }
+
+.board {
+  display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 3.5rem 4rem; align-items: start;
+  grid-template-areas: "kpis kpis" "sent sent" "bad domains" "hooks quota" "server server";
+}
+.board h2 { margin: 0 0 1.5rem; }
+.board > .problem { grid-column: 1 / -1; margin: 0; max-width: none; }
+.unsent { max-width: none; }
+
+.kpis {
+  grid-area: kpis; margin: 0; display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  border-top: 3px solid var(--rule); border-bottom: 1px solid var(--line);
+}
+.kpi { padding: 1.25rem 1.75rem 1.75rem; border-left: 1px solid var(--line); display: flex; flex-direction: column; justify-content: space-between; }
+.kpi:first-child { border-left: 0; padding-left: 0; }
+.kpi dt { font: 600 11px var(--mono); letter-spacing: 0.09em; text-transform: uppercase; color: var(--soft); }
+.kpi .value { display: block; margin-top: 1rem; font-size: 2.5rem; line-height: 1.05; font-weight: 750; letter-spacing: -0.035em; }
+.kpi-sent .value { font-size: 4.25rem; }
+.kpi .value.none, .kpi-sent .value.none { color: var(--muted); font-size: 1.5rem; letter-spacing: -0.01em; }
+.kpi .sub { display: block; margin-top: 0.45rem; color: var(--soft); font-size: 0.875rem; }
+.kpi .sub svg { width: 10px; height: 10px; margin-right: 0.3rem; fill: currentColor; }
+
+.sent { grid-area: sent; } .bad { grid-area: bad; } .domains { grid-area: domains; }
+.hooks { grid-area: hooks; } .quota { grid-area: quota; } .server { grid-area: server; }
+.board section, .board details { min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.3rem 1rem; padding-top: 1.1rem; border-top: 3px solid var(--rule); margin-bottom: 1.5rem; }
+.panel-head h2 { margin: 0; padding: 0; border: 0; }
+.note { color: var(--soft); font-size: 0.875rem; margin: 0.9rem 0 0; }
+
+/* Too narrow for it, a chart scrolls inside its own width, and starts at
+   its newest end. */
+.plot { display: flex; flex-direction: row-reverse; overflow-x: auto; }
+.chart { display: block; flex: none; width: 100%; min-width: 560px; height: auto; overflow: visible; }
+.chart text { font: 11px var(--sans); fill: var(--muted); font-variant-numeric: tabular-nums; }
+.chart .end { fill: var(--soft); font-size: 12px; }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .axis { stroke: var(--rule); stroke-width: 1; }
+.chart .bar { fill: var(--s1); }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .s2 { stroke: var(--s2); }
+.chart .s3 { stroke: var(--s3); }
+.chart .dot { stroke: var(--page); stroke-width: 2; }
+.chart .dot.s2 { fill: var(--s2); }
+.chart .dot.s3 { fill: var(--s3); }
+.chart .hit { fill: transparent; }
+.chart .cross { stroke: var(--muted); stroke-width: 1; opacity: 0; }
+.chart .dot.hover { opacity: 0; }
+.chart .step:hover .hit { fill: var(--text); opacity: 0.07; }
+.chart .step:hover .cross, .chart .step:hover .dot.hover { opacity: 1; }
+
+.legend { display: flex; gap: 1.25rem; margin: 0; padding: 0; list-style: none; font-size: 0.875rem; color: var(--soft); }
+.legend li { display: flex; align-items: center; gap: 0.45rem; }
+.key { width: 14px; border-top: 2px solid; }
+.key.s2 { border-color: var(--s2); }
+.key.s3 { border-color: var(--s3); }
+
+.tip {
+  position: fixed; z-index: 20; pointer-events: none; padding: 0.45rem 0.65rem;
+  font-size: 12px; line-height: 1.45; background: var(--text); color: var(--page);
+}
+.tip b { display: block; font-weight: 600; }
+
+details.astable { margin-top: 0.9rem; }
+details.astable summary { cursor: pointer; font-size: 0.875rem; color: var(--soft); width: fit-content; }
+details.astable .scroll { margin-top: 0.75rem; max-height: 22rem; }
+table.num td + td, table.num th + th { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* A bar of how much: the track is a lighter step of the fill. */
+.track { display: block; width: 100%; height: 8px; }
+.track .rest { fill: var(--track); }
+.track .fill { fill: var(--s1); }
+.track.high .rest { fill: var(--warn-track); }
+.track.high .fill { fill: var(--warn-fill); }
+.track.wide { height: 14px; }
+
+.meters, .rows { list-style: none; margin: 0; padding: 0; }
+.meters li { display: grid; grid-template-columns: 1fr auto; gap: 0.6rem 1rem; align-items: baseline; padding: 1.1rem 0; border-top: 1px solid var(--line); }
+.meters li:first-child { border-top: 0; padding-top: 0; }
+.meters .name { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; align-items: baseline; min-width: 0; }
+.meters .track { grid-column: 1 / -1; grid-row: 2; }
+.meters .figure { color: var(--soft); font-size: 0.875rem; white-space: nowrap; }
+.meters .figure b { color: var(--text); font-size: 1.375rem; font-weight: 750; letter-spacing: -0.02em; margin-right: 0.4rem; }
+
+.big { color: var(--soft); margin: 0 0 1rem; }
+.big b { font-size: 4.25rem; line-height: 1; font-weight: 750; color: var(--text); letter-spacing: -0.04em; margin-right: 0.4rem; }
+
+.rows li { display: grid; grid-template-columns: 7rem minmax(0, 1fr) auto; gap: 0.3rem 1.5rem; align-items: baseline; padding: 1.1rem 0; border-top: 1px solid var(--line); }
+.rows li:first-child { border-top: 0; padding-top: 0; }
+.rows .where { min-width: 0; }
+.rows .says { display: block; color: var(--soft); font-size: 0.875rem; margin-top: 0.15rem; }
+.rows .act { grid-column: 3; grid-row: 1; align-self: center; }
+.rows .act form { margin: 0; }
+.server .rows li { grid-template-columns: 7rem minmax(0, 1fr); }
+.more { margin: 1.25rem 0 0; color: var(--soft); font-size: 0.875rem; }
+
+details.server summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1.25rem; cursor: pointer; list-style: none; padding-top: 1.1rem; border-top: 3px solid var(--rule); }
+details.server summary::-webkit-details-marker { display: none; }
+details.server summary h2 { margin: 0; padding: 0; border: 0; }
+details.server summary::after { content: "Show"; margin-left: auto; font-size: 0.875rem; font-weight: 550; text-decoration: underline; text-underline-offset: 3px; }
+details.server[open] summary::after { content: "Hide"; }
+details.server[open] summary { margin-bottom: 1.5rem; }
+details.server .facts { margin-top: 0.5rem; }
+
+@media (max-width: 1000px) {
+  .board { grid-template-columns: minmax(0, 1fr); row-gap: 3rem; grid-template-areas: "kpis" "sent" "bad" "domains" "hooks" "quota" "server"; }
+  .kpis { grid-template-columns: 1fr 1fr; }
+  .kpi:nth-child(odd) { border-left: 0; padding-left: 0; }
+  .kpi:nth-child(n+3) { border-top: 1px solid var(--line); }
+}
+@media (max-width: 760px) {
+  .kpi { padding: 1rem 1rem 1.25rem; }
+  .kpi .value { font-size: 1.9rem; }
+  .kpi-sent .value { font-size: 2.75rem; }
+  .big b { font-size: 3.25rem; }
+  .rows li { grid-template-columns: minmax(0, 1fr) auto; }
+  .rows .where { grid-column: 1 / -1; grid-row: 2; }
+  .rows .act { grid-column: 2; }
+}
+@media (max-width: 760px) {
+  table.num td + td { text-align: left; }
+}

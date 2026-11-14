@@ -3,7 +3,7 @@
 <p class="back"><a href="{{.Root}}/webhooks">Webhooks</a></p>
 <h1 class="long">{{.Data.Endpoint.URL}}</h1>
 {{$state := endpointState .Data.Endpoint}}
-<p class="lede"><span class="state state-{{endpointTone .Data.Endpoint}}">{{endpointLabel .Data.Endpoint}}</span> {{if eq $state "paused"}}It took nothing for too long, so nothing is sent to it since <time datetime="{{stamp .Data.Endpoint.PausedAt}}">{{when .Data.Endpoint.PausedAt}}</time>. It is still owed everything that happens. Once it answers again, resume it: what it is owed is sent then, with what was given up while it failed.{{else if eq $state "on"}}It is told what becomes of emails{{if .Data.Endpoint.Domain}} from <code>{{.Data.Endpoint.Domain}}</code>{{else}} from every sending domain{{end}}.{{else}}Nothing is sent to it. What it was owed when it was turned off waits until it is on, or until its email's record is deleted; it is told nothing of what happens meanwhile, even later.{{if .Data.Endpoint.PausedAt}} It was also paused for failing, and stays paused when it is turned on.{{end}}{{end}}</p>
+<p class="lede"><span class="state state-{{endpointTone .Data.Endpoint}}">{{template "ico" (endpointTone .Data.Endpoint)}}{{endpointLabel .Data.Endpoint}}</span> {{if eq $state "paused"}}It took nothing for too long, so nothing is sent to it since <time datetime="{{stamp .Data.Endpoint.PausedAt}}">{{when .Data.Endpoint.PausedAt}}</time>. It is still owed everything that happens. Once it answers again, resume it: what it is owed is sent then, with what was given up while it failed.{{else if eq $state "on"}}It is told what becomes of emails{{if .Data.Endpoint.Domain}} from <code>{{.Data.Endpoint.Domain}}</code>{{else}} from every sending domain{{end}}.{{else}}Nothing is sent to it. What it was owed when it was turned off waits until it is on, or until its email's record is deleted; it is told nothing of what happens meanwhile, even later.{{if .Data.Endpoint.PausedAt}} It was also paused for failing, and stays paused when it is turned on.{{end}}{{end}}</p>
 {{if and (eq $state "on") .Data.Endpoint.FailingSince}}<p class="notice">Every try since <time datetime="{{stamp .Data.Endpoint.FailingSince}}">{{when .Data.Endpoint.FailingSince}}</time> has failed.{{if .Data.PauseAfter}} If a webhook is given up once that has gone on for {{.Data.PauseAfter}}, the endpoint is paused.{{end}} A test that is answered ends it.</p>{{end}}
 {{if .Data.Problem}}<p class="problem" role="alert">The change was not saved. {{.Data.Problem}} <a href="#change">Go to the form</a></p>{{end}}
 
@@ -54,7 +54,7 @@
       {{range .Data.Deliveries}}
       <tr>
         <td data-label="Event"><code>{{typeOf .Kind}}</code>{{if .MessageID}} <a class="by" href="{{$.Root}}/emails/{{.MessageID}}">the email</a>{{end}}</td>
-        <td data-label="State"><span class="state state-{{deliveryTone .State}}">{{deliveryLabel .State}}</span></td>
+        <td data-label="State"><span class="state state-{{deliveryTone .State}}">{{template "ico" (deliveryTone .State)}}{{deliveryLabel .State}}</span></td>
         <td data-label="Tries">{{.Attempts}}</td>
         <td data-label="Last answer" class="wrap">{{met .LastStatus .LastFailure}}{{if eq .State "pending"}} <span class="by">{{if eq $state "paused"}}Waits until the endpoint is resumed{{else if eq $state "on"}}Next try <time datetime="{{stamp .NextAt}}">{{when .NextAt}}</time>{{else}}Waits until the endpoint is on{{end}}</span>{{end}}</td>
         <td data-label="When"><time datetime="{{stamp .CreatedAt}}">{{when .CreatedAt}}</time></td>

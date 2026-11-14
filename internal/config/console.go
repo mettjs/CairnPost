@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +20,10 @@ type Console struct {
 	// travel without TLS, for a console opened over plain http on a
 	// developer's machine. Default false: the cookie is marked Secure.
 	PlainHTTP bool
+	// BounceWarn is CAIRNPOST_BOUNCE_WARN: the share of a sending domain's
+	// emails, in percent, that bounced at which the console marks the
+	// domain. Default 5; "off" marks none, and is 0.
+	BounceWarn float64
 }
 
 func console(getenv func(string) string) (Console, error) {
@@ -33,8 +38,29 @@ func console(getenv func(string) string) (Console, error) {
 	if c.Session < time.Minute || c.Session > 30*24*time.Hour {
 		return c, fmt.Errorf("config: CAIRNPOST_CONSOLE_SESSION must be between 1m and 720h (got %s)", c.Session)
 	}
-	c.PlainHTTP, err = flag(getenv, "CAIRNPOST_CONSOLE_PLAIN_HTTP", false)
+	if c.PlainHTTP, err = flag(getenv, "CAIRNPOST_CONSOLE_PLAIN_HTTP", false); err != nil {
+		return c, err
+	}
+	c.BounceWarn, err = bounceWarn(getenv)
 	return c, err
+}
+
+// bounceWarn reads CAIRNPOST_BOUNCE_WARN: a percentage ("5", "2.5", with
+// or without the sign), or "off".
+func bounceWarn(getenv func(string) string) (float64, error) {
+	const name = "CAIRNPOST_BOUNCE_WARN"
+	v := strings.ToLower(strings.TrimSpace(getenv(name)))
+	switch v {
+	case "":
+		return 5, nil
+	case "off":
+		return 0, nil
+	}
+	at, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(v, "%")), 64)
+	if err != nil || !(at > 0 && at <= 100) {
+		return 0, fmt.Errorf("config: %s must be a percentage above 0 and at most 100, such as 5, or off (got %q)", name, v)
+	}
+	return at, nil
 }
 
 // flag reads a setting that is on or off.

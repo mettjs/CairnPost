@@ -6,25 +6,27 @@
 <meta name="robots" content="noindex">
 <title>{{block "title" .}}Console{{end}} · CairnPost</title>
 <link rel="stylesheet" href="{{.Root}}/assets/console.css?v={{.Assets}}">
+<link rel="stylesheet" href="{{.Root}}/assets/board.css?v={{.Assets}}">
 <script src="{{.Root}}/assets/console.js?v={{.Assets}}" defer></script>
 </head>
 <body>
 {{if .Who}}
-<header class="top">
-  <a class="mark" href="{{.Root}}/">CairnPost</a>
-  <nav aria-label="Console">
-    <a href="{{.Root}}/" {{if eq .Page "overview"}}aria-current="page"{{end}}>Overview</a>
-    <a href="{{.Root}}/emails" {{if or (eq .Page "emails") (eq .Page "email")}}aria-current="page"{{end}}>Emails</a>
-    <a href="{{.Root}}/suppressions" {{if or (eq .Page "suppressions") (eq .Page "lift")}}aria-current="page"{{end}}>Suppressions</a>
-    <a href="{{.Root}}/webhooks" {{if or (eq .Page "webhooks") (eq .Page "endpoint") (eq .Page "remove")}}aria-current="page"{{end}}>Webhooks</a>
-    <a href="{{.Root}}/domains" {{if or (eq .Page "domains") (eq .Page "domain")}}aria-current="page"{{end}}>Domains</a>
-    <a href="{{.Root}}/keys" {{if or (eq .Page "keys") (eq .Page "revoke")}}aria-current="page"{{end}}>API keys</a>
-  </nav>
+<header class="band">
+  <a class="mark" href="{{.Root}}/">{{template "cairn"}}CairnPost</a>
+  <p class="pulse{{if .Pulse.Failing}} pulse-failing{{end}}">{{if .Pulse.Failing}}{{template "ico" "failing"}}{{else}}{{template "ico" "ok"}}{{end}}<a href="{{.Root}}/#server">{{.Pulse.Says}}</a></p>
   <form class="who" method="post" action="{{.Root}}/signout">
     <span class="who-name" title="The key you are signed in with">{{.Who.Name}} <code>{{.Who.Prefix}}</code></span>
     <button class="quiet" type="submit">Sign out</button>
   </form>
 </header>
+<nav class="tabs" aria-label="Console">
+  <a href="{{.Root}}/" {{if eq .Page "overview"}}aria-current="page"{{end}}>Overview</a>
+  <a href="{{.Root}}/emails" {{if or (eq .Page "emails") (eq .Page "email")}}aria-current="page"{{end}}>Emails</a>
+  <a href="{{.Root}}/suppressions" {{if or (eq .Page "suppressions") (eq .Page "lift")}}aria-current="page"{{end}}>Suppressions</a>
+  <a href="{{.Root}}/webhooks" {{if or (eq .Page "webhooks") (eq .Page "endpoint") (eq .Page "remove") (eq .Page "secret")}}aria-current="page"{{end}}>Webhooks</a>
+  <a href="{{.Root}}/domains" {{if or (eq .Page "domains") (eq .Page "domain")}}aria-current="page"{{end}}>Domains</a>
+  <a href="{{.Root}}/keys" {{if or (eq .Page "keys") (eq .Page "revoke")}}aria-current="page"{{end}}>API keys</a>
+</nav>
 {{end}}
 <main{{if not .Who}} class="alone"{{end}}>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
