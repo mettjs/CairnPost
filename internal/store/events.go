@@ -111,6 +111,11 @@ type Events interface {
 	RecordEvent(ctx context.Context, e Event) (Recorded, error)
 	// EventsOf is a message's events, oldest first.
 	EventsOf(ctx context.Context, messageID string) ([]Event, error)
+	// EventsAfter answers events in the order they were recorded, oldest
+	// first, each with its email's addresses (Sender, Recipient): those
+	// recorded after the event after names, or, for "", the last limit
+	// of them. Of one sending domain, or of all ("").
+	EventsAfter(ctx context.Context, after, domain string, limit int) ([]Event, error)
 	// Record is a message and its events as they stood at one moment;
 	// ErrNotFound for an id no message has.
 	Record(ctx context.Context, messageID string) (Message, []Event, error)

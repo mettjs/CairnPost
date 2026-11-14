@@ -120,3 +120,29 @@ func (s *Store) EventsOf(_ context.Context, messageID string) ([]store.Event, er
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
 	return out, nil
 }
+
+// EventsAfter implements store.Events: events are kept in the order
+// they were recorded.
+func (s *Store) EventsAfter(_ context.Context, after, domain string, limit int) ([]store.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []store.Event
+	seen := after == ""
+	for _, e := range s.events {
+		m := s.messages[e.MessageID]
+		if seen && (domain == "" || store.DomainOf(m.Sender) == domain) {
+			e.Sender, e.Recipient = m.Sender, m.Recipient
+			out = append(out, e)
+		}
+		if e.ID == after {
+			seen = true
+		}
+	}
+	switch {
+	case after == "" && len(out) > limit:
+		out = out[len(out)-limit:]
+	case after != "" && len(out) > limit:
+		out = out[:limit]
+	}
+	return out, nil
+}

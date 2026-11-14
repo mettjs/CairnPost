@@ -32,6 +32,7 @@ const usage = `CairnPost: a small transactional email service.
   cairnpost webhooks remove ID    remove a webhook endpoint
   cairnpost domains check DOMAIN  see whether a domain's DNS is ready to send from
   cairnpost send                  send an email through a running server
+  cairnpost tail                  show what becomes of emails, as it happens
   cairnpost version               print the version
 
 Each command explains its flags with -h. The server is configured by
@@ -88,6 +89,8 @@ func run(ctx context.Context, args []string) error {
 		return domainsCommand(ctx, args[1:])
 	case "send":
 		return sendCommand(ctx, args[1:])
+	case "tail":
+		return tailCommand(ctx, args[1:])
 	case "version":
 		fmt.Println(version)
 		return nil
