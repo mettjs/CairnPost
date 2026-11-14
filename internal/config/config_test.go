@@ -230,3 +230,31 @@ func TestNoFilesIsASetting(t *testing.T) {
 		t.Fatalf("%+v %v", c, err)
 	}
 }
+
+// The smtp driver needs a server to send through, is secured unless it
+// is said not to be, and never says a password in the clear.
+func TestTheSMTPDriversSettings(t *testing.T) {
+	base := []string{"CAIRNPOST_POSTGRES_DSN", "postgres://x", "CAIRNPOST_DRIVER", "smtp"}
+	if _, err := Load(env(base...)); err == nil || !strings.Contains(err.Error(), "CAIRNPOST_SMTP_HOST") {
+		t.Fatalf("with no server: %v", err)
+	}
+	base = append(base, "CAIRNPOST_SMTP_HOST", "mail.example.com")
+	c, err := Load(env(base...))
+	if err != nil || c.SMTP.Security != "starttls" || c.SMTP.Port != 587 || c.SMTP.Hello == "" {
+		t.Fatalf("%+v %v", c.SMTP, err)
+	}
+	c, err = Load(env(append(base, "CAIRNPOST_SMTP_SECURITY", "TLS", "CAIRNPOST_SMTP_USERNAME", "u", "CAIRNPOST_SMTP_PASSWORD", "p")...))
+	if err != nil || c.SMTP.Security != "tls" || c.SMTP.Port != 465 || c.SMTP.Username != "u" {
+		t.Fatalf("%+v %v", c.SMTP, err)
+	}
+	for name, more := range map[string][]string{
+		"CAIRNPOST_SMTP_SECURITY": {"CAIRNPOST_SMTP_SECURITY", "ssl"},
+		"CAIRNPOST_SMTP_PORT":     {"CAIRNPOST_SMTP_PORT", "70000"},
+		"CAIRNPOST_SMTP_USERNAME": {"CAIRNPOST_SMTP_USERNAME", "u"},
+		"in the clear":            {"CAIRNPOST_SMTP_SECURITY", "none", "CAIRNPOST_SMTP_USERNAME", "u", "CAIRNPOST_SMTP_PASSWORD", "PASSWORDMARK"},
+	} {
+		if _, err := Load(env(append(base, more...)...)); err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), "PASSWORDMARK") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

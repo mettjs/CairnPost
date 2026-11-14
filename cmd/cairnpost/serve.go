@@ -17,6 +17,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/driver"
 	"github.com/mettjs/cairnpost/internal/driver/capture"
 	"github.com/mettjs/cairnpost/internal/driver/cloudflare"
+	"github.com/mettjs/cairnpost/internal/driver/smtp"
 	"github.com/mettjs/cairnpost/internal/events"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
@@ -82,6 +83,9 @@ func serve(ctx context.Context) error {
 		drv      driver.Driver
 		captured func() []api.CapturedEmail
 		source   driver.Source
+		// neverTold is a driver whose upstream reports nothing of an
+		// email after it took it.
+		neverTold bool
 	)
 	switch cfg.Driver {
 	case capture.Name:
@@ -99,6 +103,12 @@ func serve(ctx context.Context) error {
 			}
 			source = events
 		}
+	case smtp.Name:
+		drv = smtp.New(smtp.Options{Host: cfg.SMTP.Host, Port: cfg.SMTP.Port, Security: cfg.SMTP.Security,
+			Username: cfg.SMTP.Username, Password: cfg.SMTP.Password, Hello: cfg.SMTP.Hello}, time.Now)
+		neverTold = true
+		log.Warn("the smtp driver is in use: a mail server tells nothing of an email after it took it, " +
+			"so records stop at \"sent\" and no address is suppressed by itself")
 	default:
 		return fmt.Errorf("no driver is built for %q", cfg.Driver)
 	}
@@ -166,8 +176,12 @@ func serve(ctx context.Context) error {
 		// The console is served beside the API, under its own path.
 		both := http.NewServeMux()
 		eventsOff := "Not read: no queue of events is set. An email's record stops at \"sent\", and a bounce is never known."
-		if captured != nil {
+		switch {
+		case captured != nil:
 			eventsOff = "None to read: this driver keeps emails and sends them to nobody."
+		case neverTold:
+			eventsOff = "None to read: a mail server spoken to by SMTP tells nothing of an email after it took it. " +
+				"An email's record stops at \"sent\", and a bounce is never known."
 		}
 		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppressions, Webhooks: endpoints,
 			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout, cfg.DNSServer), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
