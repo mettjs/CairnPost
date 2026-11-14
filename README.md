@@ -92,7 +92,7 @@ silently dropped.
 | `bounced` | The receiving server refused it. The event says whether for good (`permanent`). |
 | `complained` | It arrived, and its recipient marked it as spam. |
 | `failed` | It was not sent: the provider refused it, or took it and then could not or would not send it. |
-| `unknown` | The provider never answered the send, so the email may or may not have gone. |
+| `unknown` | The provider never answered the send, so the email may or may not have gone. A send left `sending` by a server that stopped in the middle of it is set to this within a few minutes (see `CAIRNPOST_IN_DOUBT_WINDOW`). |
 
 States past `sent` come from the provider's delivery events, which need the
 driver's event settings (see Drivers). Each event is listed under `events`
@@ -230,6 +230,9 @@ The status tells a program what to do:
 | 409 | `invalid_idempotent_request` | The key was already used with a different request, which was sent. Do not retry. |
 | 409 | `concurrent_idempotent_requests` | A send under this key is in flight, or its answer has not come yet. Retry after `Retry-After`. |
 | 401, 403 | `missing_api_key`, `invalid_api_key`, `domain_not_allowed`, `admin_key_required` | The key is missing, wrong, or not allowed to do this. |
+| 404 | `not_found` | There is no such email, endpoint or suppression, or it is not this key's to see. |
+| 404 | `route_not_found` | There is nothing at this path: the path or the server's address is wrong. |
+| 405 | `method_not_allowed` | The path is there, and does not take this method. `Allow` names the ones it takes. |
 | 413 | `request_too_large` | The body is over `CAIRNPOST_MAX_BODY_BYTES`. |
 | 429 | `rate_limit_exceeded` | The provider's limit is reached; nothing was sent. Retry after `Retry-After`. |
 | 502 | `upstream_unknown` | The provider did not answer; the email may have gone. Retry with the same key. This is the only answer that leaves it open. |
@@ -389,7 +392,7 @@ or when no provider it knows is named.
 | `CAIRNPOST_RETENTION` | `30d` | How long an email's record is kept after the last thing that happened to it, in days (`30d`) or hours (`720h`). At least `7d`, and longer than `CAIRNPOST_IDEMPOTENCY_TTL` and than the waits of `CAIRNPOST_WEBHOOK_RETRIES` together. `off` keeps records for ever. |
 | `CAIRNPOST_CONTENT_RETENTION` | `off` | How long what an email said, and what the receiving server said of it, is kept and shown to admin keys: a time such as `24h` or `7d`, `30d` at most and no longer than `CAIRNPOST_RETENTION`. `off` keeps none. |
 | `CAIRNPOST_PRUNE_EVERY` | `1h` | How long the pruner rests between passes. |
-| `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. |
+| `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. It is also how long a send may stay `sending` before it is taken to be abandoned (by a server that stopped in the middle of it) and set to `unknown`: looked for that often, so within twice this time, and never sooner than `CAIRNPOST_SEND_TIMEOUT` plus a minute. |
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |

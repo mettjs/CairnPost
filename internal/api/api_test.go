@@ -349,7 +349,7 @@ func TestSuppressionsAreAnAdminsToManage(t *testing.T) {
 		"lift of nothing":     {"POST", "/suppressions/lift", `{"domain":"example.com"}`, 422, "validation_error"},
 		"lift of both":        {"POST", "/suppressions/lift", `{"domain":"example.com","address":"a@example.org","all":true}`, 422, "validation_error"},
 		"a reason for one":    {"POST", "/suppressions/lift", `{"domain":"example.com","address":"a@example.org","reason":"bounce"}`, 422, "validation_error"},
-		"the old way to lift": {"DELETE", "/suppressions?domain=example.com&address=ana@example.org", "", 404, "not_found"},
+		"the old way to lift": {"DELETE", "/suppressions?domain=example.com&address=ana@example.org", "", 405, "method_not_allowed"},
 	} {
 		if code, name, _ := r.do(c.method, c.path, r.admin, "", c.body); code != c.code || name != c.name {
 			t.Errorf("%s: %d %s", what, code, name)
@@ -464,7 +464,20 @@ func TestHealthNeedsNoKey(t *testing.T) {
 			t.Fatalf("healthy=%v: %d %v", healthy, code, got)
 		}
 	}
-	if code, name, _ := r.do("GET", "/nothing", "", "", ""); code != 404 || name != "not_found" {
-		t.Fatalf("an unknown path: %d %s", code, name)
+	// A path that is not there is named apart from a record that is not,
+	// so a wrong server address is not read as a missing email; a path
+	// that is there under another method says which.
+	for path, want := range map[string]string{"/nothing": "route_not_found", "/api/emails/abc": "route_not_found",
+		"/emails/": "route_not_found"} {
+		if code, name, _ := r.do("GET", path, "", "", ""); code != 404 || name != want {
+			t.Errorf("GET %s: %d %s", path, code, name)
+		}
+	}
+	req := httptest.NewRequest("PUT", "/emails/abc", nil)
+	rec := httptest.NewRecorder()
+	r.h.ServeHTTP(rec, req)
+	if rec.Code != 405 || rec.Header().Get("Allow") != "GET, HEAD" || !strings.Contains(rec.Body.String(), `"method_not_allowed"`) ||
+		!strings.Contains(rec.Body.String(), "It takes: GET, HEAD.") {
+		t.Fatalf("a wrong method: %d Allow %q %s", rec.Code, rec.Header().Get("Allow"), rec.Body.String())
 	}
 }

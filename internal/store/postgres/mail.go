@@ -80,7 +80,7 @@ func (db *DB) Failed(ctx context.Context, id string) error {
 
 // Lost implements store.Mail.
 func (db *DB) Lost(ctx context.Context, id string) error {
-	if err := markUnknown(ctx, db.pool, id); err != nil {
+	if err := markUnknown(ctx, db.pool, true, id); err != nil {
 		return fmt.Errorf("postgres: mark a message's answer lost: %w", err)
 	}
 	return nil
@@ -94,11 +94,17 @@ type execer interface {
 // markUnknown records that what became of messages is not known: each was
 // handed to the upstream and its answer never came. It is the one place
 // that says so, whoever found out: the send itself, the next request under
-// its key, or the pruner forgetting the key.
-func markUnknown(ctx context.Context, q execer, ids ...string) error {
+// its key, the pruner forgetting the key, or the sweep that finds it
+// abandoned.
+//
+// happened says that something came of the email just now (a try that
+// ended, a retry, its key forgotten), which its record is then kept
+// from. A send found abandoned long after is not that: its record stays
+// kept from when it was sent.
+func markUnknown(ctx context.Context, q execer, happened bool, ids ...string) error {
 	_, err := q.Exec(ctx, `
-		UPDATE messages SET state = 'unknown', updated_at = now()
-		WHERE id = ANY($1::uuid[]) AND state = 'sending'`, ids)
+		UPDATE messages SET state = 'unknown', updated_at = CASE WHEN $2 THEN now() ELSE updated_at END
+		WHERE id = ANY($1::uuid[]) AND state = 'sending'`, ids, happened)
 	return err
 }
 
