@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,10 +14,21 @@ import (
 // batchItem is what became of one email of a batch: the email's id, or
 // why it was not sent. An error can carry an id too, as a send's does.
 type batchItem struct {
-	ID         string   `json:"id,omitempty"`
-	Suppressed []string `json:"suppressed,omitempty"`
-	Error      *problem `json:"error,omitempty"`
+	ID         string       `json:"id,omitempty"`
+	Suppressed []string     `json:"suppressed,omitempty"`
+	Error      *itemProblem `json:"error,omitempty"`
 }
+
+// itemProblem is why one email of a batch was not sent: the answer it
+// would have had alone, and the seconds its Retry-After header would
+// have said, when it would have had one.
+type itemProblem struct {
+	problem
+	RetryAfter int `json:"retry_after,omitempty"`
+}
+
+// errNotAList is a batch's body that is not one list.
+var errNotAList = errors.New("api: the body is not a list")
 
 // sendBatch is POST /emails/batch: several emails in one request, each
 // an email as POST /emails takes it. All are checked first, and one that
@@ -32,24 +44,53 @@ func (a *app) sendBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	var bodies []sendBody
-	if !a.bodyUpTo(w, r, &bodies, "The body must be a JSON list of emails, each with from, to, subject and html or text; "+
-		"cc, bcc, reply_to, headers and attachments are optional. No other field is supported.", most) {
+	shape := "The body must be a JSON list of emails, each with from, to, subject and html or text; " +
+		"cc, bcc, reply_to, headers and attachments are optional. No other field is supported."
+	// Read one email after the other, and no more of them than a batch
+	// may hold: a list of a million empty emails is small to send and
+	// large to hold.
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, most))
+	dec.DisallowUnknownFields()
+	if open, err := dec.Token(); err != nil || open != json.Delim('[') {
+		if err == nil {
+			err = errNotAList
+		}
+		a.read(w, err, shape)
 		return
 	}
-	reqs := make([]mail.Request, len(bodies))
-	for i := range bodies {
-		req, err := bodies[i].request()
-		if err != nil {
-			a.failBatch(w, &mail.BatchInvalid{Index: i, Err: err})
+	var reqs []mail.Request
+	for dec.More() {
+		if len(reqs) == a.Mail.MaxBatch() {
+			a.failBatch(w, &mail.BatchInvalid{Index: -1, Err: &mail.Invalid{Field: "emails",
+				Reason: fmt.Sprintf("A batch holds at most %d emails; this one holds more. Send it in parts.", a.Mail.MaxBatch())}})
 			return
 		}
-		reqs[i] = req
+		var body sendBody
+		if !a.read(w, dec.Decode(&body), shape) {
+			return
+		}
+		req, err := body.request()
+		if err != nil {
+			a.failBatch(w, &mail.BatchInvalid{Index: len(reqs), Err: err})
+			return
+		}
+		reqs = append(reqs, req)
+	}
+	// What follows the list must be its end and nothing else.
+	if _, err := dec.Token(); err != nil {
+		a.read(w, err, shape)
+		return
+	}
+	if dec.More() {
+		a.read(w, errNotAList, shape)
+		return
 	}
 	if a.BatchTime > 0 {
 		// A batch answers later than anything else does: the time it
 		// may take is its own, counted from here.
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(a.BatchTime))
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(a.BatchTime)); err != nil {
+			a.Log.Warn("api: a batch could not be given its own time to answer; a long one may be cut off", "error", err)
+		}
 	}
 	c := callerOf(r)
 	done, err := a.Mail.SendBatch(r.Context(), c.key, c.presented, r.Header.Get("Idempotency-Key"), reqs)
@@ -64,10 +105,9 @@ func (a *app) sendBatch(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		p, wait := a.problemOf(d.ID, d.Err)
-		items[i], code = batchItem{Error: &p}, http.StatusMultiStatus
-		if n, _ := strconv.Atoi(wait); n > longest {
-			longest = n
-		}
+		n, _ := strconv.Atoi(wait)
+		items[i], code = batchItem{Error: &itemProblem{p, n}}, http.StatusMultiStatus
+		longest = max(longest, n)
 	}
 	if longest > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(longest))

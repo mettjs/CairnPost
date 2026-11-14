@@ -142,3 +142,43 @@ func TestABatchStartsNothingOnceItIsOver(t *testing.T) {
 		}
 	}
 }
+
+// A send that breaks in our own code ends the batch, not the server.
+type breaks struct{ byAddress }
+
+func (b *breaks) Send(ctx context.Context, m driver.Message) (string, error) {
+	if m.To[0] == "ben@example.org" {
+		panic("broken")
+	}
+	return b.byAddress.Send(ctx, m)
+}
+
+func TestASendThatPanicsEndsTheBatchAndNotTheServer(t *testing.T) {
+	d := &breaks{}
+	svc := mail.New(memstore.New(), d, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
+		InDoubtWindow: time.Minute, BatchParallel: 1}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	out, err := svc.SendBatch(context.Background(), sender, "cp_x", "", to("ana", "ben", "cy"))
+	if err != nil || out[0].Err != nil || !errors.Is(out[1].Err, mail.ErrInDoubt) || !errors.Is(out[2].Err, mail.ErrInDoubt) || len(d.sent) != 1 {
+		t.Fatalf("%+v %v, %d sent", out, err, len(d.sent))
+	}
+}
+
+// With several sent at one time, those under way when the limit is said
+// are finished and no other is begun.
+func TestAThrottleLetsWhatIsUnderWayFinish(t *testing.T) {
+	svc, drv, _ := batchRig(mail.Options{BatchParallel: 3})
+	drv.refuse = map[string]error{"ana@example.org": &driver.Throttled{After: time.Minute}}
+	out, _ := svc.SendBatch(context.Background(), sender, "cp_x", "", to("ana", "ben", "cy", "dee", "eve", "fay", "gus", "hal"))
+	var throttled *driver.Throttled
+	tried := 0
+	for _, o := range out {
+		if o.ID != "" {
+			tried++
+		} else if !errors.As(o.Err, &throttled) {
+			t.Errorf("an email not tried answers %v", o.Err)
+		}
+	}
+	if tried != len(drv.sent) || tried > 5 || out[7].ID != "" {
+		t.Fatalf("%d tried, %d handed to the driver", tried, len(drv.sent))
+	}
+}

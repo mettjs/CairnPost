@@ -150,7 +150,7 @@ its `id` (and `suppressed`, if addresses were left out) or with the
 | Status | Meaning |
 |---|---|
 | 200 | The mail provider took every email. |
-| 207 | It did not take some, or any: read `data`. Each `error` has the `statusCode` and `name` of the same failure on `POST /emails`, and says the same about trying again. |
+| 207 | It did not take some, or any: read `data`. Each `error` has the `statusCode` and `name` of the same failure on `POST /emails`, and says the same about trying again; where that answer would carry a `Retry-After` header, the error has its seconds as `retry_after`. The answer's own `Retry-After` is the longest of them. |
 | 4xx, 503 | The batch was refused whole. Nothing was sent. |
 
 Two errors are a batch's own. Once the mail provider says its sending
@@ -158,14 +158,17 @@ limit is reached, the emails not yet tried are not tried and answer
 `rate_limit_exceeded` too. And a batch starts emails for a minute
 (`CAIRNPOST_BATCH_TIMEOUT`), a few at one time
 (`CAIRNPOST_BATCH_PARALLEL`): an email whose turn did not come, then or
-because the server was stopping, answers 503 `not_started`. Nothing of it
-was sent.
+because the server was stopping or the request was dropped, answers 503
+`not_started`. Nothing of it was sent.
 
 With an `Idempotency-Key` a batch is safe to send again as it was: each
 email is remembered under the key and its place, so the second try answers
-the ids of what went and sends only what did not. Send the same emails in
-the same order: a place that holds another email answers
-`invalid_idempotent_request`.
+the ids of what went and sends only what did not. An email whose answer
+from the provider was lost (`upstream_unknown`) answers
+`concurrent_idempotent_requests` until `CAIRNPOST_IN_DOUBT_WINDOW` has
+passed, and is sent again after it, as it would be alone. Send the same
+emails in the same order: a place that holds another email answers
+`invalid_idempotent_request`. A batch's key may be 248 characters.
 
 **An email's state**, from `GET /emails/{id}`:
 
@@ -368,7 +371,7 @@ The status tells a program what to do:
 | 413 | `request_too_large` | The body is over `CAIRNPOST_MAX_BODY_BYTES`, or a send's is over that and its files' allowance. |
 | 429 | `rate_limit_exceeded` | The provider's limit is reached; nothing was sent. Retry after `Retry-After`. |
 | 502 | `upstream_unknown` | The provider did not answer; the email may have gone. Retry with the same key. This is the only answer that leaves it open. |
-| 503 | `upstream_unavailable`, `unavailable` | Nothing was sent. Retry later. |
+| 503 | `upstream_unavailable`, `unavailable`, `not_started` | Nothing was sent. Retry later. `not_started` is an email of a batch whose turn did not come. |
 
 When a send fails after it was recorded (`rejected_by_upstream`, 429, 502,
 503 `upstream_unavailable`), the error carries the email's `id`, and
@@ -658,7 +661,7 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_MAX_RECIPIENTS` | `50` | How many addresses one email may name, counting `to`, `cc` and `bcc` (1 to 1000). Set it to what the provider takes or below. |
 | `CAIRNPOST_MAX_BATCH` | `100` | How many emails one `POST /emails/batch` may hold (1 to 1000). |
 | `CAIRNPOST_BATCH_PARALLEL` | `4` | How many emails of a batch are handed to the provider at one time (1 to 64). Keep it below what the provider takes at once. |
-| `CAIRNPOST_BATCH_TIMEOUT` | `1m` | How long a batch goes on starting emails, `10m` at most. An email whose turn has not come by then answers `not_started`. A proxy in front of the server must wait this long, and `CAIRNPOST_SEND_TIMEOUT` more, for an answer. |
+| `CAIRNPOST_BATCH_TIMEOUT` | `1m` | How long a batch goes on starting emails, `10m` at most. An email whose turn has not come by then answers `not_started`. The answer may come as late as this, `CAIRNPOST_SEND_TIMEOUT` and 20 seconds more after the request arrived, which may itself take 30 seconds: a proxy in front of the server must wait that long. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
 | `CAIRNPOST_DNS_TIMEOUT` | `6s` | The most one check of a domain's DNS records may take, in the console and in `domains check`: a second at least, a minute at most. Raise it where the first DNS server is slow to answer. |
 | `CAIRNPOST_DNS_SERVER` | the system's | The one DNS server those checks ask, as an IP address with or without a port (`1.1.1.1`). Set it where the machine's own resolver does not answer as the public internet does: a home router that makes up answers, or one that is silent about names that do not exist. |

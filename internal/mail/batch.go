@@ -42,11 +42,13 @@ const batchKeyRoom = 8
 
 // batchKey is the Idempotency-Key of the email at place i of a batch
 // sent under key: the same batch sent again finds each of its emails.
+// The two are joined by a character no key a caller sends can hold, so
+// an email of a batch is never taken for one sent alone.
 func batchKey(key string, i int) string {
 	if key == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s#%d", key, i+1)
+	return fmt.Sprintf("%s\x1f%d", key, i+1)
 }
 
 // SendBatch sends several emails and answers what became of each, in
@@ -92,9 +94,9 @@ func (s *Service) SendBatch(ctx context.Context, key store.Key, presented, idem 
 					out[i].Err = halted
 					continue
 				}
-				out[i].Receipt, out[i].Err = s.send(ctx, key, presented, batchKey(idem, i), ready[i])
+				out[i] = s.one(ctx, key, presented, batchKey(idem, i), ready[i])
 				var throttled *driver.Throttled
-				if errors.As(out[i].Err, &throttled) {
+				if errors.As(out[i].Err, &throttled) || errors.Is(out[i].Err, errBroke) {
 					run.halt(out[i].Err)
 				}
 			}
@@ -103,6 +105,27 @@ func (s *Service) SendBatch(ctx context.Context, key store.Key, presented, idem 
 	wg.Wait()
 	return out, nil
 }
+
+// errBroke is a send that broke in our own code. Whether its email went
+// is not known.
+var errBroke = fmt.Errorf("mail: a send of the batch broke: %w", ErrInDoubt)
+
+// one sends one email of a batch. A send that panics is answered as in
+// doubt and ends the batch: alone it would end its request, and here it
+// must not end the server.
+func (s *Service) one(ctx context.Context, key store.Key, presented, idem string, c checked) (out Outcome) {
+	defer func() {
+		if p := recover(); p != nil {
+			s.log.Error("mail: a send of a batch panicked", "panic", fmt.Sprint(p))
+			out.Err = errBroke
+		}
+	}()
+	out.Receipt, out.Err = s.send(ctx, key, presented, idem, c)
+	return out
+}
+
+// MaxBatch is how many emails one batch may hold.
+func (s *Service) MaxBatch() int { return s.opt.MaxBatch }
 
 // batchRun hands a batch's emails out by their place, and says when no
 // further one is to be started.

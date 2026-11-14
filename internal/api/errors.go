@@ -98,7 +98,7 @@ func (a *app) problemOf(id string, err error) (p problem, wait string) {
 			"The mail provider's sending limit is reached. Nothing was sent; try again later.", id}
 	case errors.Is(err, mail.ErrNotStarted):
 		p = problem{http.StatusServiceUnavailable, "not_started",
-			"The batch ended before this email's turn: it ran out of time, or the server is stopping. " +
+			"The batch ended before this email's turn: it ran out of time, the server is stopping or the request was dropped. " +
 				"Nothing was sent; send it again.", ""}
 	case errors.Is(err, driver.ErrUnavailable):
 		p = problem{http.StatusServiceUnavailable, "upstream_unavailable",
@@ -128,7 +128,11 @@ func (a *app) bodyUpTo(w http.ResponseWriter, r *http.Request, v any, shape stri
 	// A field CairnPost does not know is refused, never dropped: an email
 	// sent without the cc its caller asked for is worse than no email.
 	dec.DisallowUnknownFields()
-	err := dec.Decode(v)
+	return a.read(w, dec.Decode(v), shape)
+}
+
+// read answers whether a body was read, having said why when it was not.
+func (a *app) read(w http.ResponseWriter, err error, shape string) bool {
 	var (
 		tooBig *http.MaxBytesError
 		slow   net.Error
