@@ -65,6 +65,9 @@ type Config struct {
 	// DNSTimeout is CAIRNPOST_DNS_TIMEOUT: the most one check of a
 	// domain's DNS records may take. Default 6s.
 	DNSTimeout time.Duration
+	// DNSServer is CAIRNPOST_DNS_SERVER: the one DNS server those checks
+	// ask, as "address:port"; "" for the system's resolver, the default.
+	DNSServer string
 	// PruneEvery is CAIRNPOST_PRUNE_EVERY: how long the pruner rests
 	// between passes. Default 1h.
 	PruneEvery time.Duration
@@ -217,6 +220,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	c.CaptureKeep = int(keep)
 	if c.DNSTimeout, err = DNSTimeout(getenv); err != nil {
+		return c, err
+	}
+	if c.DNSServer, err = DNSServer(getenv); err != nil {
 		return c, err
 	}
 	if c.PruneEvery, err = duration(getenv, "CAIRNPOST_PRUNE_EVERY", time.Hour); err != nil {

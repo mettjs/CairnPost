@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -68,4 +69,24 @@ func DNSTimeout(getenv func(string) string) (time.Duration, error) {
 		err = fmt.Errorf("config: CAIRNPOST_DNS_TIMEOUT must be between 1s and 1m (got %s)", d)
 	}
 	return d, err
+}
+
+// DNSServer reads CAIRNPOST_DNS_SERVER on its own: the one DNS server a
+// check of a domain's records asks, as an IP address with or without a
+// port ("1.1.1.1", "[2606:4700:4700::1111]:53"); "" asks the system's
+// resolver. It is an address and not a name: a name would have to be
+// looked up by the very resolver it is there to replace.
+func DNSServer(getenv func(string) string) (string, error) {
+	v := strings.TrimSpace(getenv("CAIRNPOST_DNS_SERVER"))
+	if v == "" {
+		return "", nil
+	}
+	if ip, err := netip.ParseAddr(strings.Trim(v, "[]")); err == nil {
+		return netip.AddrPortFrom(ip, 53).String(), nil
+	}
+	at, err := netip.ParseAddrPort(v)
+	if err != nil || at.Port() == 0 {
+		return "", fmt.Errorf("config: CAIRNPOST_DNS_SERVER must be the IP address of a DNS server, with or without a port, such as 1.1.1.1 (got %q)", v)
+	}
+	return at.String(), nil
 }

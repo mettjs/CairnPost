@@ -20,10 +20,11 @@ const shownSuppressions = 500
 type suppressionsView struct {
 	List []store.Suppression
 	// To is the address the list is narrowed to, Domain the sending
-	// domain; "" for not. Bound is the one domain the signed-in key
+	// domain; "" for not. For is the handle that names To in this
+	// page's links and forms. Bound is the one domain the signed-in key
 	// manages, "" for all.
-	To, Domain, Bound string
-	Reasons           []string
+	To, Domain, For, Bound string
+	Reasons                []string
 	// Shown is how many rows the page lists at most.
 	Shown int
 	// Problem says why narrowing was refused; Typed and TypedDomain are
@@ -37,6 +38,8 @@ type suppressionsView struct {
 	LiftProblem  string
 	Lift         struct{ Domain, Reason string }
 	Unread, More bool
+	// Forgotten says the page named an address that is no longer kept.
+	Forgotten bool
 }
 
 // suppressed is the list as the signed-in key may use it.
@@ -68,8 +71,9 @@ func (suppressionsView) boundTo(r *http.Request) string { return who(r).Domain }
 // of them all. v.Domain is a domain already checked.
 func (c *console) suppressionsShown(w http.ResponseWriter, r *http.Request, code int, v suppressionsView) {
 	v.Bound, v.Reasons, v.Shown = who(r).Domain, store.Reasons, shownSuppressions
-	to, err := c.found(r)
-	if v.To = to; err == nil && to != "" {
+	to, handle, err := c.found(r)
+	v.Forgotten = forgotten(r, handle)
+	if v.To, v.For = to, handle; err == nil && to != "" {
 		// An address has one row for a sending domain at most.
 		v.List, err = c.suppressed(r).Of(r.Context(), v.Domain, to)
 	} else if err == nil {
@@ -84,17 +88,29 @@ func (c *console) suppressionsShown(w http.ResponseWriter, r *http.Request, code
 	c.render(w, r, code, "suppressions", v)
 }
 
-// narrowed answers the sending domain a form says the list it was sent
-// from is narrowed to, checked, and the list's address with it: so that
-// what a form does leads back to the list as it was. A domain that is
-// none is no narrowing.
-func (c *console) narrowed(r *http.Request) (domain, list string) {
-	list = Root + "/suppressions"
-	domain, err := c.suppressed(r).Domain(r.PostFormValue("in"))
-	if err != nil || domain == "" || domain == who(r).Domain {
-		return "", list
+// suppressionsAt is the list's address: narrowed to a sending domain and
+// to the address a handle names; each only if given.
+func suppressionsAt(domain, handle string) string {
+	q := url.Values{}
+	if domain != "" {
+		q.Set("domain", domain)
 	}
-	return domain, list + "?" + url.Values{"domain": {domain}}.Encode()
+	return at("/suppressions", narrowedTo(q, handle))
+}
+
+// narrowed answers the sending domain a form says the list it was sent
+// from is narrowed to, checked, and the list's address with it, narrowed
+// as it was to the address its handle names: so that what a form does
+// leads back to the list as it was. A domain that is none is no
+// narrowing. The handle is passed on as it came: the list it leads to
+// asks whether the session still keeps it.
+func (c *console) narrowed(r *http.Request) (domain, handle, list string) {
+	handle = handleOf(r)
+	domain, err := c.suppressed(r).Domain(r.PostFormValue("in"))
+	if err != nil || domain == who(r).Domain {
+		domain = ""
+	}
+	return domain, handle, suppressionsAt(domain, handle)
 }
 
 // findSuppressions narrows the list: to an address, kept with the
@@ -118,7 +134,7 @@ func (c *console) findSuppressions(w http.ResponseWriter, r *http.Request) {
 			Typed: typed(r, "to"), TypedDomain: asked})
 		return
 	}
-	typed, err := c.look(r)
+	handle, typed, err := c.look(r)
 	if errors.Is(err, errNotAnAddress) {
 		c.suppressionsShown(w, r, http.StatusUnprocessableEntity, suppressionsView{Typed: typed, TypedDomain: domain, Problem: notAnAddress})
 		return
@@ -128,11 +144,10 @@ func (c *console) findSuppressions(w http.ResponseWriter, r *http.Request) {
 		c.fail(w, r, http.StatusServiceUnavailable, "The list could not be narrowed. Try again shortly.")
 		return
 	}
-	next := Root + "/suppressions"
-	if domain != "" && domain != who(r).Domain {
-		next += "?" + url.Values{"domain": {domain}}.Encode()
+	if domain == who(r).Domain {
+		domain = "" // a bound key's own domain narrows nothing
 	}
-	http.Redirect(w, r, next, http.StatusSeeOther)
+	http.Redirect(w, r, suppressionsAt(domain, handle), http.StatusSeeOther)
 }
 
 // addProblems are the form's own words for each part the suppression
@@ -152,7 +167,7 @@ func (c *console) addSuppression(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var list string
-	v.Domain, list = c.narrowed(r)
+	v.Domain, _, list = c.narrowed(r)
 	v.Add.Domain, v.Add.Address, v.Add.Note = typed(r, "domain"), typed(r, "address"), typed(r, "note")
 	s, added, err := c.suppressed(r).Add(r.Context(), r.PostFormValue("domain"), r.PostFormValue("address"), r.PostFormValue("note"))
 	var invalid *suppress.Invalid

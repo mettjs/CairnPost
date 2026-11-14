@@ -95,4 +95,7 @@ type Record struct {
 	Name, Type string
 	// Include is, for an SPF record, the include it must name.
 	Include string
+	// Under is, for an MX record, the name every host it points at must
+	// be under: the upstream's own mail servers. "" when any host will do.
+	Under string
 }

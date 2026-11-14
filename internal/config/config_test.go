@@ -176,3 +176,20 @@ func TestAbandonedAfterIsNeverInsideASend(t *testing.T) {
 		}
 	}
 }
+
+// The DNS server a check asks is an address, with a port or the usual
+// one; a name is refused, since the resolver it replaces would have to
+// look it up.
+func TestDNSServer(t *testing.T) {
+	for given, want := range map[string]string{"": "", " 1.1.1.1 ": "1.1.1.1:53", "9.9.9.9:5353": "9.9.9.9:5353",
+		"2606:4700:4700::1111": "[2606:4700:4700::1111]:53", "[2606:4700:4700::1111]:53": "[2606:4700:4700::1111]:53"} {
+		if got, err := DNSServer(env("CAIRNPOST_DNS_SERVER", given)); err != nil || got != want {
+			t.Errorf("%q: %q %v, want %q", given, got, err, want)
+		}
+	}
+	for _, bad := range []string{"dns.example.com", "one.one.one.one:53", "1.1.1.1:0", "1.1.1.1:port"} {
+		if _, err := DNSServer(env("CAIRNPOST_DNS_SERVER", bad)); err == nil || !strings.Contains(err.Error(), "CAIRNPOST_DNS_SERVER") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}

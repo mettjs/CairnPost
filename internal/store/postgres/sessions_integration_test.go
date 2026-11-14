@@ -55,23 +55,60 @@ func TestAConsoleSessionLivesAndEnds(t *testing.T) {
 	if err := db.DeleteSession(ctx, hash("out")); err != nil {
 		t.Fatalf("deleting it twice: %v", err)
 	}
-	// What a session looks for is kept with it, and is its own.
-	if err := db.LookFor(ctx, hash("kept"), "ana@example.org"); err != nil {
-		t.Fatal(err)
+	// What a session looks for is kept with it under a handle, and is its
+	// own: the same address keeps its handle, another session's handle
+	// names nothing, and no session keeps nothing.
+	remember := func(token, handle, address string, keep int) string {
+		t.Helper()
+		got, err := db.Remember(ctx, hash(token), handle, address, keep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
 	}
-	if err := db.LookFor(ctx, hash("never"), "bo@example.org"); err != nil {
-		t.Fatalf("looking for something in no session: %v", err)
+	if got := remember("kept", "h1", "ana@example.org", 2); got != "h1" {
+		t.Fatalf("kept under %q", got)
 	}
-	for token, want := range map[string]string{"kept": "ana@example.org", "old": "", "never": "", "out": ""} {
-		if got, err := db.LookingFor(ctx, hash(token)); err != nil || got != want {
-			t.Fatalf("session %s looks for %q: %v", token, got, err)
+	if got := remember("kept", "h2", "ana@example.org", 2); got != "h1" {
+		t.Fatalf("the same address looked for again is under %q, want its first handle", got)
+	}
+	if got := remember("never", "h3", "bo@example.org", 2); got != "" {
+		t.Fatalf("looking for something in no session kept it under %q", got)
+	}
+	for _, c := range []struct{ token, handle, want string }{
+		{"kept", "h1", "ana@example.org"}, {"kept", "h2", ""}, {"old", "h1", ""}, {"never", "h3", ""}, {"out", "h1", ""},
+	} {
+		if got, err := db.Recall(ctx, hash(c.token), c.handle); err != nil || got != c.want {
+			t.Fatalf("session %s, handle %s: %q %v", c.token, c.handle, got, err)
 		}
 	}
-	if err := db.LookFor(ctx, hash("kept"), ""); err != nil {
-		t.Fatal(err)
+	// A session keeps the ones looked for or asked for last, and the
+	// older ones go: one in use outlives one that is not.
+	older := func() {
+		t.Helper()
+		exec(t, `UPDATE console_lookups SET used_at = used_at - interval '1 minute' WHERE session_hash = $1`, hash("kept"))
 	}
-	if got, err := db.LookingFor(ctx, hash("kept")); err != nil || got != "" {
-		t.Fatalf("after looking for nothing: %q %v", got, err)
+	older()
+	remember("kept", "h4", "bo@example.org", 2)
+	older()
+	if got, err := db.Recall(ctx, hash("kept"), "h1"); err != nil || got != "ana@example.org" {
+		t.Fatalf("asked for again: %q %v", got, err)
+	}
+	older()
+	remember("kept", "h5", "cy@example.org", 2)
+	for handle, want := range map[string]string{"h1": "ana@example.org", "h4": "", "h5": "cy@example.org"} {
+		if got, err := db.Recall(ctx, hash("kept"), handle); err != nil || got != want {
+			t.Fatalf("after a third address, handle %s: %q %v", handle, got, err)
+		}
+	}
+	// Forgotten when asked, and that once is enough.
+	for range 2 {
+		if err := db.Forget(ctx, hash("kept"), "h1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := db.Recall(ctx, hash("kept"), "h1"); err != nil || got != "" {
+		t.Fatalf("after forgetting: %q %v", got, err)
 	}
 	// A session begun under a longer setting ends when it is made shorter.
 	if _, _, err := db.SessionKey(ctx, hash("kept"), time.Nanosecond); !errors.Is(err, store.ErrNotFound) {

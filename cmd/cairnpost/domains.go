@@ -60,7 +60,11 @@ func domainsCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := domains.New(nil, dnscheck.New(timeout), provider, recordsFor(provider)).Check(ctx, "", fs.Arg(0))
+	server, err := config.DNSServer(os.Getenv)
+	if err != nil {
+		return err
+	}
+	report, err := domains.New(nil, dnscheck.New(timeout, server), provider, recordsFor(provider)).Check(ctx, "", fs.Arg(0))
 	if errors.Is(err, domains.ErrNotAHost) {
 		return fmt.Errorf("%q is not a domain name, such as mail.example.com", fs.Arg(0))
 	}

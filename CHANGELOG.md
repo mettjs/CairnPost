@@ -72,13 +72,17 @@ Every change a user of CairnPost can notice is written here. The format is
   and `CAIRNPOST_CONSOLE_PLAIN_HTTP` set it up.
 - The console lists the emails on record, newest first, narrowed to a
   state or a recipient, and shows what happened to each and, where content
-  is kept, what it said.
+  is kept, what it said. A recipient looked for is never in a page's
+  URL, which carries a handle for it, and each tab keeps its own search.
 - The console shows the suppression list, finds an address on it, adds
   one by hand and lifts one or a sending domain's, asking first.
 - `cairnpost domains check DOMAIN` and the console's Domains page look up
   a sending domain's DNS: the records the mail provider asks for, and its
   DMARC policy. The command needs neither the database nor the provider,
-  takes `-provider`, and fails when the domain is not ready.
+  takes `-provider`, and fails when the domain is not ready. A bounce
+  address that points anywhere but at the provider's mail servers is not
+  right. `CAIRNPOST_DNS_SERVER` names the DNS server to ask, for a machine
+  whose own resolver does not answer as the public internet does.
 - The console manages webhook endpoints: make, change, turn off and on,
   send a test, remove, and see and retry what each was sent.
 - An admin key bound to a sending domain reads that domain's emails only,

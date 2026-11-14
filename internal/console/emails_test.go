@@ -3,7 +3,6 @@ package console_test
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -92,27 +91,21 @@ func TestEmailsAreListedAndNarrowed(t *testing.T) {
 	// By address: typed in any case, with a name or spaces around it, and
 	// never put in a URL.
 	for _, typed := range []string{"  ANA@example.org ", "Ana <ana@example.org>"} {
-		rec := b.do("POST", "/emails/find", url.Values{"to": {typed}, "state": {""}})
-		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/console/emails" {
-			t.Fatalf("%q: %d %s", typed, rec.Code, rec.Header().Get("Location"))
-		}
 		// The address is kept with the session: the browser is given
-		// nothing that holds it.
-		if len(rec.Result().Cookies()) != 0 {
-			t.Fatalf("%q: a cookie was set: %v", typed, rec.Result().Cookies())
-		}
-		page = b.do("GET", "/emails", nil).Body.String()
+		// a handle for it, and nothing that holds it.
+		narrowed, _ := b.narrow("/emails/find", url.Values{"to": {typed}, "state": {""}})
+		page = b.do("GET", narrowed, nil).Body.String()
 		at := order(page, "/emails/"+third.ID, "/emails/"+first.ID, "/emails/"+second.ID)
 		if at[0] < 0 || at[1] < 0 || at[2] >= 0 {
 			t.Fatalf("%q: by address: %v", typed, at)
 		}
 	}
 	// An address kept as it was typed is found however it is typed now.
-	b.do("POST", "/emails/find", url.Values{"to": {"bo@example.ORG"}, "state": {"bounced"}})
-	if page = b.do("GET", "/emails?state=bounced", nil).Body.String(); !strings.Contains(page, "/emails/"+second.ID) {
-		t.Fatal("an address was not found in another case")
+	narrowed, bo := b.narrow("/emails/find", url.Values{"to": {"bo@example.ORG"}, "state": {"bounced"}})
+	if page = b.do("GET", narrowed, nil).Body.String(); !strings.HasSuffix(narrowed, "&state=bounced") || !strings.Contains(page, "/emails/"+second.ID) {
+		t.Fatalf("an address was not found in another case, at %s", narrowed)
 	}
-	if page = b.do("GET", "/emails?state=delivered", nil).Body.String(); !strings.Contains(page, "No email on record matches") {
+	if page = b.do("GET", "/emails?state=delivered&for="+bo, nil).Body.String(); !strings.Contains(page, "No email on record matches") {
 		t.Fatal("nothing matching is not said")
 	}
 	for _, typed := range []string{"ana", "ana@", "a@b.example, c@d.example", "<script>"} {
@@ -124,7 +117,7 @@ func TestEmailsAreListedAndNarrowed(t *testing.T) {
 	// A refused search keeps what the list was narrowed to, says the
 	// address is at fault even beside a state that is none, and leaves
 	// an address in the browser that is the list when asked for again.
-	rec = b.do("POST", "/emails/find", url.Values{"to": {"ana"}, "state": {"nonsense"}})
+	rec = b.do("POST", "/emails/find", url.Values{"to": {"ana"}, "state": {"nonsense"}, "for": {bo}})
 	if page = rec.Body.String(); rec.Code != 422 || !strings.Contains(page, "Give one whole address") || strings.Contains(page, "no such state") ||
 		!strings.Contains(page, "/emails/"+second.ID) || strings.Contains(page, "/emails/"+first.ID) {
 		t.Fatalf("a refused search: %d", rec.Code)

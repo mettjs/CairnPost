@@ -9,6 +9,8 @@ func Records(domain string) []driver.Record {
 	return []driver.Record{
 		{Use: driver.UseDKIM, Name: "cf-bounce._domainkey." + domain, Type: "TXT"},
 		{Use: driver.UseSPF, Name: "cf-bounce." + domain, Type: "TXT", Include: "_spf.mx.cloudflare.net"},
-		{Use: driver.UseBounce, Name: "cf-bounce." + domain, Type: "MX"},
+		// Bounces come back to Cloudflare's own mail servers, which is how
+		// it hears of them.
+		{Use: driver.UseBounce, Name: "cf-bounce." + domain, Type: "MX", Under: "mx.cloudflare.net"},
 	}
 }

@@ -340,17 +340,21 @@ on the page that made it.
   webhook endpoints only.
 - Emails are listed newest first, a hundred to a page, and can be narrowed
   to a state and to one recipient. The address you look for is kept with
-  your session on the server, not in the page's address, so it is in no
-  proxy's log and not in the browser's history, and it is forgotten when
-  the session ends. The list never shows a subject.
+  your session on the server; the page's address carries only a random
+  handle for it. So the address is in no proxy's log and not in the
+  browser's history, it is forgotten when the session ends or when you
+  ask to see everything again, and two tabs each keep their own search.
+  A session keeps the twenty addresses looked for or shown last; a page
+  narrowed to an older one says so and shows the whole list. The list
+  never shows a subject.
 - The suppression list shows who is not sent to and why, with the email
   it happened to: the first 500 in order of sending domain and address,
   narrowed to a domain or an address (`cairnpost suppressions list` on
   the server shows them all). An address is suppressed by hand or sent to again from
   there, and a sending domain's suppressions can be lifted together; both
-  ask first. Looking for an address narrows the emails and the
-  suppressions alike, so one search answers "was it sent, did it arrive,
-  is it blocked".
+  ask first. Each list, narrowed to an address, leads to the other
+  narrowed to the same one, so one search answers "was it sent, did it
+  arrive, is it blocked".
 - A webhook endpoint is made, changed, turned off and on, tested and
   removed there. Its signing secret is shown once, on the page that made
   it, and can be changed, after asking, for a new one shown once. An
@@ -409,7 +413,9 @@ credentials, so it can be run before anything else is set up. It looks for
 the records of the provider named by `CAIRNPOST_DRIVER`, or by
 `-provider` before the domain (`cairnpost domains check -provider
 cloudflare mail.example.com`), and ends as a failure when one is missing,
-or when no provider it knows is named.
+or when no provider it knows is named. The bounce address must point at
+the provider's own mail servers: a record that sends bounces elsewhere is
+not right, since the server would never hear of them.
 
 ## Configuration
 
@@ -435,6 +441,7 @@ or when no provider it knows is named.
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
 | `CAIRNPOST_DNS_TIMEOUT` | `6s` | The most one check of a domain's DNS records may take, in the console and in `domains check`: a second at least, a minute at most. Raise it where the first DNS server is slow to answer. |
+| `CAIRNPOST_DNS_SERVER` | the system's | The one DNS server those checks ask, as an IP address with or without a port (`1.1.1.1`). Set it where the machine's own resolver does not answer as the public internet does: a home router that makes up answers, or one that is silent about names that do not exist. |
 | `CAIRNPOST_CONSOLE` | `on` | Serve the console at `/console`. `off` leaves it out. |
 | `CAIRNPOST_CONSOLE_SESSION` | `12h` | How long a sign-in to the console lasts: a minute at least, 30 days at most. |
 | `CAIRNPOST_CONSOLE_PLAIN_HTTP` | `off` | Let the console's session cookie travel without TLS, for a console opened over plain http in development. |

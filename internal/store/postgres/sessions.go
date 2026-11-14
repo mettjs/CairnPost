@@ -45,19 +45,39 @@ func (db *DB) SessionKey(ctx context.Context, hash []byte, ttl time.Duration) (s
 	return k, until, nil
 }
 
-// LookFor implements store.Sessions.
-func (db *DB) LookFor(ctx context.Context, hash []byte, address string) error {
-	_, err := db.pool.Exec(ctx, `UPDATE console_sessions SET looking_for = nullif($2, '') WHERE hash = $1`, hash, address)
+// Remember implements store.Sessions.
+func (db *DB) Remember(ctx context.Context, hash []byte, handle, address string, keep int) (string, error) {
+	var kept string
+	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			INSERT INTO console_lookups (session_hash, handle, address)
+			SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM console_sessions WHERE hash = $1)
+			ON CONFLICT (session_hash, address) DO UPDATE SET used_at = now()
+			RETURNING handle`, hash, handle, address).Scan(&kept)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // no such session
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+			DELETE FROM console_lookups WHERE session_hash = $1 AND handle NOT IN (
+				SELECT handle FROM console_lookups WHERE session_hash = $1
+				ORDER BY used_at DESC, handle LIMIT $2)`, hash, keep)
+		return err
+	})
 	if err != nil {
-		return fmt.Errorf("postgres: keep what a console session looks for: %w", err)
+		return "", fmt.Errorf("postgres: keep what a console session looks for: %w", err)
 	}
-	return nil
+	return kept, nil
 }
 
-// LookingFor implements store.Sessions.
-func (db *DB) LookingFor(ctx context.Context, hash []byte) (string, error) {
+// Recall implements store.Sessions.
+func (db *DB) Recall(ctx context.Context, hash []byte, handle string) (string, error) {
 	var address string
-	err := db.pool.QueryRow(ctx, `SELECT coalesce(looking_for, '') FROM console_sessions WHERE hash = $1`, hash).Scan(&address)
+	err := db.pool.QueryRow(ctx, `
+		UPDATE console_lookups SET used_at = now() WHERE session_hash = $1 AND handle = $2
+		RETURNING address`, hash, handle).Scan(&address)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -65,6 +85,14 @@ func (db *DB) LookingFor(ctx context.Context, hash []byte) (string, error) {
 		return "", fmt.Errorf("postgres: read what a console session looks for: %w", err)
 	}
 	return address, nil
+}
+
+// Forget implements store.Sessions.
+func (db *DB) Forget(ctx context.Context, hash []byte, handle string) error {
+	if _, err := db.pool.Exec(ctx, `DELETE FROM console_lookups WHERE session_hash = $1 AND handle = $2`, hash, handle); err != nil {
+		return fmt.Errorf("postgres: forget what a console session looked for: %w", err)
+	}
+	return nil
 }
 
 // DeleteSession implements store.Sessions.
