@@ -79,26 +79,22 @@ type file struct {
 	Filename    string `json:"filename"`
 	Type        string `json:"type"`
 	Disposition string `json:"disposition"`
+	// ContentID is how the HTML names a file it shows.
+	ContentID string `json:"content_id,omitempty"`
 }
 
-// errInline is an attachment the HTML body shows. How Cloudflare's send
-// call names such a file's content id is not known, and a guess that is
-// wrong would send an email whose pictures are missing: it is refused.
-var errInline = fmt.Errorf("cloudflare: an attachment with a content id cannot be sent through this provider yet: %w", driver.ErrRejected)
-
-// NoInlineFiles implements driver.Plain.
-func (*Driver) NoInlineFiles() bool { return true }
-
-// files are a message's attachments as Cloudflare takes them.
-func files(m driver.Message) ([]file, error) {
+// files are a message's attachments as Cloudflare takes them: beside
+// the email, or, with a content id, as part of its HTML.
+func files(m driver.Message) []file {
 	var out []file
 	for _, a := range m.Attachments {
+		f := file{Content: a.Content, Filename: a.Filename, Type: a.Type, Disposition: "attachment"}
 		if a.ContentID != "" {
-			return nil, errInline
+			f.Disposition, f.ContentID = "inline", a.ContentID
 		}
-		out = append(out, file{Content: a.Content, Filename: a.Filename, Type: a.Type, Disposition: "attachment"})
+		out = append(out, f)
 	}
-	return out, nil
+	return out
 }
 
 // sendResult names the recipient in exactly one of its lists.
@@ -112,13 +108,9 @@ type sendResult struct {
 
 // Send implements driver.Driver.
 func (d *Driver) Send(ctx context.Context, m driver.Message) (string, error) {
-	attached, err := files(m)
-	if err != nil {
-		return "", err
-	}
 	a, err := d.ask(ctx, http.MethodPost, "/email/sending/send", sendBody{
 		From: sender{Address: m.From, Name: m.FromName}, To: m.To, Cc: m.Cc, Bcc: m.Bcc, ReplyTo: m.ReplyTo,
-		Subject: m.Subject, HTML: m.HTML, Text: m.Text, Headers: m.Headers, Attachments: attached,
+		Subject: m.Subject, HTML: m.HTML, Text: m.Text, Headers: m.Headers, Attachments: files(m),
 	})
 	if err != nil {
 		return "", err
