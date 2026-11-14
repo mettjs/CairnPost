@@ -148,3 +148,17 @@ func TestConsoleSettings(t *testing.T) {
 		}
 	}
 }
+
+// A send is taken to be abandoned after the in-doubt window, and never
+// while one could still be under way.
+func TestAbandonedAfterIsNeverInsideASend(t *testing.T) {
+	for _, c := range []struct{ window, send, want time.Duration }{
+		{2 * time.Minute, 10 * time.Second, 2 * time.Minute},
+		{11 * time.Second, 10 * time.Second, 70 * time.Second},
+		{time.Hour, 10 * time.Second, time.Hour},
+	} {
+		if got := (Config{InDoubtWindow: c.window, SendTimeout: c.send}).AbandonedAfter(); got != c.want {
+			t.Errorf("window %v, send %v: %v, want %v", c.window, c.send, got, c.want)
+		}
+	}
+}

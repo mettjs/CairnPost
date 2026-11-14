@@ -3,12 +3,17 @@
 // Idempotency-Keys past their life, emails' records past the time the
 // operator keeps them, and lifted suppressions nothing can undo any more.
 // A suppression in force is never pruned.
+//
+// Beside that, at a pace of its own, it settles what a server that
+// stopped mid-send left undone: a send nobody is waiting on any more is
+// recorded as unknown.
 package prune
 
 import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +43,10 @@ type Options struct {
 	// Keep is how long an email's record is kept; 0 keeps records for
 	// ever, and then only keys and kept words are pruned.
 	Keep time.Duration
+	// Unanswered is how long a send may stay "sending" before it is
+	// recorded as unknown, and how often that is looked for; 0 never
+	// looks. It must be longer than any send is given.
+	Unanswered time.Duration
 }
 
 // Pruner forgets what has been kept long enough.
@@ -61,6 +70,11 @@ func (p *Pruner) Healthy() bool { return !p.failing.Load() }
 // that fails is tried again soon, not a whole rest later: most failures
 // pass by themselves, and what it left undone is still due.
 func (p *Pruner) Run(ctx context.Context) {
+	if p.opt.Unanswered > 0 {
+		var sweeping sync.WaitGroup
+		sweeping.Go(func() { p.sweeps(ctx) })
+		defer sweeping.Wait()
+	}
 	retry := firstRetry
 	for {
 		c, err := p.Pass(ctx)
@@ -90,6 +104,35 @@ func (p *Pruner) Run(ctx context.Context) {
 		case <-time.After(rest):
 		}
 	}
+}
+
+// sweeps looks, until the context ends, for sends left unanswered. A send
+// is found between one and two times Unanswered after it began.
+func (p *Pruner) sweeps(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(p.opt.Unanswered):
+		}
+		switch n, err := p.Sweep(ctx); {
+		case ctx.Err() != nil:
+			return
+		case err != nil:
+			p.log.Error("prune: sends left unanswered could not be looked for; trying again", "error", err, "in", p.opt.Unanswered.String())
+		case n > 0:
+			// A count only. It is worth a warning: each may or may not
+			// have gone, and nobody was told.
+			p.log.Warn("prune: sends were left unanswered, by a server that stopped in the middle of them, "+
+				"and are now recorded as unknown", "sends", n)
+		}
+	}
+}
+
+// Sweep records as unknown every send still "sending" after Unanswered,
+// and answers how many.
+func (p *Pruner) Sweep(ctx context.Context) (int, error) {
+	return all(ctx, func(ctx context.Context) (int, error) { return p.store.MarkUnanswered(ctx, p.opt.Unanswered, batch) })
 }
 
 // Counts is how much a pass deleted.

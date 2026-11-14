@@ -69,10 +69,47 @@ func New(d Deps) http.Handler {
 	if d.Captured != nil {
 		mux.Handle("GET /capture/emails", a.auth(true, a.captured))
 	}
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		fail(w, http.StatusNotFound, "not_found", "There is nothing at this path.")
+	return a.logged(unrouted(mux))
+}
+
+// unrouted answers, in the API's own form, a request no route takes. A
+// path that exists under another method says which methods it takes. A
+// path that does not exist is named apart from a record that is not
+// there: a caller whose base address is wrong must not read it as "no
+// such email".
+func unrouted(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h, pattern := mux.Handler(r)
+		if pattern != "" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		// The mux knows which of the two it is, and says so in plain
+		// text: its answer is read, not sent.
+		probe := &unsent{header: http.Header{}}
+		h.ServeHTTP(probe, r)
+		if probe.code == http.StatusMethodNotAllowed {
+			allow := probe.header.Get("Allow")
+			w.Header().Set("Allow", allow)
+			fail(w, http.StatusMethodNotAllowed, "method_not_allowed", "This path does not take "+r.Method+". It takes: "+allow+".")
+			return
+		}
+		fail(w, http.StatusNotFound, "route_not_found", "There is nothing at this path. Check the path and the server's address.")
 	})
-	return a.logged(mux)
+}
+
+// unsent takes an answer that is only looked at.
+type unsent struct {
+	header http.Header
+	code   int
+}
+
+func (u *unsent) Header() http.Header         { return u.header }
+func (u *unsent) Write(b []byte) (int, error) { return len(b), nil }
+func (u *unsent) WriteHeader(code int) {
+	if u.code == 0 {
+		u.code = code
+	}
 }
 
 type app struct{ Deps }

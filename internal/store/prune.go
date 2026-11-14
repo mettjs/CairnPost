@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
-// Pruning forgets what has been kept long enough. Each call deletes at most
-// limit rows, oldest first, skipping any row another transaction holds, and
-// answers how many went: a caller repeats it until fewer than limit do.
+// Pruning forgets what has been kept long enough, and settles what was
+// left undone. Each call takes at most limit rows, oldest first, skipping
+// any row another transaction holds, and answers how many it took: a
+// caller repeats it until fewer than limit are.
 type Pruning interface {
 	// PruneContents deletes what emails said, once the time each was kept
 	// for is up. That time was fixed when it was kept, so a pruner needs
@@ -22,6 +23,14 @@ type Pruning interface {
 	// ones a new request would take over anyway. A message one of them
 	// left with no answer is recorded as unknown, as a takeover would.
 	PruneKeys(ctx context.Context, ttl time.Duration, limit int) (int, error)
+	// MarkUnanswered records as unknown the messages still "sending"
+	// that were started older ago: a send is answered or given up long
+	// before, so one left like that lost whoever was sending it (the
+	// process ended mid-send), and nothing else would ever say what
+	// became of it. A send that does get its answer after all is
+	// recorded with it as usual. Marking it is nothing that happened to
+	// the email: its record stays kept from when it was sent.
+	MarkUnanswered(ctx context.Context, older time.Duration, limit int) (int, error)
 	// Horizon is the store's own time, keep ago: the instant the other
 	// prunes of one pass are measured against, so they agree.
 	Horizon(ctx context.Context, keep time.Duration) (time.Time, error)

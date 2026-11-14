@@ -23,7 +23,8 @@ type Config struct {
 	IdempotencyTTL time.Duration
 	// InDoubtWindow is CAIRNPOST_IN_DOUBT_WINDOW: how long a send whose
 	// answer was lost blocks a retry of its key before the retry is let
-	// through. Default 2m.
+	// through. Default 2m. It is also, through AbandonedAfter, how long
+	// a send may stay "sending" before it is recorded as unknown.
 	InDoubtWindow time.Duration
 	// SendTimeout is CAIRNPOST_SEND_TIMEOUT: the most one call to the
 	// upstream may take. Default 10s.
@@ -123,6 +124,14 @@ type Cloudflare struct {
 	// it delivery events are not read, and an email's record stops at
 	// "sent". The token then also needs the Queues permission.
 	QueueID string
+}
+
+// AbandonedAfter is how long a send may stay "sending" before it is taken
+// to have been abandoned by a server that stopped in the middle of it: the
+// in-doubt window, and never less than a send and the writing down of its
+// answer can take.
+func (c Config) AbandonedAfter() time.Duration {
+	return max(c.InDoubtWindow, c.SendTimeout+time.Minute)
 }
 
 // Drivers are the values CAIRNPOST_DRIVER takes.

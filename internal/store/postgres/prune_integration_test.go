@@ -355,3 +355,49 @@ func TestWhatAnEmailSaidIsKeptWithItAndForgottenOnTime(t *testing.T) {
 		t.Fatalf("the record went with its words: %v", err)
 	}
 }
+
+// A send left "sending" past the time any send is given is recorded as
+// unknown; one within it, and one that was answered, are left alone. Its
+// record stays kept from when it was sent, and an answer that comes after
+// all still lands.
+func TestASendLeftSendingBecomesUnknown(t *testing.T) {
+	ctx, db := context.Background(), open(t)
+	k := key(t, db)
+	begin := func() string {
+		t.Helper()
+		c, err := db.Start(ctx, start(k, "", "one"))
+		if err != nil || c.Outcome != store.Started {
+			t.Fatalf("did not start: %v %v", c.Outcome, err)
+		}
+		return c.ID
+	}
+	left, fresh, sent := begin(), begin(), begin()
+	if err := db.Sent(ctx, sent, "<"+sent+">"); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, `UPDATE messages SET created_at = created_at - interval '2 hours', updated_at = updated_at - interval '2 hours'
+		WHERE id = ANY($1::uuid[])`, []string{left, sent})
+	for {
+		n, err := db.MarkUnanswered(ctx, time.Hour, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n < 1000 {
+			break
+		}
+	}
+	for id, want := range map[string]string{left: store.StateUnknown, fresh: store.StateSending, sent: store.StateSent} {
+		if m, err := db.Message(ctx, id); err != nil || m.State != want {
+			t.Errorf("state %q, want %q: %v", m.State, want, err)
+		}
+	}
+	if m, err := db.Message(ctx, left); err != nil || time.Since(m.UpdatedAt) < time.Hour {
+		t.Fatalf("marking it moved its record's time to %v: %v", m.UpdatedAt, err)
+	}
+	if err := db.Sent(ctx, left, "<"+left+">"); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := db.Message(ctx, left); err != nil || m.State != store.StateSent {
+		t.Fatalf("a late answer left it %q: %v", m.State, err)
+	}
+}

@@ -43,6 +43,13 @@ Every change a user of CairnPost can notice is written here. The format is
   `Idempotency-Key` when its life is over. A suppression in force is never
   deleted; a lifted one is forgotten once no email sent before the lift is
   on record.
+- A send left `sending` because the server stopped in the middle of it is
+  set to `unknown` within twice `CAIRNPOST_IN_DOUBT_WINDOW`, instead of
+  staying `sending` for good. The log says how many, as a warning.
+- A path the API does not have answers 404 `route_not_found`, apart from
+  the `not_found` of a record that is not there, so a wrong server address
+  is not read as a missing email. A path that is there under another
+  method answers 405 `method_not_allowed` with `Allow`.
 - Content retention, off by default: with `CAIRNPOST_CONTENT_RETENTION` set
   (30 days at most), what each email said, and what the receiving server
   said about a bounce or a delay, is kept for that long and shown by

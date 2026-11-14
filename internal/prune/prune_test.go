@@ -278,3 +278,48 @@ func TestMoreThanABatchIsPrunedInOnePass(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+// sweep looks for sends left unanswered for two minutes.
+func (r *rig) sweep() int {
+	r.t.Helper()
+	n, err := New(r.s, Options{Every: time.Hour, Unanswered: 2 * time.Minute}, quiet).Sweep(context.Background())
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return n
+}
+
+// A send with no Idempotency-Key that was never answered (whoever sent
+// it ended mid-send) is said to be unknown once no send could still be
+// under way; one just begun is left alone, and one answered is not
+// touched. Its record stays kept from when it was sent.
+func TestASendNobodyAnsweredBecomesUnknown(t *testing.T) {
+	ctx, r := context.Background(), newRig(t)
+	began := r.now
+	left := r.send("", "left@example.org", "")
+	sent := r.send("<s>", "sent@example.org", "")
+	r.now = r.now.Add(time.Minute)
+	if n := r.sweep(); n != 0 {
+		t.Fatalf("a send still within its time was marked: %d", n)
+	}
+	r.now = r.now.Add(2 * time.Minute)
+	fresh := r.send("", "fresh@example.org", "")
+	if n := r.sweep(); n != 1 {
+		t.Fatalf("after its time: %d", n)
+	}
+	for id, want := range map[string]string{left: store.StateUnknown, sent: store.StateSent, fresh: store.StateSending} {
+		if m, err := r.s.Message(ctx, id); err != nil || m.State != want {
+			t.Errorf("state %q, want %q: %v", m.State, want, err)
+		}
+	}
+	if m, _ := r.s.Message(ctx, left); !m.UpdatedAt.Equal(began) {
+		t.Errorf("marking it moved its record's time to %v", m.UpdatedAt)
+	}
+	// The answer coming after all is recorded as usual.
+	if err := r.s.Sent(ctx, left, "<late>"); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := r.s.Message(ctx, left); m.State != store.StateSent {
+		t.Errorf("a late answer left it %q", m.State)
+	}
+}

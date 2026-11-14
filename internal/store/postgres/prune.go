@@ -58,10 +58,34 @@ func (db *DB) PruneKeys(ctx context.Context, ttl time.Duration, limit int) (int,
 		}
 		// A try that never got its answer: what became of its email is
 		// not known, and with the key gone nothing else would say so.
-		return markUnknown(ctx, tx, inDoubt...)
+		return markUnknown(ctx, tx, true, inDoubt...)
 	})
 	if err != nil {
 		return 0, fmt.Errorf("postgres: prune idempotency keys: %w", err)
+	}
+	return n, nil
+}
+
+// MarkUnanswered implements store.Pruning, on the database's clock.
+func (db *DB) MarkUnanswered(ctx context.Context, older time.Duration, limit int) (int, error) {
+	n := 0
+	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT id::text FROM messages
+			WHERE state = 'sending' AND created_at <= now() - make_interval(secs => $1)
+			ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED`, older.Seconds(), limit)
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil || len(ids) == 0 {
+			return err
+		}
+		n = len(ids)
+		return markUnknown(ctx, tx, false, ids...)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("postgres: mark unanswered sends unknown: %w", err)
 	}
 	return n, nil
 }

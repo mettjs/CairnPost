@@ -55,6 +55,22 @@ func (s *Store) PruneKeys(_ context.Context, ttl time.Duration, limit int) (int,
 	return n, nil
 }
 
+// MarkUnanswered implements store.Pruning.
+func (s *Store) MarkUnanswered(_ context.Context, older time.Duration, limit int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, now := 0, s.Now()
+	for id, m := range s.messages {
+		if n < limit && m.State == store.StateSending && now.Sub(m.CreatedAt) >= older {
+			// Its record stays kept from when it was sent.
+			m.State = store.StateUnknown
+			s.messages[id] = m
+			n++
+		}
+	}
+	return n, nil
+}
+
 // Horizon implements store.Pruning.
 func (s *Store) Horizon(_ context.Context, keep time.Duration) (time.Time, error) {
 	s.mu.Lock()
