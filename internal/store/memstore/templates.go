@@ -5,13 +5,14 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"time"
 
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
 // copyOf is a template nobody else holds a part of.
 func copyOf(t store.Template) store.Template {
-	t.Defaults = maps.Clone(t.Defaults)
+	t.Defaults, t.Variables = maps.Clone(t.Defaults), slices.Clone(t.Variables)
 	if t.Defaults == nil {
 		t.Defaults = map[string]string{}
 	}
@@ -78,6 +79,7 @@ func (s *Store) ListTemplates(_ context.Context, domain string, limit int) ([]st
 	var out []store.Template
 	for _, t := range s.templates {
 		if domain == "" || t.Domain == domain {
+			t.HTML, t.Text = "", ""
 			out = append(out, copyOf(t))
 		}
 	}
@@ -95,13 +97,21 @@ func (s *Store) UpdateTemplate(_ context.Context, t store.Template) (store.Templ
 	if !ok {
 		return store.Template{}, store.ErrNotFound
 	}
+	if !was.UpdatedAt.Equal(t.UpdatedAt) {
+		return store.Template{}, store.ErrStale
+	}
 	for _, other := range s.templates {
 		if other.ID != t.ID && other.Domain == was.Domain && other.Name == t.Name {
 			return store.Template{}, store.ErrTaken
 		}
 	}
 	t = copyOf(t)
+	// Past the time before, however the clock stands: each change is
+	// told apart.
 	t.Domain, t.CreatedAt, t.UpdatedAt = was.Domain, was.CreatedAt, s.Now()
+	if !t.UpdatedAt.After(was.UpdatedAt) {
+		t.UpdatedAt = was.UpdatedAt.Add(time.Microsecond)
+	}
 	s.templates[t.ID] = t
 	return copyOf(t), nil
 }

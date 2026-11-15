@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mettjs/cairnpost/internal/fill"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/templates"
 )
@@ -31,6 +30,8 @@ type templatesView struct {
 	Problem string
 	Form    templateForm
 	Unread  bool
+	// More says there are more templates than the list holds.
+	More bool
 	// Tab is the part shown: "" the list, "new" the form.
 	Tab  string
 	Tabs tabs
@@ -38,7 +39,7 @@ type templatesView struct {
 
 // defaultsRead reads lines of "name = value" into the values variables
 // are filled with when a send gives none; a problem for a line that is
-// neither that nor empty. A value is kept as typed after the "=".
+// neither that nor empty.
 func defaultsRead(typed string) (map[string]string, string) {
 	out := map[string]string{}
 	for _, line := range strings.Split(strings.ReplaceAll(typed, "\r\n", "\n"), "\n") {
@@ -46,13 +47,15 @@ func defaultsRead(typed string) (map[string]string, string) {
 			continue
 		}
 		name, value, ok := strings.Cut(line, "=")
-		if name = strings.TrimSpace(name); !ok || !fill.Name(name) {
+		if name = strings.TrimSpace(name); !ok || !templates.VariableName(name) {
 			return nil, `Each line of the defaults is a variable's name, "=", and what it is filled with, such as: name = there`
 		}
 		if _, twice := out[name]; twice {
 			return nil, "The defaults name a variable twice. Give each one line."
 		}
-		out[name] = strings.TrimSpace(value)
+		// As typed, but for the one space written after the "=": a
+		// default that begins or ends with a space stays as it is.
+		out[name] = strings.TrimPrefix(value, " ")
 	}
 	return out, ""
 }
@@ -90,6 +93,9 @@ func templateProblem(bad *templates.Invalid) string {
 		}
 		return "The name is how a send asks for the template: 1 to 64 of a-z, 0-9, - and _, starting with a letter or a digit."
 	case "subject":
+		if strings.Contains(bad.Reason, "{{") || strings.Contains(bad.Reason, "space") {
+			return formWords.Replace(bad.Reason)
+		}
 		return "A template needs a subject, on one line, of at most 998 bytes."
 	case "domain":
 		return "The sending domain must be a domain, such as mail.example.com, or left empty."
@@ -98,20 +104,22 @@ func templateProblem(bad *templates.Invalid) string {
 }
 
 // formWords says a problem's fields as the form calls them.
-var formWords = strings.NewReplacer(`"defaults" gives`, "The defaults give", `In "html"`, "In the HTML", `In "text"`, "In the text",
+var formWords = strings.NewReplacer(`"defaults" gives`, "The defaults give", `A value in "defaults"`, "A default", `"subject" must`, "The subject must", `In "html"`, "In the HTML", `In "text"`, "In the text",
 	`In "subject"`, "In the subject", `"html"`, "HTML", `"text"`, "text")
 
 // wideForm reads a form as long as a template may be.
 func (c *console) wideForm(w http.ResponseWriter, r *http.Request) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, c.TemplateBytes*2+8192)
+	// A form writes some characters as three bytes, and a line's end
+	// as six.
+	r.Body = http.MaxBytesReader(w, r.Body, c.TemplateBytes*6+8192)
 	return r.ParseForm() == nil
 }
 
 // templatesShown is the page with the templates the signed-in key manages.
 func (c *console) templatesShown(w http.ResponseWriter, r *http.Request, code int, v templatesView) {
 	v.Bound = who(r).Domain
-	list, err := c.Templates.List(r.Context(), who(r).Domain)
-	if err != nil {
+	list, more, err := c.Templates.List(r.Context(), who(r).Domain, "")
+	if v.More = more; err != nil {
 		c.Log.Error("console: the templates could not be read", "error", err)
 		v.Unread = true
 	}
@@ -142,6 +150,8 @@ func (c *console) refusal(err error, doing string) (code int, why string, ok boo
 		return http.StatusUnprocessableEntity, templateProblem(invalid), false
 	case errors.Is(err, templates.ErrDomain):
 		return http.StatusForbidden, "The key you are signed in with manages one sending domain, and can only make templates for it.", false
+	case errors.Is(err, store.ErrStale):
+		return http.StatusConflict, "It was changed by someone else while you were changing it. Open it again and make your change over what it says now.", false
 	case errors.Is(err, store.ErrTaken):
 		return http.StatusConflict, "That sending domain already has a template of this name. Give this one another name.", false
 	}

@@ -97,7 +97,9 @@ func filled(text string, values map[string]string, most int, as func(string) str
 		}
 	}
 	err := walk(text, write, func(n string) {
-		if !long {
+		// A value is never shorter written than it is: one that cannot
+		// fit is not written out first to find that it does not.
+		if long = long || len(values[n]) > most-b.Len(); !long {
 			write(as(values[n]))
 		}
 	})

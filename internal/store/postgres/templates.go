@@ -11,11 +11,14 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
-const templateColumns = `id::text, domain, name, subject, html, body_text, defaults, created_at, updated_at`
+const templateColumns = `id::text, domain, name, subject, html, body_text, variables, defaults, created_at, updated_at`
+
+// listedColumns are a template's without its bodies.
+const listedColumns = `id::text, domain, name, subject, '', '', variables, defaults, created_at, updated_at`
 
 func scanTemplate(row pgx.Row) (store.Template, error) {
 	var t store.Template
-	err := row.Scan(&t.ID, &t.Domain, &t.Name, &t.Subject, &t.HTML, &t.Text, &t.Defaults, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.Domain, &t.Name, &t.Subject, &t.HTML, &t.Text, &t.Variables, &t.Defaults, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.Template{}, store.ErrNotFound
 	}
@@ -36,6 +39,14 @@ func defaults(t store.Template) map[string]string {
 	return t.Defaults
 }
 
+// names are a template's variables as they are kept: never null.
+func names(t store.Template) []string {
+	if t.Variables == nil {
+		return []string{}
+	}
+	return t.Variables
+}
+
 // CreateTemplate implements store.Templates.
 func (db *DB) CreateTemplate(ctx context.Context, t store.Template, max int) (store.Template, error) {
 	var out store.Template
@@ -44,15 +55,24 @@ func (db *DB) CreateTemplate(ctx context.Context, t store.Template, max int) (st
 		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('cairnpost.templates'))`); err != nil {
 			return err
 		}
+		// A name the domain has is said before the count is: the answer
+		// is the same however many there are.
+		var had bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM templates WHERE domain = $1 AND name = $2)`, t.Domain, t.Name).Scan(&had); err != nil {
+			return err
+		}
+		if had {
+			return store.ErrTaken
+		}
 		out, err = scanTemplate(tx.QueryRow(ctx, `
-			INSERT INTO templates (domain, name, subject, html, body_text, defaults)
-			SELECT $1, $2, $3, $4, $5, $6
-			WHERE $7 = 0 OR (SELECT count(*) FROM templates WHERE domain = $1) < $7
-			RETURNING `+templateColumns, t.Domain, t.Name, t.Subject, t.HTML, t.Text, defaults(t), max))
+			INSERT INTO templates (domain, name, subject, html, body_text, variables, defaults)
+			SELECT $1, $2, $3, $4, $5, $6, $7
+			WHERE $8 = 0 OR (SELECT count(*) FROM templates WHERE domain = $1) < $8
+			RETURNING `+templateColumns, t.Domain, t.Name, t.Subject, t.HTML, t.Text, names(t), defaults(t), max))
 		return err
 	})
 	switch {
-	case nameTaken(err):
+	case nameTaken(err), errors.Is(err, store.ErrTaken):
 		return store.Template{}, store.ErrTaken
 	case errors.Is(err, store.ErrNotFound):
 		return store.Template{}, store.ErrLimit // nothing was inserted: the count was reached
@@ -87,7 +107,7 @@ func (db *DB) TemplateNamed(ctx context.Context, domain, name string) (store.Tem
 
 // ListTemplates implements store.Templates.
 func (db *DB) ListTemplates(ctx context.Context, domain string, limit int) ([]store.Template, error) {
-	rows, err := db.pool.Query(ctx, `SELECT `+templateColumns+` FROM templates
+	rows, err := db.pool.Query(ctx, `SELECT `+listedColumns+` FROM templates
 		WHERE $1 = '' OR domain = $1 ORDER BY domain, name LIMIT $2`, domain, limit)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list templates: %w", err)
@@ -104,16 +124,26 @@ func (db *DB) UpdateTemplate(ctx context.Context, t store.Template) (store.Templ
 	if !uuidShape.MatchString(t.ID) {
 		return store.Template{}, store.ErrNotFound
 	}
+	// Written only over what was read: of two changes made at one time,
+	// the second is told, and neither undoes the other. The time is
+	// stamped past the one before, so each change is told apart.
 	out, err := scanTemplate(db.pool.QueryRow(ctx, `
-		UPDATE templates SET name = $2, subject = $3, html = $4, body_text = $5, defaults = $6, updated_at = now()
-		WHERE id = $1::uuid RETURNING `+templateColumns, t.ID, t.Name, t.Subject, t.HTML, t.Text, defaults(t)))
+		UPDATE templates SET name = $2, subject = $3, html = $4, body_text = $5, variables = $6, defaults = $7,
+			updated_at = greatest(now(), updated_at + interval '1 microsecond')
+		WHERE id = $1::uuid AND updated_at = $8 RETURNING `+templateColumns,
+		t.ID, t.Name, t.Subject, t.HTML, t.Text, names(t), defaults(t), t.UpdatedAt))
 	switch {
 	case nameTaken(err):
 		return store.Template{}, store.ErrTaken
-	case err != nil && !errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound):
+		if _, gone := db.Template(ctx, t.ID); gone == nil {
+			return store.Template{}, store.ErrStale
+		}
+		return store.Template{}, store.ErrNotFound
+	case err != nil:
 		return store.Template{}, fmt.Errorf("postgres: change a template: %w", err)
 	}
-	return out, err
+	return out, nil
 }
 
 // DeleteTemplate implements store.Templates.

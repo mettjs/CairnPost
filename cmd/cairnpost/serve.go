@@ -167,7 +167,7 @@ func serve(ctx context.Context) error {
 	endpoints := webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, cfg.Webhook.SecretOverlap, time.Now)
 	suppressions := suppress.New(db)
 	written := templates.NewService(db, templates.Options{Max: cfg.MaxTemplates, MaxBytes: int(cfg.MaxBodyBytes)})
-	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout, Templates: written,
+	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout, Templates: written, MaxFilled: int(max(emailBytes(cfg), cfg.MaxBodyBytes)),
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention, KeepFiles: cfg.ContentFiles,
 		MaxRecipients: cfg.MaxRecipients, MaxAttachments: attachmentsOf(cfg), MaxAttachmentBytes: cfg.MaxAttachmentBytes,
 		MaxBatch: cfg.MaxBatch, BatchParallel: cfg.BatchParallel, BatchTime: cfg.BatchTimeout, Stopping: ctx.Done(),

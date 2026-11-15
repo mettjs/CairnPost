@@ -35,6 +35,16 @@ func TestATemplateIsHeldToWhatAnEmailIs(t *testing.T) {
 			t.Errorf("%s: %v", field, err)
 		}
 	}
+	for field, n := range map[string]templates.New{
+		"subject":  {Name: "a", Subject: strings.Repeat("x", 901), Text: "t"},
+		"html":     {Name: "a", Subject: "s", Text: "a\x00b"},
+		"defaults": {Name: "a", Subject: "s", Text: "{{a}}", Defaults: map[string]string{"a": "two\nlines"}},
+	} {
+		var bad *templates.Invalid
+		if _, err := s.Create(ctx, "", n); !errors.As(err, &bad) || bad.Field != field || strings.Contains(bad.Reason, "SECRETVALUE") {
+			t.Errorf("%s: %v", field, err)
+		}
+	}
 	for name, n := range map[string]templates.New{
 		"a subject on two lines": {Name: "a", Subject: "s\nBcc: x", Text: "t"},
 		"too long":               {Name: "a", Subject: "s", Text: strings.Repeat("x", 1000)},
@@ -70,11 +80,21 @@ func TestATemplateIsItsDomainsOrEveryones(t *testing.T) {
 		t.Fatalf("%+v %v", all, err)
 	}
 	// A bound key manages its own and is not told of the others.
-	if list, err := s.List(ctx, "a.example"); err != nil || len(list) != 1 || list[0].ID != own.ID {
+	// However it asks: a bound key's list is its own domain's.
+	for _, asked := range []string{"", "b.example"} {
+		if list, more, err := s.List(ctx, "a.example", asked); err != nil || more || len(list) != 1 || list[0].ID != own.ID || list[0].HTML != "" {
+			t.Errorf("%+v %v", list, err)
+		}
+	}
+	if list, _, err := s.List(ctx, "", ""); err != nil || len(list) != 2 {
 		t.Errorf("%+v %v", list, err)
 	}
-	if list, err := s.List(ctx, ""); err != nil || len(list) != 2 {
-		t.Errorf("%+v %v", list, err)
+	if list, _, err := s.List(ctx, "", "A.example"); err != nil || len(list) != 1 || len(list[0].Variables) != 2 {
+		t.Errorf("one domain's: %+v %v", list, err)
+	}
+	var bad *templates.Invalid
+	if _, _, err := s.List(ctx, "", "not a domain"); !errors.As(err, &bad) {
+		t.Errorf("a domain that is none: %v", err)
 	}
 	if _, err := s.Get(ctx, "a.example", all.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("everyone's, read by a bound key: %v", err)
@@ -154,8 +174,31 @@ func TestAnEmailIsFilledFromItsDomainsTemplate(t *testing.T) {
 }
 
 func TestVariablesAreNamedOnceInOrder(t *testing.T) {
-	got := templates.Variables(store.Template{Subject: welcome.Subject, HTML: welcome.HTML, Text: welcome.Text, Defaults: welcome.Defaults})
+	made, _ := service(0).Create(ctx, "", welcome)
+	got := templates.Variables(made)
 	if len(got) != 2 || got[0] != (templates.Variable{Name: "name", Default: "there"}) || got[1] != (templates.Variable{Name: "code", Required: true}) {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// Two changes made at one time: neither undoes the other.
+func TestChangesMadeAtOneTimeAreBothKept(t *testing.T) {
+	mem := memstore.New()
+	s := templates.NewService(mem, templates.Options{MaxBytes: 1000})
+	made, _ := s.Create(ctx, "", welcome)
+	// A change made over a read that is no longer the latest is told.
+	stale := made
+	stale.Subject = "Stale"
+	html := "<p>{{name}} {{code}} changed</p>"
+	if _, err := s.Update(ctx, "", made.ID, templates.Change{HTML: &html}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mem.UpdateTemplate(ctx, stale); !errors.Is(err, store.ErrStale) {
+		t.Fatalf("written over a newer one: %v", err)
+	}
+	subject := "Hi {{name}}"
+	got, err := s.Update(ctx, "", made.ID, templates.Change{Subject: &subject})
+	if err != nil || got.Subject != subject || got.HTML != html || !got.UpdatedAt.After(made.UpdatedAt) {
+		t.Fatalf("%+v %v", got, err)
 	}
 }

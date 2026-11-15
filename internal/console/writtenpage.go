@@ -74,14 +74,18 @@ func exampleOf(t store.Template, variables []templates.Variable) string {
 	return string(out)
 }
 
+// formOfTemplate is a template as its form holds it.
+func formOfTemplate(t store.Template) templateForm {
+	return templateForm{Name: t.Name, Subject: t.Subject, HTML: t.HTML, Text: t.Text, Defaults: defaultsText(t.Defaults)}
+}
+
 // templateShown is a template's page.
 func (c *console) templateShown(w http.ResponseWriter, r *http.Request, code int, v templateView) {
 	forced := ""
 	if v.Problem != "" {
 		forced = "edit"
 	} else {
-		t := v.Template
-		v.Form = templateForm{Name: t.Name, Subject: t.Subject, HTML: t.HTML, Text: t.Text, Defaults: defaultsText(t.Defaults)}
+		v.Form = formOfTemplate(v.Template)
 	}
 	v.Variables = templates.Variables(v.Template)
 	v.Example = exampleOf(v.Template, v.Variables)
@@ -105,7 +109,7 @@ func (c *console) updateTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	if !c.wideForm(w, r) {
 		c.templateShown(w, r, http.StatusUnprocessableEntity, templateView{Template: t, Problem: "That is longer than a template may be.",
-			Form: templateForm{Name: t.Name, Subject: t.Subject}})
+			Form: formOfTemplate(t)})
 		return
 	}
 	f := templateRead(r)

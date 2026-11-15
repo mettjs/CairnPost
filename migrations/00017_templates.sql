@@ -12,6 +12,9 @@ CREATE TABLE templates (
     subject    text NOT NULL,
     html       text NOT NULL DEFAULT '',
     body_text  text NOT NULL DEFAULT '',
+    -- The variables its subject and bodies name, in the order they first
+    -- come: kept beside them, so a list need not read the bodies.
+    variables  text[] NOT NULL DEFAULT '{}',
     -- What a variable is filled with when a send gives it no value.
     defaults   jsonb NOT NULL DEFAULT '{}',
     created_at timestamptz NOT NULL DEFAULT now(),

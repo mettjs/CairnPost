@@ -71,6 +71,10 @@ func TestATextFilledTooLongIsNotWritten(t *testing.T) {
 			t.Errorf("%q: %v", text[:10], err)
 		}
 	}
+	// A value that cannot fit is not escaped first to find that out.
+	if _, err := HTML("{{v}}", map[string]string{"v": strings.Repeat(`"`, 1<<20)}, 100); !errors.Is(err, ErrTooLong) {
+		t.Error(err)
+	}
 	// Escaping counts: what is written is what is measured.
 	if _, err := HTML("{{v}}", map[string]string{"v": "<<<<<"}, 10); !errors.Is(err, ErrTooLong) {
 		t.Error(err)

@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/mettjs/cairnpost/internal/fill"
+	"github.com/mettjs/cairnpost/internal/line"
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
@@ -27,24 +28,40 @@ func parts(t store.Template) [3]struct{ field, text string } {
 	return [3]struct{ field, text string }{{"subject", t.Subject}, {"html", t.HTML}, {"text", t.Text}}
 }
 
-// Variables answers the variables a template names, in the order they
-// first come in its subject, HTML and text. None for a template that
+// named answers the variables a template's subject, HTML and text name,
+// each once, in the order they first come. None for a template that
 // cannot be filled.
-func Variables(t store.Template) []Variable {
-	var out []Variable
+func named(t store.Template) []string {
+	out := []string{}
 	seen := map[string]bool{}
 	for _, p := range parts(t) {
 		names, _ := fill.Names(p.text)
 		for _, n := range names {
 			if !seen[n] {
 				seen[n] = true
-				d, has := t.Defaults[n]
-				out = append(out, Variable{Name: n, Default: d, Required: !has})
+				out = append(out, n)
 			}
 		}
 	}
 	return out
 }
+
+// Variables answers the variables a kept template names, in the order
+// they first come, and what each is filled with when a send gives none.
+func Variables(t store.Template) []Variable {
+	var out []Variable
+	for _, n := range t.Variables {
+		d, has := t.Defaults[n]
+		out = append(out, Variable{Name: n, Default: d, Required: !has})
+	}
+	return out
+}
+
+// VariableName reports whether s can name a variable.
+func VariableName(s string) bool { return fill.Name(s) }
+
+// nul is the one character no text kept here may hold.
+const nul = "\x00"
 
 // check says whether a template may be kept: an *Invalid otherwise.
 func (s *Service) check(t store.Template) error {
@@ -56,6 +73,14 @@ func (s *Service) check(t store.Template) error {
 	}
 	if len(t.Subject) > maxSubject || strings.ContainsFunc(t.Subject, unicode.IsControl) {
 		return &Invalid{"subject", fmt.Sprintf(`"subject" must be at most %d bytes on one line.`, maxSubject)}
+	}
+	if line.Unbroken(t.Subject) {
+		// An email's subject is held to this, so the template's is too:
+		// no send from it could go otherwise.
+		return &Invalid{"subject", fmt.Sprintf(`"subject" must have a space at least every %d characters.`, line.MaxWord)}
+	}
+	if strings.Contains(t.HTML, nul) || strings.Contains(t.Text, nul) {
+		return &Invalid{"html", `"html" and "text" must not hold the character U+0000.`}
 	}
 	if t.HTML == "" && t.Text == "" {
 		return &Invalid{"html", `One of "html" and "text" is required, or both: an email says something.`}
@@ -72,13 +97,16 @@ func (s *Service) check(t store.Template) error {
 		}
 	}
 	named := map[string]bool{}
-	for _, v := range Variables(t) {
-		named[v.Name] = true
+	for _, n := range t.Variables {
+		named[n] = true
 	}
 	if len(named) > MaxVariables {
 		return &Invalid{"html", fmt.Sprintf(`A template names at most %d variables; this one names %d.`, MaxVariables, len(named))}
 	}
-	for name := range t.Defaults {
+	for name, value := range t.Defaults {
+		if strings.ContainsAny(value, "\r\n"+nul) {
+			return &Invalid{"defaults", `A value in "defaults" is one line.`}
+		}
 		if !named[name] {
 			// The name is the caller's own, and only said when it could
 			// name a variable: nothing else is quoted.

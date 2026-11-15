@@ -108,7 +108,7 @@ func newRigBuilt(t *testing.T, s store.Store, adjust func(*api.Deps)) *rig {
 	written := templates.NewService(s, templates.Options{Max: 3, MaxBytes: 4096})
 	deps := api.Deps{
 		Mail: mail.New(s, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
-			InDoubtWindow: time.Minute, Templates: written}, log),
+			InDoubtWindow: time.Minute, Templates: written, MaxFilled: 600}, log),
 		Templates: written,
 		Keys:      ks, Suppress: suppress.New(s), Ping: s.Ping,
 		Webhooks: webhook.NewService(s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, 24*time.Hour, time.Now), Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,

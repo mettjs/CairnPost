@@ -39,11 +39,18 @@ func TestATemplateIsMadeReadChangedAndDeletedByAnAdminKey(t *testing.T) {
 	if code, _, _ := r.do("POST", "/templates", r.admin, "", `{"name":"x","subject":"s","text":"t","from":"a@example.com"}`); code != 400 && code != 422 {
 		t.Errorf("a field that is not known: %d", code)
 	}
-	// A list says what each is, without its bodies.
+	// A list says what each is and names, without its bodies.
 	_, _, list := r.do("GET", "/templates", r.admin, "", "")
 	data, _ := list["data"].([]any)
-	if one, _ := data[0].(map[string]any); len(data) != 1 || one["subject"] != "Hello {{name}}" || one["html"] != nil || one["text"] != nil {
+	if one, _ := data[0].(map[string]any); len(data) != 1 || one["subject"] != "Hello {{name}}" || one["html"] != nil || one["text"] != nil ||
+		len(one["variables"].([]any)) != 2 || list["more"] != false {
 		t.Errorf("%v", list)
+	}
+	if _, _, none := r.do("GET", "/templates?domain=other.example", r.admin, "", ""); len(none["data"].([]any)) != 0 {
+		t.Errorf("another domain's: %v", none)
+	}
+	if code, _, _ := r.do("POST", "/templates", r.admin, "", `{"name":"nul","subject":"s","text":"a\u0000b"}`); code != 422 {
+		t.Errorf("a text no database keeps: %d", code)
 	}
 	if code, _, got := r.do("GET", "/templates/"+id, r.admin, "", ""); code != 200 || got["html"] != "<p>{{name}}, your code is {{code}}</p>" {
 		t.Errorf("%d %v", code, got)
@@ -139,6 +146,41 @@ func TestAnEmailIsSentFromATemplate(t *testing.T) {
 	if code, name, _ := send("k1", `"template":{"name":"welcome","variables":{"name":"<Ana>","code":4822}}`); code != 409 || name != "invalid_idempotent_request" {
 		t.Errorf("another value under the same key: %d %s", code, name)
 	}
+	// Nor does the repeat need the template any more: changed so that it
+	// no longer fills the request, or deleted, the first email answers.
+	batch := `[{"from":"app@example.com","to":"bo@example.org","template":{"name":"welcome","variables":{"code":1}}}]`
+	if code, _, _ := r.do("POST", "/emails/batch", r.send, "b1", batch); code != 200 || len(r.drv.held) != 3 {
+		t.Fatalf("the batch: %d", code)
+	}
+	if code, _, _ := r.do("PATCH", "/templates/"+id, r.admin, "", `{"html":"<p>{{name}} {{code}} {{more}}</p>"}`); code != 200 {
+		t.Fatal(code)
+	}
+	if code, _, again := send("k1", `"template":{"name":"welcome","variables":{"name":"<Ana>","code":4821}}`); code != 200 || again["id"] != sent["id"] {
+		t.Errorf("the repeat, the template asking for more: %d %v", code, again)
+	}
+	if code, _, _ := r.do("DELETE", "/templates/"+id, r.admin, "", ""); code != 204 {
+		t.Fatal(code)
+	}
+	if code, _, again := send("k1", `"template":{"name":"welcome","variables":{"name":"<Ana>","code":4821}}`); code != 200 || again["id"] != sent["id"] {
+		t.Errorf("the repeat, the template gone: %d %v", code, again)
+	}
+	if code, _, _ := r.do("POST", "/emails/batch", r.send, "b1", batch); code != 200 {
+		t.Errorf("the batch again, the template gone: %d", code)
+	}
+	// What was not asked before is refused for what it is, and with a
+	// key as without one.
+	for _, idem := range []string{"", "k2"} {
+		if code, kind, out := send(idem, `"template":{"name":"welcome","variables":{"code":1}}`); code != 422 || kind != "validation_error" ||
+			!strings.Contains(out["message"].(string), "no template") {
+			t.Errorf("a new request, the template gone (key %q): %d %v", idem, code, out)
+		}
+	}
+	if code, _, _ := r.do("POST", "/emails/batch", r.send, "b2", batch); code != 422 {
+		t.Errorf("a new batch, the template gone: %d", code)
+	}
+	if len(r.drv.held) != 3 {
+		t.Errorf("%d emails went", len(r.drv.held))
+	}
 }
 
 func TestATemplateIsItsDomainsFirstAndABoundKeyLearnsOfNoOther(t *testing.T) {
@@ -182,6 +224,12 @@ func TestABatchAndALaterEmailAreFilledWhenTheyAreAsked(t *testing.T) {
 	// One that cannot be filled, and none goes.
 	if code, _, out := r.do("POST", "/emails/batch", r.send, "", "["+one(`"code":1`)+","+one(``)+"]"); code != 422 || len(r.drv.held) != 2 {
 		t.Fatalf("%d %v", code, out)
+	}
+	// A few bytes cannot ask for more than a batch may be.
+	many := strings.Repeat(one(`"code":1`)+",", 12)
+	if code, _, out := r.do("POST", "/emails/batch", r.send, "", "["+many[:len(many)-1]+"]"); code != 422 || len(r.drv.held) != 2 ||
+		!strings.Contains(out["message"].(string), "in all") {
+		t.Fatalf("a batch filled past what one may be: %d %v", code, out)
 	}
 	// An email that waits keeps what it was filled with.
 	later := strings.Replace(one(`"code":3`), `{"from"`, `{"scheduled_at":"`+time.Now().Add(time.Hour).UTC().Format(time.RFC3339)+`","from"`, 1)

@@ -273,7 +273,9 @@ and any key sends an email from it by naming it in place of `html` and
   `{{`, give it as a value: a value is never read for variables.
 - **Values.** A value is a string or a number, and is written as it is in
   the subject and the text and escaped in the HTML, so it is shown as
-  written and is never markup. Put in a link's address it is still only
+  written and is never markup there: keep attributes in quotes
+  (`href="{{link}}"`), since a value in an unquoted one could add
+  another. Put in a link's address it is still only
   escaped: check an address your users typed before you send it. A
   variable takes the value the send gives, or else its default; one with
   neither is refused, 422, and so is a value for a variable the template
@@ -294,7 +296,19 @@ and any key sends an email from it by naming it in place of `html` and
   `CAIRNPOST_MAX_BODY_BYTES` in all.
 - **Asked twice.** Under an `Idempotency-Key`, a request is the same when
   it names the same template with the same values, even if the template
-  was changed in between: the email is not sent again.
+  was changed or deleted in between: the email is not sent again, and
+  the first one's id is answered.
+- **Changing one.** `PATCH` changes what it names and leaves the rest,
+  and the whole must still stand: a default for a variable the template
+  no longer names is refused, so take it out in the same change. A
+  default is one line. Of two changes made at the same moment neither
+  undoes the other; 409 `changed_meanwhile` says to read it and try
+  again.
+- **Listing.** `GET /templates` answers each without its bodies, by
+  sending domain and name. `"more": true` says there are more than the
+  list holds; a key bound to no domain narrows it with `?domain=`.
+- **In a batch**, each email may name a template. What they fill may be,
+  in all, as long as a batch itself may be.
 - A template is kept in the database as it was written, until it is
   deleted. It is what you wrote, not what one email said: an email made
   from it is kept, or not, like any other.
@@ -505,6 +519,8 @@ The status tells a program what to do:
 | 422 | `recipient_suppressed` | The address is on the sending domain's suppression list, or every address in `to` and `cc` is when the email names several. Nothing was sent now. Do not retry; lift the suppression if it is wrong. If the answer has an `id`, an earlier try under the same `Idempotency-Key` got no answer from the provider and may have gone: the id is that try's. |
 | 409 | `invalid_idempotent_request` | The key was already used with a different request, which was sent. Do not retry. |
 | 409 | `concurrent_idempotent_requests` | A send under this key is in flight, or its answer has not come yet. Retry after `Retry-After`. |
+| 409 | `name_taken` | The sending domain already has a template of that name. |
+| 409 | `changed_meanwhile` | The template was changed by others at the same time. Read it and try again. |
 | 409 | `not_scheduled` | The email to cancel or move does not wait to be sent: it is being sent, was sent, or was cancelled. |
 | 401, 403 | `missing_api_key`, `invalid_api_key`, `domain_not_allowed`, `admin_key_required` | The key is missing, wrong, or not allowed to do this. |
 | 404 | `not_found` | There is no such email, endpoint or suppression, or it is not this key's to see. |

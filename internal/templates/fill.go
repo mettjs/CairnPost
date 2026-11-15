@@ -21,13 +21,26 @@ type Filled struct{ Subject, HTML, Text string }
 // variable with no value, a value for no variable, and an email that
 // would be too long.
 func (s *Service) Fill(ctx context.Context, domain, name string, values map[string]string) (Filled, error) {
-	t, err := s.store.TemplateNamed(ctx, domain, name)
-	if errors.Is(err, store.ErrNotFound) {
-		return Filled{}, &Invalid{"template", `There is no template of this name for the sending domain in "from".`}
-	}
+	t, err := s.Find(ctx, domain, name)
 	if err != nil {
 		return Filled{}, err
 	}
+	return s.FillFrom(t, values)
+}
+
+// Find answers the template a sending domain's email is made from under
+// a name; an *Invalid for none.
+func (s *Service) Find(ctx context.Context, domain, name string) (store.Template, error) {
+	t, err := s.store.TemplateNamed(ctx, domain, name)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Template{}, &Invalid{"template", `There is no template of this name for the sending domain in "from".`}
+	}
+	return t, err
+}
+
+// FillFrom is Fill from a template already found.
+func (s *Service) FillFrom(t store.Template, values map[string]string) (Filled, error) {
+	var err error
 	with := map[string]string{}
 	var missing []string
 	for _, v := range Variables(t) {

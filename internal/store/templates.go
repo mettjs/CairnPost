@@ -9,6 +9,9 @@ import (
 // ErrTaken is a name another already has.
 var ErrTaken = errors.New("store: the name is taken")
 
+// ErrStale is a change to something that was changed meanwhile.
+var ErrStale = errors.New("store: changed meanwhile")
+
 // Template is an email written once to be sent many times.
 type Template struct {
 	ID string
@@ -20,6 +23,9 @@ type Template struct {
 	Subject string
 	HTML    string
 	Text    string
+	// Variables are the names its subject and bodies name, in the order
+	// they first come: whoever writes a template says them.
+	Variables []string
 	// Defaults are what a variable is filled with when a send gives it
 	// no value.
 	Defaults  map[string]string
@@ -39,11 +45,13 @@ type Templates interface {
 	// every domain. ErrNotFound for none.
 	TemplateNamed(ctx context.Context, domain, name string) (Template, error)
 	// ListTemplates answers a domain's templates by name, or every
-	// template by domain and name for "", limit at most.
+	// template by domain and name for "", limit at most, each without
+	// its bodies.
 	ListTemplates(ctx context.Context, domain string, limit int) ([]Template, error)
 	// UpdateTemplate writes what a template is over what it was, by id,
 	// but its domain. ErrNotFound for none, ErrTaken for a name its
-	// domain has.
+	// domain has, ErrStale when it was changed since t.UpdatedAt, the
+	// time it was read at.
 	UpdateTemplate(ctx context.Context, t Template) (Template, error)
 	// DeleteTemplate removes one; ErrNotFound for none.
 	DeleteTemplate(ctx context.Context, id string) error

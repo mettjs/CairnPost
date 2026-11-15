@@ -71,6 +71,7 @@ func (s *Service) Create(ctx context.Context, scope string, n New) (store.Templa
 		return store.Template{}, ErrDomain
 	}
 	t := store.Template{Domain: domain, Name: n.Name, Subject: n.Subject, HTML: n.HTML, Text: n.Text, Defaults: n.Defaults}
+	t.Variables = named(t)
 	if err := s.check(t); err != nil {
 		return store.Template{}, err
 	}
@@ -87,9 +88,24 @@ func (s *Service) Create(ctx context.Context, scope string, n New) (store.Templa
 	return made, err
 }
 
-// List answers the templates a caller manages: its domain's, or all.
-func (s *Service) List(ctx context.Context, scope string) ([]store.Template, error) {
-	return s.store.ListTemplates(ctx, scope, mostListed)
+// List answers the templates a caller manages, each without its
+// bodies: its own domain's, or, for a caller bound to none, those of
+// the domain asked for or all for "". more says there are others than
+// the list holds: narrow it to a domain to see them.
+func (s *Service) List(ctx context.Context, scope, domain string) (list []store.Template, more bool, err error) {
+	if scope != "" {
+		domain = scope
+	} else if domain != "" {
+		var ok bool
+		if domain, ok = address.Host(domain); !ok {
+			return nil, false, &Invalid{"domain", `"domain" must be a sending domain, such as "mail.example.com", or left out.`}
+		}
+	}
+	list, err = s.store.ListTemplates(ctx, domain, mostListed+1)
+	if len(list) > mostListed {
+		list, more = list[:mostListed], true
+	}
+	return list, more, err
 }
 
 // Get answers one a caller manages; store.ErrNotFound for none, and
@@ -109,8 +125,19 @@ type Change struct {
 }
 
 // Update changes a template a caller manages. The whole it becomes is
-// held to what a new one is.
-func (s *Service) Update(ctx context.Context, scope, id string, c Change) (store.Template, error) {
+// held to what a new one is. Of two changes made at one time neither
+// undoes the other: the later is made over what the earlier left, and
+// store.ErrStale says it could not be, for the others kept coming.
+func (s *Service) Update(ctx context.Context, scope, id string, c Change) (t store.Template, err error) {
+	for range 3 {
+		if t, err = s.update(ctx, scope, id, c); !errors.Is(err, store.ErrStale) {
+			break
+		}
+	}
+	return t, err
+}
+
+func (s *Service) update(ctx context.Context, scope, id string, c Change) (store.Template, error) {
 	t, err := s.Get(ctx, scope, id)
 	if err != nil {
 		return store.Template{}, err
@@ -126,6 +153,7 @@ func (s *Service) Update(ctx context.Context, scope, id string, c Change) (store
 	if c.Defaults != nil {
 		t.Defaults = *c.Defaults
 	}
+	t.Variables = named(t)
 	if err := s.check(t); err != nil {
 		return store.Template{}, err
 	}

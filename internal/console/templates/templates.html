@@ -32,6 +32,7 @@
   {{else if not .Data.Templates}}
   <p class="empty"><b>There are no templates yet.</b> Every email is sent with its own subject and body. <a href="{{.Root}}/templates?tab=new">Make a template</a></p>
   {{else}}
+  {{if .Data.More}}<p class="hint">These are the first of them by sending domain and name. There are more than one list holds.</p>{{end}}
   <div class="scroll" tabindex="0" role="region" aria-labelledby="all">
     <table>
       <thead><tr><th>Name</th><th>Sending domain</th><th>Subject</th><th>Variables</th><th>Changed</th></tr></thead>

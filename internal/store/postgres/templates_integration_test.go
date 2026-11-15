@@ -19,7 +19,7 @@ func TestTemplatesAreKeptByDomainAndName(t *testing.T) {
 	k := key(t, db)
 	domain := strings.ToLower(k.Prefix) + ".example"
 	name := "t-" + strings.ToLower(k.Prefix)
-	mine := store.Template{Domain: domain, Name: name, Subject: "Mine {{a}}", HTML: "<p>{{a}}</p>", Text: "{{a}}", Defaults: map[string]string{"a": "x"}}
+	mine := store.Template{Domain: domain, Name: name, Subject: "Mine {{a}}", HTML: "<p>{{a}}</p>", Text: "{{a}}", Variables: []string{"a"}, Defaults: map[string]string{"a": "x"}}
 	made, err := db.CreateTemplate(ctx, mine, 2)
 	if err != nil || made.ID == "" || made.Subject != mine.Subject || made.HTML != mine.HTML || made.Text != mine.Text ||
 		made.Defaults["a"] != "x" || made.CreatedAt.IsZero() || !made.UpdatedAt.Equal(made.CreatedAt) {
@@ -36,6 +36,10 @@ func TestTemplatesAreKeptByDomainAndName(t *testing.T) {
 	second.Name = name + "-3"
 	if _, err := db.CreateTemplate(ctx, second, 2); !errors.Is(err, store.ErrLimit) {
 		t.Errorf("a third where two may be: %v", err)
+	}
+	// A name the domain has is said to be taken, full or not.
+	if _, err := db.CreateTemplate(ctx, mine, 2); !errors.Is(err, store.ErrTaken) {
+		t.Errorf("the same name, the domain full: %v", err)
 	}
 	// The one that serves every domain: found for another domain, and
 	// for this one only where it has none of the name.
@@ -55,7 +59,8 @@ func TestTemplatesAreKeptByDomainAndName(t *testing.T) {
 		t.Errorf("another domain's own: %v", err)
 	}
 	list, err := db.ListTemplates(ctx, domain, 10)
-	if err != nil || len(list) != 2 || list[0].Name != name || list[1].Name != name+"-2" {
+	if err != nil || len(list) != 2 || list[0].Name != name || list[1].Name != name+"-2" || list[0].HTML != "" || list[0].Text != "" ||
+		list[0].Subject != mine.Subject || len(list[0].Variables) != 1 || list[0].Variables[0] != "a" || list[0].Defaults["a"] != "x" {
 		t.Errorf("%+v %v", list, err)
 	}
 	if list, err := db.ListTemplates(ctx, domain, 1); err != nil || len(list) != 1 {
@@ -68,6 +73,15 @@ func TestTemplatesAreKeptByDomainAndName(t *testing.T) {
 	if err != nil || changed.Subject != "Changed" || changed.Domain != domain || !changed.CreatedAt.Equal(made.CreatedAt) ||
 		changed.UpdatedAt.Before(made.UpdatedAt) || len(changed.Defaults) != 0 {
 		t.Errorf("%+v %v", changed, err)
+	}
+	// Over a read that is no longer the latest, it is told and not made.
+	if _, err := db.UpdateTemplate(ctx, made); !errors.Is(err, store.ErrStale) {
+		t.Errorf("a change over a stale read: %v", err)
+	}
+	if again, err := db.UpdateTemplate(ctx, changed); err != nil || !again.UpdatedAt.After(changed.UpdatedAt) {
+		t.Errorf("a change over the latest: %+v %v", again, err)
+	} else {
+		made.UpdatedAt = again.UpdatedAt
 	}
 	made.Name = name + "-2"
 	if _, err := db.UpdateTemplate(ctx, made); !errors.Is(err, store.ErrTaken) {

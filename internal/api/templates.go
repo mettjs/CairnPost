@@ -55,6 +55,8 @@ func (a *app) failTemplate(w http.ResponseWriter, err error) {
 		fail(w, http.StatusForbidden, "domain_not_allowed", "This API key manages the templates of its own sending domain only.")
 	case errors.Is(err, store.ErrTaken):
 		fail(w, http.StatusConflict, "name_taken", "A template of this name is already there for that sending domain. Change it, or give this one another name.")
+	case errors.Is(err, store.ErrStale):
+		fail(w, http.StatusConflict, "changed_meanwhile", "The template was changed by others while this change was made. Read it and try again.")
 	case errors.Is(err, store.ErrNotFound):
 		fail(w, http.StatusNotFound, "not_found", "There is no such template.")
 	default:
@@ -85,20 +87,20 @@ func (a *app) createTemplate(w http.ResponseWriter, r *http.Request) {
 	write(w, http.StatusCreated, templateOf(t))
 }
 
-// listTemplates is GET /templates: each without its bodies.
+// listTemplates is GET /templates: each without its bodies. A key bound
+// to no domain may ask for one domain's with ?domain=.
 func (a *app) listTemplates(w http.ResponseWriter, r *http.Request) {
-	list, err := a.Templates.List(r.Context(), scope(r))
+	list, more, err := a.Templates.List(r.Context(), scope(r), r.URL.Query().Get("domain"))
 	if err != nil {
 		a.failTemplate(w, err)
 		return
 	}
 	data := make([]templateView, 0, len(list))
 	for _, t := range list {
-		view := templateOf(t)
-		view.HTML, view.Text = "", ""
-		data = append(data, view)
+		data = append(data, templateOf(t))
 	}
-	write(w, http.StatusOK, map[string]any{"data": data})
+	// more says the list is cut short: ask for one domain's.
+	write(w, http.StatusOK, map[string]any{"data": data, "more": more})
 }
 
 // getTemplate is GET /templates/{id}.

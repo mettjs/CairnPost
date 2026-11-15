@@ -94,6 +94,8 @@ func TestATemplateThatCannotBeMadeComesBackAsTyped(t *testing.T) {
 		"a default that is none": {[2]string{"defaults", "just words"}, "Each line of the defaults", 422},
 		"a default for nothing":  {[2]string{"defaults", "nobody = x"}, "does not name", 422},
 		"a domain that is none":  {[2]string{"domain", "not a domain"}, "must be a domain", 422},
+		"a subject's variable":   {[2]string{"subject", "Hi {{ first name }}"}, "In the subject, the", 422},
+		"a subject with no gap":  {[2]string{"subject", strings.Repeat("x", 950)}, "The subject must have a space", 422},
 	} {
 		f := welcomeForm()
 		f.Set(try.change[0], try.change[1])
@@ -111,9 +113,16 @@ func TestATemplateThatCannotBeMadeComesBackAsTyped(t *testing.T) {
 		t.Errorf("the same name twice: %d", rec.Code)
 	}
 	long := welcomeForm()
-	long.Set("html", strings.Repeat("x", 20000))
+	long.Set("html", strings.Repeat("x", 30000))
 	if rec := b.do("POST", "/templates", long); rec.Code != 422 || !strings.Contains(rec.Body.String(), "longer than a template may be") {
 		t.Errorf("far too long: %d", rec.Code)
+	}
+	// As long as a template may be, in letters a form writes at length.
+	wide := welcomeForm()
+	wide.Set("name", "wide")
+	wide.Set("html", strings.Repeat("\n<й>", 300)+"{{code}}")
+	if rec := b.do("POST", "/templates", wide); rec.Code != 303 {
+		t.Errorf("a template of letters a form writes at length: %d", rec.Code)
 	}
 }
 
@@ -146,5 +155,42 @@ func TestABoundKeySeesAndMakesItsOwnDomainsTemplates(t *testing.T) {
 	own := templateID(t, b.do("POST", "/templates", welcomeForm()).Header().Get("Location"))
 	if got, _ := r.s.Template(context.Background(), own); got.Domain != "a.example" {
 		t.Errorf("%+v", got)
+	}
+}
+
+// What the API kept, the form shows and saves back as it was.
+func TestDefaultsComeBackFromTheFormAsTheyWere(t *testing.T) {
+	r := newRig(t, nil)
+	b := r.signedIn(r.admin)
+	f := welcomeForm()
+	f.Set("defaults", "name =  two spaces before, one after \r\ncode = a=b")
+	id := templateID(t, b.do("POST", "/templates", f).Header().Get("Location"))
+	read := func() map[string]string {
+		got, _ := r.s.Template(context.Background(), id)
+		return got.Defaults
+	}
+	if d := read(); d["name"] != " two spaces before, one after " || d["code"] != "a=b" {
+		t.Fatalf("%q", d)
+	}
+	// Saved again as the form shows it, nothing of them changes.
+	page := b.do("GET", "/templates/"+id+"?tab=edit", nil).Body.String()
+	if !strings.Contains(page, "code = a=b\nname =  two spaces before, one after \n") {
+		t.Fatalf("the form shows: %s", page)
+	}
+	again := welcomeForm()
+	again.Set("defaults", "code = a=b\nname =  two spaces before, one after \n")
+	if rec := b.do("POST", "/templates/"+id, again); rec.Code != 303 {
+		t.Fatalf("saved again: %d", rec.Code)
+	}
+	if d := read(); d["name"] != " two spaces before, one after " || d["code"] != "a=b" {
+		t.Fatalf("after a save: %q", d)
+	}
+	// A change far too long comes back with the template as it is kept.
+	long := welcomeForm()
+	long.Set("text", strings.Repeat("x", 30000))
+	rec := b.do("POST", "/templates/"+id, long)
+	if page := rec.Body.String(); rec.Code != 422 || !strings.Contains(page, "longer than a template may be") ||
+		!strings.Contains(page, "your code is {{code}}") || !strings.Contains(page, "code = a=b") {
+		t.Fatalf("a change too long: %d", rec.Code)
 	}
 }
