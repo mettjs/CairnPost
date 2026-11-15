@@ -1,0 +1,11 @@
+{{define "title"}}Delete a received email{{end}}
+{{define "main"}}
+<section class="narrow">
+  <h1 class="long">Delete the email for {{.Data.Recipient}}?</h1>
+  <p>It came <time datetime="{{stamp .Data.ReceivedAt}}">{{when $.Zone .Data.ReceivedAt}}</time>. Deleted, it can no longer be read by anyone, and a webhook still owed for it is dropped. This cannot be undone.</p>
+  <form class="actions" method="post" action="{{.Root}}/inbound/{{.Data.ID}}/delete">
+    <button class="danger" type="submit">Delete email</button>
+    <a href="{{.Root}}/inbound/{{.Data.ID}}">Keep it</a>
+  </form>
+</section>
+{{end}}

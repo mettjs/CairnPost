@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/domains"
+	"github.com/mettjs/cairnpost/internal/inbound"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
@@ -34,6 +35,8 @@ type Deps struct {
 	Mail     *mail.Service
 	Suppress *suppress.Service
 	Webhooks *webhook.Service
+	// Inbound takes the emails that come and reads them.
+	Inbound *inbound.Service
 	// Templates are the emails written once to be sent many times, and
 	// TemplateBytes how long one may be.
 	Templates     *templates.Service

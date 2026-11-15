@@ -39,12 +39,21 @@ type emailsView struct {
 	// says there are more of them than are shown.
 	Waiting []store.Held
 	More    bool
+	// Came are the emails that came and are kept, newest first. Takes
+	// says this server takes any, and KeptFor how long one is kept.
+	Came    []store.Inbound
+	Takes   bool
+	KeptFor string
 }
 
 func (c *console) emailsPage(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if tabOf(r, "", "scheduled") != "" {
+	switch tabOf(r, "", "scheduled", "received") {
+	case "scheduled":
 		c.scheduledShown(w, r)
+		return
+	case "received":
+		c.receivedShown(w, r)
 		return
 	}
 	c.emailsShown(w, r, http.StatusOK, emailsView{State: q.Get("state")}, q.Get("before"))
@@ -57,8 +66,12 @@ func (c *console) emailTabs(r *http.Request, on, handle string) tabs {
 	if err != nil {
 		c.Log.Error("console: the emails waiting to be sent could not be counted", "error", err)
 	}
+	came, err := c.Inbound.Kept(r.Context(), who(r).Domain)
+	if err != nil {
+		c.Log.Error("console: the emails that came could not be counted", "error", err)
+	}
 	return tabsOf("Emails", "/emails", narrowedTo(url.Values{}, handle), on,
-		tab{Label: "On record"}, tab{Key: "scheduled", Label: "Scheduled", N: n})
+		tab{Label: "On record"}, tab{Key: "scheduled", Label: "Scheduled", N: n}, tab{Key: "received", Label: "Received", N: came})
 }
 
 // scheduledShown is the part of the page with the emails that wait to

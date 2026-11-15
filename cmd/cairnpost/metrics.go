@@ -25,7 +25,10 @@ type measured struct {
 	parts map[string]func() bool
 	// waiting counts the emails that wait to be sent.
 	waiting func(ctx context.Context, domain string) (int, error)
-	log     *slog.Logger
+	// came counts the emails that came and are kept; nil where none are
+	// taken.
+	came func(ctx context.Context, domain string) (int, error)
+	log  *slog.Logger
 }
 
 // gaugeWait is how long one of the reads behind the numbers may take.
@@ -49,7 +52,7 @@ func (m measured) gauges(ctx context.Context, domain string) []metrics.Sample {
 				Kind: metrics.Gauge, Labels: [][2]string{{"part", part}}, Value: metrics.Up(working())})
 		}
 	}
-	reads := []func(context.Context, string) []metrics.Sample{m.emails, m.hooks, m.quota, m.scheduled}
+	reads := []func(context.Context, string) []metrics.Sample{m.emails, m.hooks, m.quota, m.scheduled, m.inbound}
 	read := make([][]metrics.Sample, len(reads))
 	var wg sync.WaitGroup
 	for i, one := range reads {
@@ -82,6 +85,20 @@ func (m measured) emails(ctx context.Context, domain string) []metrics.Sample {
 			Kind: metrics.Gauge, Labels: [][2]string{{"state", state}}, Value: float64(in[state])})
 	}
 	return out
+}
+
+// inbound is how many emails that came are kept.
+func (m measured) inbound(ctx context.Context, domain string) []metrics.Sample {
+	if m.came == nil {
+		return nil
+	}
+	n, err := m.came(ctx, domain)
+	if err != nil {
+		m.log.Error("metrics: the emails that came could not be counted", "error", err)
+		return nil
+	}
+	return []metrics.Sample{{Name: "cairnpost_inbound_emails", Help: "Emails that came for a sending domain's addresses and are kept.",
+		Kind: metrics.Gauge, Value: float64(n)}}
 }
 
 // scheduled is how many emails wait to be sent.

@@ -16,6 +16,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/domains"
 	"github.com/mettjs/cairnpost/internal/driver/capture"
 	"github.com/mettjs/cairnpost/internal/driver/cloudflare"
+	"github.com/mettjs/cairnpost/internal/inbound"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/session"
@@ -28,6 +29,9 @@ import (
 )
 
 // rig is a console over a store on a clock the test moves.
+// cameSecret is what the rig's emails are handed on under.
+const cameSecret = "inbound-secret-of-the-console-rig-0123456789"
+
 type rig struct {
 	t    *testing.T
 	h    http.Handler
@@ -73,6 +77,7 @@ func newRigOn(t *testing.T, adjust func(*rig, *console.Deps)) *rig {
 			Now:       func() time.Time { return r.now }},
 		slog.New(slog.NewTextHandler(&r.logged, nil)))
 	d := console.Deps{Keys: r.ks, Mail: r.mail, Suppress: suppress.New(r.s), Templates: written, TemplateBytes: 2000,
+		Inbound:  inbound.New(r.s, inbound.Options{Secret: cameSecret, Now: func() time.Time { return r.now }}),
 		Webhooks: webhook.NewService(r.s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, 24*time.Hour, time.Now), Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
 		EventsOff: "Not read.", Stats: stats.New(r.s, 5), Log: slog.New(slog.NewTextHandler(&r.logged, nil))}
 	d.Domains = domains.New(r.s, &dnscheck.Checker{Resolver: resolver{r}, Timeout: time.Second}, "cloudflare", cloudflare.Records)

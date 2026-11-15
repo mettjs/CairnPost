@@ -40,7 +40,7 @@
       <tbody>
       {{range .Data.Deliveries}}
       <tr>
-        <td data-label="Event"><code>{{typeOf .Kind}}</code>{{if .MessageID}} <a class="by" href="{{$.Root}}/emails/{{.MessageID}}">the email</a>{{end}}</td>
+        <td data-label="Event"><code>{{typeOf .Kind}}</code>{{if .MessageID}} <a class="by" href="{{$.Root}}/emails/{{.MessageID}}">the email</a>{{end}}{{if .InboundID}} <a class="by" href="{{$.Root}}/inbound/{{.InboundID}}">the email</a>{{end}}</td>
         <td data-label="State"><span class="state state-{{deliveryTone .State}}">{{template "ico" (deliveryTone .State)}}{{deliveryLabel .State}}</span></td>
         <td data-label="Tries">{{.Attempts}}</td>
         <td data-label="Last answer" class="wrap">{{met .LastStatus .LastFailure}}{{if eq .State "pending"}} <span class="by">{{if eq $state "paused"}}Waits until the endpoint is resumed{{else if eq $state "on"}}Next try <time datetime="{{stamp .NextAt}}">{{when $.Zone .NextAt}}</time>{{else}}Waits until the endpoint is on{{end}}</span>{{end}}</td>

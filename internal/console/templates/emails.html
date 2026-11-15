@@ -1,10 +1,42 @@
 {{define "title"}}Emails{{end}}
 {{define "main"}}
 <h1>Emails</h1>
-<p class="lede">{{if eq .Data.Tab "scheduled"}}The emails asked for ahead of time that wait to be sent, the next to go out first.{{else}}Every email sent through this server that is still on record, newest first.{{end}}{{if .Who.Domain}} You are signed in with a key that manages <code>{{.Who.Domain}}</code>, so you see that domain's emails only.{{end}}</p>
+<p class="lede">{{if eq .Data.Tab "scheduled"}}The emails asked for ahead of time that wait to be sent, the next to go out first.{{else if eq .Data.Tab "received"}}The emails that came for addresses of the sending domains and are still kept, newest first.{{else}}Every email sent through this server that is still on record, newest first.{{end}}{{if .Who.Domain}} You are signed in with a key that manages <code>{{.Who.Domain}}</code>, so you see that domain's emails only.{{end}}</p>
 
 {{template "subtabs" .Data.Tabs}}
-{{if eq .Data.Tab "scheduled"}}
+{{if eq .Data.Tab "received"}}
+<section aria-labelledby="came">
+  <h2 id="came" class="sr">Emails that came</h2>
+  {{if .Data.Unread}}
+  <p class="problem" role="alert">The emails that came could not be read. Reload the page to try again.</p>
+  {{else if not .Data.Came}}
+  <p class="empty">{{if .Data.Paged}}There are no older emails.{{else if .Data.Takes}}<b>No email that came is kept.</b> One appears here when the mail provider hands it on, and stays for {{.Data.KeptFor}}.{{else}}<b>This server takes no emails.</b> To have the emails sent to your domains' addresses handed on to it, set <code>CAIRNPOST_INBOUND_SECRET</code> and set up the mail provider's side.{{end}}</p>
+  {{else}}
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="came">
+    <table>
+      <thead><tr><th>For</th><th>From</th><th>Subject</th><th>Came</th></tr></thead>
+      <tbody>
+      {{range .Data.Came}}
+      <tr>
+        <td data-label="For"><a href="{{$.Root}}/inbound/{{.ID}}">{{.Recipient}}</a></td>
+        <td data-label="From" class="wrap">{{if .From}}{{.From}}{{else if .Sender}}{{.Sender}}{{else}}<span class="by">Nobody</span>{{end}}</td>
+        <td data-label="Subject" class="wrap">{{if .Subject}}{{.Subject}}{{else}}<span class="by">None</span>{{end}}{{if .Files}} <span class="by">{{.Files}} {{if eq .Files 1}}file{{else}}files{{end}}</span>{{end}}</td>
+        <td data-label="Came"><time datetime="{{stamp .ReceivedAt}}">{{when $.Zone .ReceivedAt}}</time></td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">Each is kept for {{.Data.KeptFor}} from when it came, and deleted then.</p>
+  {{end}}
+  {{if or .Data.Older .Data.Paged}}
+  <p class="pager">
+    {{if .Data.Paged}}<a href="{{.Data.Newest}}">Newest</a>{{end}}
+    {{if .Data.Older}}<a href="{{.Data.Older}}">Older</a>{{end}}
+  </p>
+  {{end}}
+</section>
+{{else if eq .Data.Tab "scheduled"}}
 <section aria-labelledby="waiting">
   <h2 id="waiting" class="sr">Emails waiting to be sent</h2>
   {{if .Data.Unread}}
