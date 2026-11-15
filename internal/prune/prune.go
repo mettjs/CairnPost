@@ -101,7 +101,7 @@ func (p *Pruner) Run(ctx context.Context) {
 			// Counts only: no address and no id.
 			p.log.Info("prune: forgot what was kept long enough", "contents", c.Contents, "details", c.Details, "console_sessions", c.Sessions, "idempotency_keys", c.Keys,
 				"emails", c.Emails, "cancelled_emails", c.Cancelled, "lifted_suppressions", c.Lifted,
-				"suppression_webhooks", c.Notices, "old_signing_keys", c.Secrets, "counted_hours", c.Hours)
+				"suppression_webhooks", c.Notices, "old_signing_keys", c.Secrets, "counted_hours", c.Hours, "inbound_emails", c.Inbound)
 		}
 		select {
 		case <-ctx.Done():
@@ -141,7 +141,9 @@ func (p *Pruner) Sweep(ctx context.Context) (int, error) {
 }
 
 // Counts is how much a pass deleted.
-type Counts struct{ Contents, Details, Sessions, Keys, Emails, Cancelled, Lifted, Notices, Secrets, Hours int }
+type Counts struct {
+	Contents, Details, Sessions, Keys, Emails, Cancelled, Lifted, Notices, Secrets, Hours, Inbound int
+}
 
 // Pass prunes everything due now. What emails said, and what was said of
 // them, goes first and each on its own: it is the most private thing
@@ -151,8 +153,10 @@ type Counts struct{ Contents, Details, Sessions, Keys, Emails, Cancelled, Lifted
 func (p *Pruner) Pass(ctx context.Context) (Counts, error) {
 	var (
 		c    Counts
-		errs [6]error
+		errs [7]error
 	)
+	// The emails that came go when their own time is up.
+	c.Inbound, errs[6] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneInbound(ctx, batch) })
 	c.Contents, errs[0] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneContents(ctx, batch) })
 	c.Details, errs[1] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneDetails(ctx, batch) })
 	c.Sessions, errs[2] = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneSessions(ctx, batch) })

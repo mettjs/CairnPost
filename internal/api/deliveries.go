@@ -15,6 +15,9 @@ type deliveryView struct {
 	// about no email (address.suppressed).
 	EmailID string `json:"email_id,omitempty"`
 	Type    string `json:"type"`
+	// InboundID is the email that came the webhook is about, for an
+	// "email.received".
+	InboundID string `json:"inbound_id,omitempty"`
 	// State is "pending", "delivered" or "failed" (given up).
 	State    string `json:"state"`
 	Attempts int    `json:"attempts"`
@@ -30,7 +33,7 @@ type deliveryView struct {
 }
 
 func deliveryOf(d store.Delivery) deliveryView {
-	v := deliveryView{ID: d.ID, EmailID: d.MessageID, Type: webhook.TypeOf(d.Kind), State: d.State, Attempts: d.Attempts,
+	v := deliveryView{ID: d.ID, EmailID: d.MessageID, InboundID: d.InboundID, Type: webhook.TypeOf(d.Kind), State: d.State, Attempts: d.Attempts,
 		LastStatus: d.LastStatus, LastFailure: d.LastFailure, CreatedAt: d.CreatedAt.UTC(),
 		AttemptedAt: utc(d.AttemptedAt), DeliveredAt: utc(d.DeliveredAt)}
 	if d.State == store.DeliveryPending {

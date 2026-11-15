@@ -13,6 +13,7 @@ import (
 // under: every kind of event, and a suppression told on its own.
 var typeOf = map[string]string{
 	store.KindSuppressed: TypeSuppressed,
+	store.KindReceived:   TypeReceived,
 	store.EventDelivered: "email.delivered", store.EventDeferred: "email.delivery_delayed",
 	store.EventBounced: "email.bounced", store.EventComplained: "email.complained",
 	store.EventFailed: "email.failed",
@@ -23,6 +24,11 @@ var typeOf = map[string]string{
 // email this server has no record of. Such an email has no event to say
 // so; one that has a record says it in its own webhook ("suppressed").
 const TypeSuppressed = "address.suppressed"
+
+// TypeReceived is the type of the webhook that tells of an email that
+// came for an address of a sending domain. It says who from, who for
+// and when, and the id to read it by: never what it says.
+const TypeReceived = "email.received"
 
 // TypeTest is the type of the webhook sent to try an endpoint out.
 const TypeTest = "webhook.test"
@@ -114,8 +120,17 @@ func suppressedBody(s store.Suppression) []byte {
 		"data": map[string]string{"domain": s.Domain, "address": s.Address, "reason": s.Reason}})
 }
 
+// receivedBody is the webhook that tells of an email that came.
+func receivedBody(in store.Inbound) []byte {
+	return encode(map[string]any{"type": TypeReceived, "created_at": in.ReceivedAt.UTC(),
+		"data": map[string]any{"inbound_id": in.ID, "from": in.Sender, "to": []string{in.Recipient}, "received_at": in.ReceivedAt.UTC()}})
+}
+
 // bodyOf is the webhook a delivery sends.
 func bodyOf(d store.Due) []byte {
+	if d.Inbound != nil {
+		return receivedBody(*d.Inbound)
+	}
 	if d.Suppression != nil {
 		return suppressedBody(*d.Suppression)
 	}
