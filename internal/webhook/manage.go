@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/mettjs/cairnpost/internal/page"
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
@@ -96,12 +97,8 @@ func (s *Service) Delete(ctx context.Context, scope, id string) error {
 // from the newest (""). It answers the cursor of the page after it, ""
 // when there is none.
 func (s *Service) Deliveries(ctx context.Context, scope, id, state, cursor string, limit int) ([]store.Delivery, string, error) {
-	if limit <= 0 {
-		limit = DefaultLimit
-	}
+	limit = page.Size(limit)
 	switch {
-	case limit > MaxLimit:
-		return nil, "", &Invalid{Field: "limit", Reason: fmt.Sprintf(`"limit" must be at most %d.`, MaxLimit)}
 	case state != "" && !slices.Contains(store.DeliveryStates, state):
 		return nil, "", &Invalid{Field: "state", Reason: `"state" must be "pending", "delivered" or "failed", or left out for all.`}
 	case !plain(cursor) || len(cursor) > 64:

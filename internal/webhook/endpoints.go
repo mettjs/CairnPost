@@ -33,13 +33,11 @@ func (e *Invalid) Error() string { return "webhook: " + e.Reason }
 // endpoint of another.
 var ErrDomain = errors.New("webhook: the caller manages another sending domain's endpoints")
 
-// Limits of an endpoint and of a list.
+// Limits of an endpoint.
 const (
 	maxURL         = 2048
 	MaxDescription = 200
 	maxDomain      = 253
-	DefaultLimit   = 50
-	MaxLimit       = 500
 )
 
 // Service manages the endpoints.

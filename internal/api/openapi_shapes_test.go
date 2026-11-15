@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mettjs/cairnpost/internal/page"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/webhook"
 )
@@ -238,5 +239,24 @@ func TestTheListedValuesAreTheCodes(t *testing.T) {
 		if !slices.Equal(got, want) {
 			t.Errorf("%s: the file lists %v, the code has %v", c.where, got, want)
 		}
+	}
+}
+
+// The page sizes the file gives are the rule's.
+func TestThePageSizesAreTheRules(t *testing.T) {
+	n := 0
+	for pattern, o := range operations(described(t)) {
+		params, _ := o["parameters"].([]any)
+		for _, p := range params {
+			if p := p.(node); p["name"] == "limit" {
+				n++
+				if s := p["schema"].(node); s["default"] != float64(page.Default) || s["maximum"] != float64(page.Most) {
+					t.Errorf("%s: a page is %v, %v at most; the rule is %d, %d at most", pattern, s["default"], s["maximum"], page.Default, page.Most)
+				}
+			}
+		}
+	}
+	if n != 3 {
+		t.Errorf("%d lists take a limit, want 3", n)
 	}
 }

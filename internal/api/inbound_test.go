@@ -73,6 +73,13 @@ func TestAnEmailHandedOnIsKeptOnceAndReadByAnAdminKey(t *testing.T) {
 		t.Errorf("as it came: %d", rec.Code)
 	}
 	// A list says who and when, and nothing of what it says.
+	// A page is sized by the one rule every list has.
+	if code, name, _ := r.do("GET", "/inbound?limit=201", r.admin, "", ""); code != 422 || name != "validation_error" {
+		t.Errorf("a page too large: %d %s", code, name)
+	}
+	if code, _, _ := r.do("GET", "/inbound?limit=200", r.admin, "", ""); code != 200 {
+		t.Errorf("the largest page: %d", code)
+	}
 	code, _, list := r.do("GET", "/inbound", r.admin, "", "")
 	if raw, _ := json.Marshal(list); code != 200 || len(list["data"].([]any)) != 1 || strings.Contains(string(raw), "INSUBJECTQ") {
 		t.Errorf("%d %s", code, raw)

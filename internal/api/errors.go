@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/mettjs/cairnpost/internal/driver"
 	"github.com/mettjs/cairnpost/internal/mail"
+	"github.com/mettjs/cairnpost/internal/page"
 )
 
 // problem is every error's body: the status, a name a program can switch
@@ -159,15 +161,16 @@ func (a *app) read(w http.ResponseWriter, err error, shape string) bool {
 }
 
 // limitOf reads ?limit=, 0 for none, and answers false, having said why,
-// for one that is no page size.
+// for one that is no page size. The rule is one for every list.
 func limitOf(w http.ResponseWriter, r *http.Request) (int, bool) {
 	raw := r.URL.Query().Get("limit")
 	if raw == "" {
 		return 0, true
 	}
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 {
-		fail(w, http.StatusUnprocessableEntity, "validation_error", `"limit" must be a whole number above zero.`)
+	if err != nil || n < 1 || n > page.Most {
+		fail(w, http.StatusUnprocessableEntity, "validation_error",
+			fmt.Sprintf(`"limit" must be a whole number from 1 to %d.`, page.Most))
 		return 0, false
 	}
 	return n, true

@@ -57,7 +57,6 @@ func TestWhatMakesNoSenseIsRefusedAndSaysWhy(t *testing.T) {
 			return err
 		},
 		"lift nothing":     func() error { return svc.Lift(ctx, "example.com", "") },
-		"a huge page":      func() error { _, _, err := svc.List(ctx, "", "", suppress.MaxLimit+1); return err },
 		"a made-up cursor": func() error { _, _, err := svc.List(ctx, "", "!!!", 10); return err },
 	} {
 		if err := try(); !errors.As(err, &invalid) || invalid.Reason == "" {
