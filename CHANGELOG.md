@@ -22,7 +22,7 @@ Every change a user of CairnPost can notice is written here. The format is
 - Attachments: `attachments` on `POST /emails` sends files with an email,
   beside it or shown in its HTML by a `content_id`, within
   `CAIRNPOST_MAX_ATTACHMENTS` and `CAIRNPOST_MAX_ATTACHMENT_BYTES`. What a
-  file holds is never kept or logged. `cairnpost send -attach`. Only so many
+  file holds is never logged, and kept only under content retention. `cairnpost send -attach`. Only so many
   large sends are taken at one time (`CAIRNPOST_MAX_UPLOAD_BYTES`), and a
   request that does not arrive whole in time answers 408
   `request_incomplete`.
@@ -96,6 +96,9 @@ Every change a user of CairnPost can notice is written here. The format is
   (30 days at most), what each email said, and what the receiving server
   said about a bounce or a delay, is kept for that long and shown by
   `GET /emails/{id}` to an admin key. Never logged, never in a webhook.
+  An email's files are kept with it, for as long, and read back by
+  `GET /emails/{id}/attachments/{place}` or from the console, unless
+  `CAIRNPOST_CONTENT_FILES` is `false`.
 - A console at `/console`, served by the same binary: sign in with an
   admin key to see whether each part of the server is working and to list,
   make and revoke API keys. `CAIRNPOST_CONSOLE`, `CAIRNPOST_CONSOLE_SESSION`

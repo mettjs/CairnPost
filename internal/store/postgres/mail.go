@@ -202,7 +202,37 @@ func insertMessage(ctx context.Context, tx pgx.Tx, s store.Start) (string, []sto
 	_, err = tx.Exec(ctx, `
 		INSERT INTO message_contents (message_id, content, expires_at)
 		VALUES ($1::uuid, $2, now() + make_interval(secs => $3))`, id, s.Content(), s.KeepContent.Seconds())
+	for i, f := range s.Files {
+		if err != nil {
+			break
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO message_files (message_id, position, filename, content_type, content_id, content)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6)`, id, i, f.Filename, f.Type, f.ContentID, f.Content)
+	}
 	return id, kept, dropped, err
+}
+
+// File implements store.Mail. Whether it is shown is asked as Content
+// asks it, on the database's clock.
+func (db *DB) File(ctx context.Context, id string, place int, keep time.Duration) (*store.HeldFile, error) {
+	if !uuidShape.MatchString(id) {
+		return nil, nil
+	}
+	var f store.HeldFile
+	err := db.pool.QueryRow(ctx, `
+		SELECT f.filename, f.content_type, f.content_id, f.content FROM message_files f
+		JOIN message_contents c ON c.message_id = f.message_id
+		WHERE f.message_id = $1::uuid AND f.position = $2
+		  AND c.expires_at > now() AND c.created_at > now() - make_interval(secs => $3)`,
+		id, place, keep.Seconds()).Scan(&f.Filename, &f.Type, &f.ContentID, &f.Content)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("postgres: read a message's kept file: %w", err)
+	}
+	return &f, nil
 }
 
 // addressed reads the suppression list for a send that starts now, and

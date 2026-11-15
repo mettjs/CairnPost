@@ -287,7 +287,7 @@ func TestWhenWordsAreKeptTheyAreKeptInOnePlace(t *testing.T) {
 	serving := func(keep time.Duration) http.Handler {
 		return api.New(api.Deps{
 			Mail: mail.New(db, capture.New(5, time.Now), mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
-				InDoubtWindow: time.Minute, KeepContent: keep}, log),
+				InDoubtWindow: time.Minute, KeepContent: keep, KeepFiles: true}, log),
 			Keys: ks, Ping: db.Ping, Driver: capture.Name, MaxBodyBytes: 1 << 20, Log: log,
 		})
 	}
@@ -342,13 +342,14 @@ func TestWhenWordsAreKeptTheyAreKeptInOnePlace(t *testing.T) {
 		t.Errorf("the server's sentence: an admin key sees %s, the sending key %s", shown, own)
 	}
 	marks = append(marks, "KEPTDETAILQ")
-	elsewhere, everywhere := dump(t, dsn, "message_contents", "event_details"), dump(t, dsn)
+	elsewhere, everywhere := dump(t, dsn, "message_contents", "event_details", "message_files"), dump(t, dsn)
 	if strings.Contains(everywhere, "EVENTSUBJECTQ") || strings.Contains(logged.String(), "EVENTSUBJECTQ") {
 		t.Error("the subject an event carried was kept or logged")
 	}
-	// What a file was is kept with the words; its bytes are kept nowhere.
-	if strings.Contains(everywhere, "KEPTBYTESQ") || strings.Contains(everywhere, "S0VQVEJZVEVTUQ") {
-		t.Error("a file's bytes were kept")
+	// What a file held is kept beside the words, as the bytes it was, and
+	// nowhere else.
+	if !strings.Contains(everywhere, "KEPTBYTESQ") || strings.Contains(elsewhere, "KEPTBYTESQ") || strings.Contains(everywhere, "S0VQVEJZVEVTUQ") {
+		t.Error("a file's bytes were not kept, or not only in their one table")
 	}
 	// The dump reads inside the two tables: without that, finding no mark
 	// in them would prove nothing, here or where nothing is to be kept.

@@ -60,6 +60,9 @@ type Options struct {
 	// KeepContent is how long what an email said is kept, for whoever
 	// runs CairnPost to see what was sent; 0, the rule, keeps none.
 	KeepContent time.Duration
+	// KeepFiles says an email's files are kept with what it said, for
+	// as long: only where KeepContent is set.
+	KeepFiles bool
 	// MaxRecipients is how many addresses one email may go to, counting
 	// "to", "cc" and "bcc"; 0 is DefaultMaxRecipients.
 	MaxRecipients int
@@ -212,7 +215,7 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 	start := store.Start{
 		KeyID: key.ID, Sender: c.msg.From, Recipients: addressees(c.msg), Driver: s.driver.Name(),
 		IdemKey: idem, TTL: s.opt.IdempotencyTTL, InDoubt: s.opt.InDoubtWindow,
-		Content: s.contentOf(c.msg), KeepContent: s.opt.KeepContent,
+		Content: s.contentOf(c.msg), KeepContent: s.opt.KeepContent, Files: s.keptFiles(c.msg),
 	}
 	if idem != "" {
 		start.Fingerprint = fingerprint(presented, c.msg, c.at)
@@ -220,7 +223,7 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 	if !c.at.IsZero() {
 		// Kept to be sent later: what it says is kept with it, whether
 		// or not what emails say is kept once they are sent.
-		start.Hold, start.Content, start.ReplayOnly = hold(c, s.opt.ScheduleRoom), nil, c.late
+		start.Hold, start.Content, start.Files, start.ReplayOnly = hold(c, s.opt.ScheduleRoom), nil, nil, c.late
 	}
 	claim, err := s.store.Start(ctx, start)
 	if err != nil {

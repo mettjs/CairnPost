@@ -77,7 +77,7 @@ func (s *Service) SendHeld(ctx context.Context, h store.Held, again bool) error 
 	}
 	msg = addressed(msg, h.Recipients)
 	claim, err := s.store.Start(reading, store.Start{ID: h.ID, Claim: h.Claim, KeyID: h.KeyID, Sender: h.Sender, Recipients: h.Recipients,
-		Driver: s.driver.Name(), Content: s.contentOf(msg), KeepContent: s.opt.KeepContent})
+		Driver: s.driver.Name(), Content: s.contentOf(msg), KeepContent: s.opt.KeepContent, Files: s.keptFiles(msg)})
 	if err != nil {
 		return fmt.Errorf("mail: record the send: %w", err)
 	}
@@ -197,7 +197,7 @@ func (s *Service) heldContent(ctx context.Context, id string) (*Content, error) 
 		return nil, errors.New("mail: what a waiting email says is not what was written")
 	}
 	for _, f := range files {
-		c.Attachments = append(c.Attachments, File{Filename: f.Filename, ContentType: f.Type, ContentID: f.ContentID, Size: len(f.Content)})
+		c.Attachments = append(c.Attachments, File{Filename: f.Filename, ContentType: f.Type, ContentID: f.ContentID, Size: len(f.Content), Kept: true})
 	}
 	return &c, nil
 }

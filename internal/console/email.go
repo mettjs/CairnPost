@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/mettjs/cairnpost/internal/download"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store"
 )
@@ -117,4 +118,20 @@ func (c *console) cancelEmail(w http.ResponseWriter, r *http.Request) {
 		c.flash(w, "email-cancelled")
 	}
 	http.Redirect(w, r, at("/emails/"+url.PathEscape(id), nil), http.StatusSeeOther)
+}
+
+// emailFile hands over what one of an email's files held, as a file to
+// save: while the email waits to be sent, or where the server keeps
+// what emails say and their files. Its name is not logged.
+func (c *console) emailFile(w http.ResponseWriter, r *http.Request) {
+	f, err := c.Mail.FileFor(r.Context(), who(r), r.PathValue("id"), download.Place(r.PathValue("place")))
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		c.fail(w, r, http.StatusNotFound, "There is no such file. What it held may no longer be kept.")
+	case err != nil:
+		c.Log.Error("console: an email's file could not be read", "error", err)
+		c.fail(w, r, http.StatusServiceUnavailable, "The file could not be read. Try again shortly.")
+	default:
+		download.Serve(w, f.Filename, f.Content)
+	}
 }

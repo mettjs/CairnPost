@@ -157,7 +157,7 @@ func serve(ctx context.Context) error {
 
 	if cfg.ContentRetention != 0 {
 		log.Warn("what emails say is kept (CAIRNPOST_CONTENT_RETENTION): subjects and bodies are in the database "+
-			"and shown to admin keys", "for", cfg.ContentRetention.String())
+			"and shown to admin keys", "for", cfg.ContentRetention.String(), "with_their_files", cfg.ContentFiles)
 	}
 
 	keyring := keys.New(db).WithMax(cfg.MaxKeys)
@@ -166,7 +166,7 @@ func serve(ctx context.Context) error {
 	endpoints := webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, cfg.Webhook.SecretOverlap, time.Now)
 	suppressions := suppress.New(db)
 	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
-		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention,
+		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention, KeepFiles: cfg.ContentFiles,
 		MaxRecipients: cfg.MaxRecipients, MaxAttachments: attachmentsOf(cfg), MaxAttachmentBytes: cfg.MaxAttachmentBytes,
 		MaxBatch: cfg.MaxBatch, BatchParallel: cfg.BatchParallel, BatchTime: cfg.BatchTimeout, Stopping: ctx.Done(),
 		ScheduleAhead: cfg.Schedule.Ahead, ScheduleRoom: cfg.Schedule.MaxBytes}, log)

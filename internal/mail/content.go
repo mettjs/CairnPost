@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/mettjs/cairnpost/internal/store"
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/driver"
@@ -19,7 +20,7 @@ type Words struct {
 	Text     string            `json:"text,omitempty"`
 	Headers  map[string]string `json:"headers,omitempty"`
 	// Attachments say what files went with it: a name is the email's
-	// words too. A file's bytes are never kept.
+	// words too. What a file held is kept apart, where it is kept.
 	Attachments []File `json:"attachments,omitempty"`
 }
 
@@ -30,6 +31,8 @@ type File struct {
 	// ContentID is set for a file the HTML body shows.
 	ContentID string `json:"content_id,omitempty"`
 	Size      int    `json:"size"`
+	// Kept says what the file held can still be read (FileFor).
+	Kept bool `json:"kept,omitempty"`
 }
 
 // filesOf says what a message's attachments were.
@@ -67,6 +70,9 @@ func (s *Service) contentOf(m driver.Message) func() []byte {
 	}
 	// Said now: what is kept must not hold on to the files' bytes.
 	files := filesOf(m)
+	for i := range files {
+		files[i].Kept = s.opt.KeepFiles
+	}
 	m.Attachments = nil
 	return func() []byte {
 		var out bytes.Buffer
@@ -79,9 +85,69 @@ func (s *Service) contentOf(m driver.Message) func() []byte {
 	}
 }
 
+// keptFiles are a message's files as they are kept with what it said;
+// none where what it said is not kept, or its files are not.
+func (s *Service) keptFiles(m driver.Message) []store.HeldFile {
+	if s.opt.KeepContent == 0 || !s.opt.KeepFiles {
+		return nil
+	}
+	var out []store.HeldFile
+	for _, a := range m.Attachments {
+		out = append(out, store.HeldFile{Filename: a.Filename, Type: a.Type, ContentID: a.ContentID, Content: a.Content})
+	}
+	return out
+}
+
+// maxPlace is past any place a file can have: no email carries so many.
+const maxPlace = 1 << 20
+
+// Attached is a file that went, or is to go, with an email.
+type Attached struct {
+	File
+	Content []byte
+}
+
+// FileFor answers, for a key, one of an email's files by its place
+// from 1, as Content lists them: while the email waits to be sent, or
+// while what it said is kept and its files with it. store.ErrNotFound
+// for an email the key may not read, for a key that is not shown what
+// emails said, and for a file that is not kept.
+func (s *Service) FileFor(ctx context.Context, key store.Key, id string, place int) (*Attached, error) {
+	m, _, err := s.MessageFor(ctx, key, id)
+	if err != nil {
+		return nil, err
+	}
+	if !ReadsContent(key) || place < 1 {
+		return nil, store.ErrNotFound
+	}
+	var f *store.HeldFile
+	// Decided as Content decides: an email is read as one that waits for
+	// as long as its words are held, so what Content says is kept is.
+	if h, err := s.held.Held(ctx, m.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	} else if err == nil && h.State == store.StateScheduled {
+		_, files, err := s.held.HeldWords(ctx, m.ID)
+		if err != nil {
+			return nil, err
+		}
+		if place <= len(files) {
+			f = &files[place-1]
+		}
+	} else if s.opt.KeepContent != 0 && s.opt.KeepFiles && place <= maxPlace {
+		if f, err = s.store.File(ctx, m.ID, place-1, s.opt.KeepContent); err != nil {
+			return nil, err
+		}
+	}
+	if f == nil {
+		return nil, store.ErrNotFound
+	}
+	return &Attached{File{Filename: f.Filename, ContentType: f.Type, ContentID: f.ContentID, Size: len(f.Content)}, f.Content}, nil
+}
+
 // Content answers what a message said, while that is kept; nil when it
 // never was, is past its time, or content is not kept at all. Turning the
-// setting off hides at once what an earlier setting kept.
+// setting off hides at once what an earlier setting kept, and so does
+// turning off the keeping of files for the files.
 //
 // What an email that waits to be sent says is kept until it is sent,
 // whatever the setting, and is answered here too.
@@ -102,5 +168,8 @@ func (s *Service) Content(ctx context.Context, id string) (*Content, error) {
 		return nil, errors.New("mail: a message's kept content is not what was written")
 	}
 	c.KeptUntil = until.UTC()
+	for i := range c.Attachments {
+		c.Attachments[i].Kept = c.Attachments[i].Kept && s.opt.KeepFiles
+	}
 	return &c, nil
 }
