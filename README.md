@@ -54,7 +54,8 @@ The [changelog](CHANGELOG.md) says what exists.
 ## Try it
 
 Each release publishes an image at `ghcr.io/mettjs/cairnpost`, for amd64 and
-arm64; none is released yet. To run it from source with its database:
+arm64: `docker pull ghcr.io/mettjs/cairnpost:0.1.0`. To run it from source
+with its database:
 
 ```sh
 docker compose up -d --build
@@ -987,6 +988,10 @@ with a time (`2030-01-31T09:00:00Z`) has the email sent then, and
 ## Contributing
 
 Commits, versions and releases follow [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+Found a weakness? Report it in private: see [SECURITY.md](SECURITY.md).
 
 ## License
 
