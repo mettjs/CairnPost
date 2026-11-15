@@ -76,6 +76,7 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `PATCH /emails/{id}` | Give an email that waits to be sent another time: `{"scheduled_at"}`. |
 | `POST /emails/{id}/cancel` | Cancel an email that waits to be sent. |
 | `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any, or its sending domain's if it is bound to one. Where content is kept, an admin key also sees what the email said, as `content`. |
+| `GET /emails/{id}/attachments/{place}` | One of an email's files, as it was sent, to an admin key: only where content and its files are kept, or while the email waits to be sent. `place` counts from 1. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
 | `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
 | `POST /suppressions` | Stop sending to an address from a domain: `{"domain", "address", "note"}`. The note is optional, one line of at most 500 bytes. Admin key. |
@@ -109,10 +110,11 @@ it); without one it is a file beside the email. An email carries 10 files and 10
 all unless `CAIRNPOST_MAX_ATTACHMENTS` and `CAIRNPOST_MAX_ATTACHMENT_BYTES`
 say otherwise, and a send's body may be that much larger than any other
 request's. A file is part of the request an `Idempotency-Key` remembers.
-**What a file holds is never logged, and not kept**: it is handed to the
-mail provider and let go. Only an email that waits to be sent
-(`scheduled_at`) has its files held, until it is sent or cancelled. Its name, type and size are kept only where
-what emails say is. Large files take time to hand on: a server that sends
+**What a file holds is never logged, and not kept by default**: it is
+handed to the mail provider and let go. An email that waits to be sent
+(`scheduled_at`) has its files held until it is sent or cancelled. Where
+what emails say is kept (`CAIRNPOST_CONTENT_RETENTION`), so are its
+files, with their name, type and size, for as long. Large files take time to hand on: a server that sends
 them wants a `CAIRNPOST_SEND_TIMEOUT` to match, and a request must arrive
 whole within 30 seconds, or it answers 408 `request_incomplete`. A server
 holds a send's files in memory while it sends, so it takes only so many
@@ -413,10 +415,13 @@ The pruner runs every `CAIRNPOST_PRUNE_EVERY`, and `GET /health` says
 
 **What an email said** is not kept unless `CAIRNPOST_CONTENT_RETENTION` is
 set, to a time of 30 days at most. While it is, the subject, bodies, reply
-address, sender's name and headers of each email, and the name, type and
-size of each file with it, are stored when it is sent,
+address, sender's name and headers of each email, and each file with it
+(its name, type and size, and what it holds unless
+`CAIRNPOST_CONTENT_FILES` is `false`), are stored when it is sent,
 and `GET /emails/{id}` shows them as `content`, with `kept_until`, to an
-admin key: one bound to a sending domain sees that domain's emails' only,
+admin key. A file there says `"kept": true` when
+`GET /emails/{id}/attachments/{place}` can give it back, `place` counting
+the email's files from 1. Of admin keys, one bound to a sending domain sees that domain's emails' only,
 and a key that may only send never does, even for its own emails. So is
 what the receiving server said about a bounce or a delay, as an event's
 `detail`: it says why, and it can quote the email, so it is kept until the
@@ -426,7 +431,11 @@ deleted at the pruner's next pass. Each is deleted on the time it was kept
 under: turning the setting off, or making it shorter, hides at once what
 is past the new time, and deletes it when its original time is up. Anyone
 who can read the database can read them, so leave it off unless you need
-it.
+it. Deleted means gone from the tables: a backup made meanwhile still
+holds them until it is itself thrown away. Kept files are stored in the
+database whole, so a server that sends many large ones grows by their
+size for as long as they are kept; `CAIRNPOST_CONTENT_FILES=false` keeps
+the words without them.
 
 **Errors** are JSON: `{"statusCode": 422, "name": "validation_error", "message": "..."}`.
 The status tells a program what to do:
@@ -654,7 +663,9 @@ on the page that made it.
   also before anything is sent from it.
 - An email's page shows what happened to it and, where
   `CAIRNPOST_CONTENT_RETENTION` keeps it, what it said: as the text it was
-  written in, never drawn as a mail program would.
+  written in, never drawn as a mail program would. Its files, where they
+  are kept, can be saved from there: always as a download, never opened
+  in the browser.
 - A key made in the console says which key made it, and the server's log
   says who signed in, made a key or revoked one, by the keys' public
   prefixes. If a key leaks, the keys it made can be found.
@@ -728,6 +739,7 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_IDEMPOTENCY_TTL` | `24h` | How long an `Idempotency-Key` is remembered. |
 | `CAIRNPOST_RETENTION` | `30d` | How long an email's record is kept after the last thing that happened to it, in days (`30d`) or hours (`720h`). At least `7d`, and longer than `CAIRNPOST_IDEMPOTENCY_TTL` and than the waits of `CAIRNPOST_WEBHOOK_RETRIES` together. `off` keeps records for ever. |
 | `CAIRNPOST_CONTENT_RETENTION` | `off` | How long what an email said, and what the receiving server said of it, is kept and shown to admin keys: a time such as `24h` or `7d`, `30d` at most and no longer than `CAIRNPOST_RETENTION`. `off` keeps none. |
+| `CAIRNPOST_CONTENT_FILES` | `true` | Whether an email's files are kept with what it said, where that is kept, and can be read back by an admin key. `false` keeps their name, type and size only. |
 | `CAIRNPOST_COUNTS_RETENTION` | `62d` | How long the counts of what was sent each hour, and what became of it, are kept: numbers only, apart from the records and whatever `CAIRNPOST_RETENTION` is. At least `62d`. `off` keeps them for ever. |
 | `CAIRNPOST_PRUNE_EVERY` | `1h` | How long the pruner rests between passes. |
 | `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. It is also how long a send may stay `sending` before it is taken to be abandoned (by a server that stopped in the middle of it) and set to `unknown`: looked for that often, so within twice this time, and never sooner than `CAIRNPOST_SEND_TIMEOUT` plus a minute. |
