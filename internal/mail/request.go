@@ -29,6 +29,10 @@ type Request struct {
 	IdemKey string
 	// ScheduledAt is when to send it; zero for now.
 	ScheduledAt time.Time
+	// Template is the template to make it from, in place of HTML and
+	// Text; nil for none. Subject, when given with it, is used instead
+	// of the template's.
+	Template *Use
 	// keyed says it is sent under an Idempotency-Key that is not in
 	// IdemKey: an email of a batch, under the batch's.
 	keyed bool
@@ -103,6 +107,9 @@ type checked struct {
 	// Idempotency-Key, and is that or an *Invalid.
 	at   time.Time
 	late bool
+	// asked is the template it was made from, as it was asked for; nil
+	// for none.
+	asked *asked
 }
 
 // addressees are a message's addresses in the order they are kept: "to",

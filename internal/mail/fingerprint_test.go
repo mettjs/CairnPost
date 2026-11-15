@@ -18,11 +18,11 @@ func TestARequestWithoutFilesKeepsItsFingerprint(t *testing.T) {
 	mac := hmac.New(sha256.New, []byte("cp_key"))
 	mac.Write([]byte(`{"From":"app@example.com","FromName":"App","To":["ana@example.org"],"Cc":null,"Bcc":null,` +
 		`"ReplyTo":"","Subject":"s","HTML":"","Text":"t","Headers":null}`))
-	if !bytes.Equal(fingerprint("cp_key", m, time.Time{}), mac.Sum(nil)) {
+	if !bytes.Equal(fingerprint("cp_key", m, time.Time{}, nil), mac.Sum(nil)) {
 		t.Fatal("the fingerprint of a request without files changed")
 	}
 	m.Attachments = []driver.Attachment{{Filename: "a", Type: "text/plain", Content: []byte("x")}}
-	if bytes.Equal(fingerprint("cp_key", m, time.Time{}), mac.Sum(nil)) {
+	if bytes.Equal(fingerprint("cp_key", m, time.Time{}, nil), mac.Sum(nil)) {
 		t.Fatal("a file is no part of the fingerprint")
 	}
 	for name, want := range map[string]string{"a.PDF": "application/pdf", "notes.txt": "text/plain", "x.unknown": "application/octet-stream", "none": "application/octet-stream"} {

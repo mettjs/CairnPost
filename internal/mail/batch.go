@@ -75,7 +75,7 @@ func (s *Service) SendBatch(ctx context.Context, key store.Key, presented, idem 
 	ready := make([]checked, len(reqs))
 	for i, r := range reqs {
 		r.keyed = idem != ""
-		c, err := s.checked(key, r)
+		c, err := s.checked(ctx, key, r)
 		if err != nil {
 			return nil, &BatchInvalid{i, err}
 		}

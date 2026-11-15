@@ -46,6 +46,12 @@ type sendBody struct {
 	// ScheduledAt is when to send it, as RFC 3339 says a time; left
 	// out, it is sent now.
 	ScheduledAt string `json:"scheduled_at"`
+	// Template is the template to make the email from, in place of
+	// "html" and "text".
+	Template *struct {
+		Name      string           `json:"name"`
+		Variables map[string]value `json:"variables"`
+	} `json:"template"`
 	// Attachments are files, each with its bytes in base64.
 	Attachments []struct {
 		Filename    string `json:"filename"`
@@ -73,8 +79,33 @@ func (b *sendBody) request() (mail.Request, error) {
 	if err != nil {
 		return mail.Request{}, err
 	}
+	var use *mail.Use
+	if b.Template != nil {
+		use = &mail.Use{Name: b.Template.Name, Variables: map[string]string{}}
+		for name, v := range b.Template.Variables {
+			use.Variables[name] = string(v)
+		}
+	}
 	return mail.Request{From: b.From, To: b.To, Cc: b.Cc, Bcc: b.Bcc, ReplyTo: b.ReplyTo, Subject: b.Subject,
-		HTML: b.HTML, Text: b.Text, Headers: b.Headers, Attachments: files, ScheduledAt: at}, nil
+		HTML: b.HTML, Text: b.Text, Headers: b.Headers, Attachments: files, ScheduledAt: at, Template: use}, nil
+}
+
+// value is what a template's variable is filled with: a string, or a
+// number, which is written as it was given.
+type value string
+
+func (v *value) UnmarshalJSON(raw []byte) error {
+	var text string
+	if json.Unmarshal(raw, &text) == nil && len(raw) > 0 && raw[0] == '"' {
+		*v = value(text)
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(raw, &number); err != nil || len(raw) == 0 || raw[0] == '"' || raw[0] == 'n' {
+		return errors.New("must be a string or a number")
+	}
+	*v = value(raw)
+	return nil
 }
 
 // when reads "scheduled_at": the zero time for none, an *Invalid for
@@ -106,7 +137,7 @@ func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	var body sendBody
-	if !a.bodyUpTo(w, r, &body, "The body must be JSON with from, to, subject and html or text; "+
+	if !a.bodyUpTo(w, r, &body, "The body must be JSON with from, to, subject and html or text, or a template in their place; "+
 		"cc, bcc, reply_to, headers, attachments and scheduled_at are optional. No other field is supported.", max(a.MaxEmailBytes, a.MaxBodyBytes)) {
 		return
 	}

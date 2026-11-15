@@ -14,6 +14,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/metrics"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/templates"
 	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
@@ -23,6 +24,8 @@ type Deps struct {
 	Keys     *keys.Service
 	Suppress *suppress.Service
 	Webhooks *webhook.Service
+	// Templates are the emails written once to be sent many times.
+	Templates *templates.Service
 	// Ping reports whether the store answers, for GET /health.
 	Ping func(context.Context) error
 	// Captured answers the emails a development driver kept instead of
@@ -79,6 +82,11 @@ func New(d Deps) http.Handler {
 	mux.Handle("GET /suppressions", a.auth(true, a.listSuppressions))
 	mux.Handle("POST /suppressions", a.auth(true, a.addSuppression))
 	mux.Handle("POST /suppressions/lift", a.auth(true, a.liftSuppressions))
+	mux.Handle("POST /templates", a.auth(true, a.createTemplate))
+	mux.Handle("GET /templates", a.auth(true, a.listTemplates))
+	mux.Handle("GET /templates/{id}", a.auth(true, a.getTemplate))
+	mux.Handle("PATCH /templates/{id}", a.auth(true, a.updateTemplate))
+	mux.Handle("DELETE /templates/{id}", a.auth(true, a.deleteTemplate))
 	mux.Handle("POST /webhooks", a.auth(true, a.createWebhook))
 	mux.Handle("GET /webhooks", a.auth(true, a.listWebhooks))
 	mux.Handle("GET /webhooks/{id}", a.auth(true, a.getWebhook))

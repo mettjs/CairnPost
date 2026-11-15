@@ -53,6 +53,9 @@ const recordTimeout = 5 * time.Second
 
 // Options are the service's settings.
 type Options struct {
+	// Templates makes an email's words from a template; nil for a
+	// server that has none.
+	Templates Filler
 	// SendTimeout bounds one call to the driver.
 	SendTimeout time.Duration
 	// IdempotencyTTL and InDoubtWindow are store.Start's.
@@ -190,7 +193,7 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 // an earlier try under the same key that was left in doubt, if there was
 // one.
 func (s *Service) Send(ctx context.Context, key store.Key, presented string, r Request) (Receipt, error) {
-	c, err := s.checked(key, r)
+	c, err := s.checked(ctx, key, r)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -199,11 +202,19 @@ func (s *Service) Send(ctx context.Context, key store.Key, presented string, r R
 
 // checked is a request this key may send, found sendable: an *Invalid
 // or ErrDomain otherwise.
-func (s *Service) checked(key store.Key, r Request) (checked, error) {
+func (s *Service) checked(ctx context.Context, key store.Key, r Request) (checked, error) {
+	var was *asked
+	if r.Template != nil {
+		var err error
+		if r, was, err = s.filled(ctx, key, r); err != nil {
+			return checked{}, err
+		}
+	}
 	c, err := check(r, s.opt)
 	if err != nil {
 		return checked{}, err
 	}
+	c.asked = was
 	if key.Domain != "" && key.Domain != c.domain {
 		return checked{}, ErrDomain
 	}
@@ -218,7 +229,7 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 		Content: s.contentOf(c.msg), KeepContent: s.opt.KeepContent, Files: s.keptFiles(c.msg),
 	}
 	if idem != "" {
-		start.Fingerprint = fingerprint(presented, c.msg, c.at)
+		start.Fingerprint = fingerprint(presented, c.msg, c.at, c.asked)
 	}
 	if !c.at.IsZero() {
 		// Kept to be sent later: what it says is kept with it, whether
