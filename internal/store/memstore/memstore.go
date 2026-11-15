@@ -43,6 +43,7 @@ type Store struct {
 	counts     map[bucket]map[string]int
 	held       map[string]*held
 	templates  map[string]store.Template
+	inbounds   map[string]*inbound
 }
 
 // New returns an empty store on the wall clock.
@@ -50,7 +51,7 @@ func New() *Store {
 	return &Store{Now: time.Now, keys: map[string]store.Key{},
 		messages: map[string]store.Message{}, idems: map[string]*idem{},
 		suppressed: map[string]*suppression{}, contents: map[string]content{}, details: map[string]content{}, sessions: map[string]session{},
-		counts: map[bucket]map[string]int{}, held: map[string]*held{}, templates: map[string]store.Template{}}
+		counts: map[bucket]map[string]int{}, held: map[string]*held{}, templates: map[string]store.Template{}, inbounds: map[string]*inbound{}}
 }
 
 var _ store.Store = (*Store)(nil)

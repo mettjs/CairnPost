@@ -248,6 +248,7 @@ type Store interface {
 	Domains
 	Counts
 	Templates
+	Inbounds
 	// Ping reports whether the store can be reached.
 	Ping(ctx context.Context) error
 }

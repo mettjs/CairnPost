@@ -17,6 +17,9 @@ type Pruning interface {
 	PruneContents(ctx context.Context, limit int) (int, error)
 	// PruneDetails does the same for what receiving servers said.
 	PruneDetails(ctx context.Context, limit int) (int, error)
+	// PruneInbound deletes the emails that came whose time is up, with
+	// what endpoints were still owed for them.
+	PruneInbound(ctx context.Context, limit int) (int, error)
 	// PruneSessions deletes console sessions whose time is up.
 	PruneSessions(ctx context.Context, limit int) (int, error)
 	// PruneKeys forgets Idempotency-Keys remembered for ttl or longer: the

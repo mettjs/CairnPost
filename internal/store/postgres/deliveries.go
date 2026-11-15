@@ -48,6 +48,10 @@ func (db *DB) TakeDeliveries(ctx context.Context, max, perEndpoint int, busy []s
 				SELECT id, next_at FROM webhook_deliveries
 				WHERE endpoint_id = e.id AND state = 'pending' AND next_at <= now()
 				  AND (taken_until IS NULL OR taken_until <= now())
+				  -- An email that came and whose time is up is told of no more:
+				  -- it goes, with this, at the pruner's next pass.
+				  AND (inbound_id IS NULL OR EXISTS (
+				       SELECT 1 FROM inbound_emails i WHERE i.id = inbound_id AND i.expires_at > now()))
 				ORDER BY next_at LIMIT $2 FOR UPDATE SKIP LOCKED) d
 			WHERE e.enabled AND e.paused_at IS NULL AND e.id::text <> ALL ($4::text[])
 			ORDER BY d.next_at LIMIT $1
@@ -56,18 +60,21 @@ func (db *DB) TakeDeliveries(ctx context.Context, max, perEndpoint int, busy []s
 			SET attempts = d.attempts + 1, attempted_at = now(), taken_until = now() + make_interval(secs => $3)
 			FROM picked WHERE d.id = picked.id
 			RETURNING d.id, d.endpoint_id, d.event_id, d.suppression_domain, d.suppression_address, d.suppression_reason,
-			          d.attempts, d.created_at
+			          d.inbound_id, d.attempts, d.created_at
 		)
 		SELECT t.id::text, t.attempts, t.created_at,
 		       e.id::text, e.url, e.secret, `+previousKeys+`,
 		       coalesce(ev.id::text, ''), coalesce(ev.kind, ''), coalesce(ev.permanent, false), coalesce(ev.code, ''),
 		       coalesce(ev.reason, ''), coalesce(ev.occurred_at, t.created_at), coalesce(ev.suppressed, false),
 		       coalesce(m.email_id::text, ''), coalesce(m.sender, ''), coalesce(m.recipient, ''), coalesce(m.created_at, t.created_at),
-		       coalesce(t.suppression_domain, ''), coalesce(t.suppression_address, ''), coalesce(t.suppression_reason, '')
+		       coalesce(t.suppression_domain, ''), coalesce(t.suppression_address, ''), coalesce(t.suppression_reason, ''),
+		       coalesce(i.id::text, ''), coalesce(i.domain, ''), coalesce(i.recipient, ''), coalesce(i.sender, ''),
+		       coalesce(i.received_at, t.created_at)
 		FROM taken t
 		JOIN webhook_endpoints e ON e.id = t.endpoint_id
 		LEFT JOIN events ev ON ev.id = t.event_id
 		LEFT JOIN messages m ON m.id = ev.message_id
+		LEFT JOIN inbound_emails i ON i.id = t.inbound_id
 		ORDER BY t.id`, max, perEndpoint, lease.Seconds(), busy)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: take webhook deliveries: %w", err)
@@ -76,15 +83,20 @@ func (db *DB) TakeDeliveries(ctx context.Context, max, perEndpoint int, busy []s
 		var (
 			d   store.Due
 			sup store.Suppression
+			in  store.Inbound
 		)
 		err := row.Scan(&d.Delivery.ID, &d.Delivery.Attempts, &d.Delivery.CreatedAt,
 			&d.Endpoint.ID, &d.Endpoint.URL, &d.Endpoint.Secret, &d.Endpoint.Previous,
 			&d.Event.ID, &d.Event.Kind, &d.Event.Permanent, &d.Event.Code, &d.Event.Reason, &d.Event.At, &d.Event.Suppressed,
 			&d.Message.ID, &d.Message.Sender, &d.Message.Recipient, &d.Message.CreatedAt,
-			&sup.Domain, &sup.Address, &sup.Reason)
+			&sup.Domain, &sup.Address, &sup.Reason,
+			&in.ID, &in.Domain, &in.Recipient, &in.Sender, &in.ReceivedAt)
 		d.Delivery.EndpointID, d.Delivery.Kind, d.Delivery.MessageID = d.Endpoint.ID, d.Event.Kind, d.Message.ID
 		d.Event.MessageID = d.Message.ID
-		if d.Event.ID == "" {
+		if in.ID != "" {
+			// It tells of an email that came: who from, who for, when.
+			d.Inbound, d.Delivery.Kind, d.Delivery.InboundID, d.Event, d.Message = &in, store.KindReceived, in.ID, store.Event{}, store.Message{}
+		} else if d.Event.ID == "" {
 			// It tells of a suppression, not of an email's event: as it
 			// was when it was owed, which is when the address was put on
 			// the list.
