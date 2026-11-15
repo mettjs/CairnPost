@@ -110,6 +110,12 @@ signs with a secret of its own (see "Receiving email").
 | `GET /metrics` | The server's numbers in the text form Prometheus reads. Admin key. |
 | `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent, scheduled emails sent, old records pruned, and emails that come taken. |
 
+The whole API is also written down for programs, in
+[`openapi.json`](openapi.json) (OpenAPI 3.1): every call, the key it
+needs, what it takes and what it answers. Feed it to a client generator
+or an API browser. A test holds its calls, the key each needs, and the
+fields and listed values of what they take and answer to the code.
+
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both,
 or a `template` in place of the three;
 `cc`, `bcc`, `reply_to`, `headers`, `attachments` and `scheduled_at` are
