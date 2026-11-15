@@ -46,8 +46,10 @@ The [changelog](CHANGELOG.md) says what exists.
 - It comes with a small console, served by the same binary at `/console`:
   sign in with an admin key to see how much was sent and what became of
   it, and to manage emails, suppressions, webhooks, domains and API keys.
-- It leans on Go's standard library. Its one direct dependency is the
-  Postgres driver, [pgx](https://github.com/jackc/pgx).
+- It leans on Go's standard library. Its direct dependencies are two:
+  the Postgres driver, [pgx](https://github.com/jackc/pgx), and Go's own
+  [text](https://pkg.go.dev/golang.org/x/text) module, to read mail
+  written in other charsets.
 
 ## Try it
 
@@ -82,7 +84,7 @@ signs with a secret of its own (see "Receiving email").
 | `PATCH /emails/{id}` | Give an email that waits to be sent another time: `{"scheduled_at"}`. |
 | `POST /emails/{id}/cancel` | Cancel an email that waits to be sent. |
 | `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any, or its sending domain's if it is bound to one. Where content is kept, an admin key also sees what the email said, as `content`. |
-| `GET /inbound` | The emails that came and are still kept, newest first, without what they say. `?limit=` and `?after=` page it. Admin key. |
+| `GET /inbound` | The emails that came and are still kept, newest first, without what they say. A page is 50 unless `?limit=` says otherwise (200 at most); when more follow, the answer has a `next` to pass as `?after=`. Admin key. |
 | `GET /inbound/{id}` | One email that came, as it reads: subject, sender, bodies, headers and the files it carries. Admin key. |
 | `GET /inbound/{id}/raw` | The email as it came, every byte. Admin key. |
 | `GET /inbound/{id}/attachments/{place}` | One of its files; `place` counts from 1. Admin key. |
@@ -94,14 +96,14 @@ signs with a secret of its own (see "Receiving email").
 | `DELETE /templates/{id}` | Delete a template. Admin key. |
 | `GET /emails/{id}/attachments/{place}` | One of an email's files, as it was sent, to an admin key: only where content and its files are kept, or while the email waits to be sent. `place` counts from 1. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
-| `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
+| `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 50 unless `?limit=` says otherwise (200 at most); when more follow, the answer has a `next` to pass as `?after=`. |
 | `POST /suppressions` | Stop sending to an address from a domain: `{"domain", "address", "note"}`. The note is optional, one line of at most 500 bytes. Admin key. |
 | `POST /suppressions/lift` | Send to an address again: `{"domain", "address"}`. Or to every suppressed address of a domain: `{"domain", "all": true}`, which `"reason"` narrows to `bounce`, `complaint` or `manual`. Answers `{"lifted": n}`. Admin key. |
 | `POST /webhooks` | Have a URL told what becomes of emails: `{"url", "domain", "events", "description"}`; all but `url` optional. Answers the endpoint with its signing `secret`, which is said only here. Admin key. |
 | `GET /webhooks`, `GET /webhooks/{id}` | The endpoints. Admin key. |
 | `PATCH /webhooks/{id}` | Change any of `url`, `events`, `description`, `enabled`. Admin key. |
 | `DELETE /webhooks/{id}` | Remove an endpoint and all it was owed. Admin key. |
-| `GET /webhooks/{id}/deliveries` | What the endpoint was sent and how each went, newest first. `?state=` narrows to `pending`, `delivered` or `failed`. A page is 50 unless `?limit=` says otherwise (500 at most); when more follow, the answer has a `next` to pass as `?after=`. Admin key. Each names its email in `email_id`, absent for an `address.suppressed`, which is about no email. |
+| `GET /webhooks/{id}/deliveries` | What the endpoint was sent and how each went, newest first. `?state=` narrows to `pending`, `delivered` or `failed`. A page is 50 unless `?limit=` says otherwise (200 at most); when more follow, the answer has a `next` to pass as `?after=`. Admin key. Each names its email in `email_id`, absent for an `address.suppressed`, which is about no email. |
 | `POST /webhooks/{id}/deliveries/{delivery}/retry` | Try a webhook now: once more if it was given up, or without waiting for its next try if it is pending. Admin key. |
 | `POST /webhooks/{id}/test` | Send the endpoint a signed `webhook.test` now and say how it answered. Admin key. |
 | `POST /webhooks/{id}/secret` | Give the endpoint a new signing secret. Answers the endpoint with the new `secret`, said this once, and `previous_secret_until`: until then webhooks are signed with the old one too. Admin key. |
@@ -614,10 +616,12 @@ reads it with an admin key: `GET /inbound/{id}` for what it says,
 - **How it reads.** `content` is a reading of the email: its first plain
   text and first HTML as bodies (1 MiB of each), every other part as a
   file, and its headers by name, the mail provider's verdicts first (200
-  of them, 4 KiB of each). Text in
-  UTF-8, Latin-1 and Windows-1252 is read; in another charset it is
-  shown as far as it reads. `"partial": true` says the reading is not
-  all of the email: for that, or because it was cut to those lengths. The email as
+  of them, 4 KiB of each). Text is read in whatever charset mail is
+  written in (UTF-8, the Latin and Windows ones, Cyrillic, Greek,
+  Japanese, Chinese, Korean and the rest browsers read); in any other,
+  ISO-2022-KR among them, it is shown as far as it reads. `"partial": true` says
+  the reading is not all of the email: for that, for bytes that are not
+  what their charset says, or because it was cut to those lengths. The email as
   it came (`/raw`) always holds all of it.
 - **Handed on twice**, the same email for the same address is kept once,
   and the first one's id is answered.
