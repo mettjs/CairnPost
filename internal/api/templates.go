@@ -67,14 +67,7 @@ func (a *app) failTemplate(w http.ResponseWriter, err error) {
 
 // createTemplate is POST /templates: keep an email to send many times.
 func (a *app) createTemplate(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name     string            `json:"name"`
-		Domain   string            `json:"domain"`
-		Subject  string            `json:"subject"`
-		HTML     string            `json:"html"`
-		Text     string            `json:"text"`
-		Defaults map[string]string `json:"defaults"`
-	}
+	var body templateBody
 	if !a.body(w, r, &body, `The body must be JSON with "name", "subject" and "html" or "text"; "domain" and "defaults" are optional.`) {
 		return
 	}
@@ -116,13 +109,7 @@ func (a *app) getTemplate(w http.ResponseWriter, r *http.Request) {
 // updateTemplate is PATCH /templates/{id}: what is named is changed,
 // the rest stays. An email asked for from now on is made from it.
 func (a *app) updateTemplate(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name     *string            `json:"name"`
-		Subject  *string            `json:"subject"`
-		HTML     *string            `json:"html"`
-		Text     *string            `json:"text"`
-		Defaults *map[string]string `json:"defaults"`
-	}
+	var body templateChange
 	if !a.body(w, r, &body, `The body must be JSON with any of "name", "subject", "html", "text" and "defaults".`) {
 		return
 	}
@@ -142,4 +129,23 @@ func (a *app) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// templateBody is what POST /templates takes.
+type templateBody struct {
+	Name     string            `json:"name"`
+	Domain   string            `json:"domain"`
+	Subject  string            `json:"subject"`
+	HTML     string            `json:"html"`
+	Text     string            `json:"text"`
+	Defaults map[string]string `json:"defaults"`
+}
+
+// templateChange is what PATCH /templates/{id} takes.
+type templateChange struct {
+	Name     *string            `json:"name"`
+	Subject  *string            `json:"subject"`
+	HTML     *string            `json:"html"`
+	Text     *string            `json:"text"`
+	Defaults *map[string]string `json:"defaults"`
 }

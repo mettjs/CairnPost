@@ -65,12 +65,7 @@ func scope(r *http.Request) string { return callerOf(r).key.Domain }
 // createWebhook is POST /webhooks: have a URL told what becomes of emails.
 // The answer carries the signing secret, and no later answer does.
 func (a *app) createWebhook(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		URL         string   `json:"url"`
-		Domain      string   `json:"domain"`
-		Events      []string `json:"events"`
-		Description string   `json:"description"`
-	}
+	var body endpointBody
 	if !a.body(w, r, &body, `The body must be JSON with "url"; "domain", "events" and "description" are optional.`) {
 		return
 	}
@@ -113,12 +108,7 @@ func (a *app) getWebhook(w http.ResponseWriter, r *http.Request) {
 // rest. "enabled": false stops it being told anything new. It does not
 // resume a paused endpoint: POST /webhooks/{id}/resume does.
 func (a *app) updateWebhook(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		URL         *string   `json:"url"`
-		Events      *[]string `json:"events"`
-		Description *string   `json:"description"`
-		Enabled     *bool     `json:"enabled"`
-	}
+	var body endpointChange
 	if !a.body(w, r, &body, `The body must be JSON with any of "url", "events", "description" and "enabled".`) {
 		return
 	}
@@ -167,4 +157,20 @@ func (a *app) deleteWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// endpointBody is what POST /webhooks takes.
+type endpointBody struct {
+	URL         string   `json:"url"`
+	Domain      string   `json:"domain"`
+	Events      []string `json:"events"`
+	Description string   `json:"description"`
+}
+
+// endpointChange is what PATCH /webhooks/{id} takes.
+type endpointChange struct {
+	URL         *string   `json:"url"`
+	Events      *[]string `json:"events"`
+	Description *string   `json:"description"`
+	Enabled     *bool     `json:"enabled"`
 }

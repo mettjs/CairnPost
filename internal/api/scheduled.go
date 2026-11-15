@@ -23,9 +23,7 @@ func (a *app) cancelEmail(w http.ResponseWriter, r *http.Request) {
 // rescheduleEmail is PATCH /emails/{id}: an email that waits is given
 // another time.
 func (a *app) rescheduleEmail(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ScheduledAt string `json:"scheduled_at"`
-	}
+	var body rescheduleBody
 	if !a.body(w, r, &body, `The body must be JSON with scheduled_at, the time to send the email at. No other field can be changed.`) {
 		return
 	}
@@ -57,4 +55,9 @@ func (a *app) failWaiting(w http.ResponseWriter, err error) {
 		a.Log.Error("api: a waiting email could not be changed", "error", err)
 		fail(w, http.StatusServiceUnavailable, "unavailable", "The email could not be changed. Try again shortly.")
 	}
+}
+
+// rescheduleBody is what PATCH /emails/{id} takes.
+type rescheduleBody struct {
+	ScheduledAt string `json:"scheduled_at"`
 }

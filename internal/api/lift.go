@@ -6,12 +6,7 @@ import "net/http"
 // or to every suppressed address of a domain. The address is in the body,
 // never the URL: a URL is what proxies and access logs keep.
 func (a *app) liftSuppressions(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Domain  string `json:"domain"`
-		Address string `json:"address"`
-		All     bool   `json:"all"`
-		Reason  string `json:"reason"`
-	}
+	var body liftBody
 	const shape = `The body must be JSON with "domain" and either "address", or "all": true to lift every suppression ` +
 		`of the domain; with "all", "reason" narrows it to "bounce", "complaint" or "manual".`
 	if !a.body(w, r, &body, shape) {
@@ -33,4 +28,12 @@ func (a *app) liftSuppressions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	write(w, http.StatusOK, map[string]int{"lifted": lifted})
+}
+
+// liftBody is what POST /suppressions/lift takes.
+type liftBody struct {
+	Domain  string `json:"domain"`
+	Address string `json:"address"`
+	All     bool   `json:"all"`
+	Reason  string `json:"reason"`
 }
