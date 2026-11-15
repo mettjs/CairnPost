@@ -31,8 +31,10 @@ does not take the email:
 - with `FALLBACK_ADDRESS` set to a verified destination address, the
   email is forwarded there;
 - without one, or when that address does not take it, the email is
-  refused, and the sending server tells its
-  sender it did not arrive.
+  refused for good. The sending server does not try again: within a
+  minute its sender gets a notice that the email was not delivered,
+  with the words "This address cannot take mail right now. Send it
+  again later."
 
 It is never dropped unsaid. The Worker's log (`npx wrangler tail`) says
 what the server answered, and never an address.
