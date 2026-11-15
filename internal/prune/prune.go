@@ -100,7 +100,7 @@ func (p *Pruner) Run(ctx context.Context) {
 		if c != (Counts{}) {
 			// Counts only: no address and no id.
 			p.log.Info("prune: forgot what was kept long enough", "contents", c.Contents, "details", c.Details, "console_sessions", c.Sessions, "idempotency_keys", c.Keys,
-				"emails", c.Emails, "lifted_suppressions", c.Lifted,
+				"emails", c.Emails, "cancelled_emails", c.Cancelled, "lifted_suppressions", c.Lifted,
 				"suppression_webhooks", c.Notices, "old_signing_keys", c.Secrets, "counted_hours", c.Hours)
 		}
 		select {
@@ -141,7 +141,7 @@ func (p *Pruner) Sweep(ctx context.Context) (int, error) {
 }
 
 // Counts is how much a pass deleted.
-type Counts struct{ Contents, Details, Sessions, Keys, Emails, Lifted, Notices, Secrets, Hours int }
+type Counts struct{ Contents, Details, Sessions, Keys, Emails, Cancelled, Lifted, Notices, Secrets, Hours int }
 
 // Pass prunes everything due now. What emails said, and what was said of
 // them, goes first and each on its own: it is the most private thing
@@ -182,6 +182,10 @@ func (p *Pruner) records(ctx context.Context, c *Counts) error {
 		return err
 	}
 	c.Emails, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneMessages(ctx, before, batch) })
+	if err != nil {
+		return err
+	}
+	c.Cancelled, err = all(ctx, func(ctx context.Context) (int, error) { return p.store.PruneCancelled(ctx, before, batch) })
 	if err != nil {
 		return err
 	}

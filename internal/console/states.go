@@ -21,10 +21,28 @@ var states = map[string]stateWords{
 	store.StateUnknown:    {"Unknown", "The mail provider's answer never came, so it is not known whether it went.", "off"},
 }
 
+// waitingStates has words for the states of an email that was asked for
+// ahead of time and is not among the sent ones.
+var waitingStates = map[string]stateWords{
+	store.StateScheduled: {"Scheduled", "It waits to be sent at the time it was asked for.", "off"},
+	store.StateCancelled: {"Cancelled", "It was to be sent later and was cancelled first. It was not sent.", "off"},
+}
+
+// cancelledFor says why an email that waited was cancelled when nobody
+// asked for that.
+var cancelledFor = map[string]string{
+	store.HeldSuppressed: "When its time came, every address it named in the open was on the suppression list.",
+	store.HeldKeyRevoked: "The API key that asked for it was revoked before its time came.",
+	store.HeldFailed:     "This server could not send it, each time it tried. The server's log says why.",
+}
+
 // wordsOf answers a state's words; a state this console does not know is
 // shown by its own name, plainly.
 func wordsOf(state string) stateWords {
 	if w, known := states[state]; known {
+		return w
+	}
+	if w, known := waitingStates[state]; known {
 		return w
 	}
 	return stateWords{Label: state, Tone: "off"}

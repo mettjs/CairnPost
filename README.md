@@ -30,7 +30,10 @@ The [changelog](CHANGELOG.md) says what exists.
   writes them to a log.** The database holds who sent what to whom and what
   became of it. Whoever runs it may turn on `CAIRNPOST_CONTENT_RETENTION` to
   keep what emails said for a short time, to see what went out when
-  something goes wrong (see "What is kept").
+  something goes wrong (see "What is kept"). One exception needs no
+  setting: an email asked for ahead of time (`scheduled_at`) is kept, with
+  its files, until it is sent or cancelled, since it could not be sent
+  otherwise.
   The `capture` driver, a development tool whose purpose is to show you the
   email, holds the last few in memory only, readable with an admin key.
 - It does not track opens or clicks.
@@ -70,6 +73,8 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 |---|---|
 | `POST /emails` | Send one email, to one address or several. Answers `{"id": "..."}` once the provider has taken it, with `suppressed` naming any address it was not sent to. |
 | `POST /emails/batch` | Send several emails in one request. Answers what became of each, in their order. |
+| `PATCH /emails/{id}` | Give an email that waits to be sent another time: `{"scheduled_at"}`. |
+| `POST /emails/{id}/cancel` | Cancel an email that waits to be sent. |
 | `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any, or its sending domain's if it is bound to one. Where content is kept, an admin key also sees what the email said, as `content`. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
 | `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
@@ -86,11 +91,11 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `POST /webhooks/{id}/resume` | End an endpoint's pause, and send what it is owed. One that is not paused is answered as it is. Admin key. |
 | `GET /limits` | The provider's sending allowance and how much of it is used, so you know before it runs out. `quota` is `null` for a provider with none to tell. |
 | `GET /metrics` | The server's numbers in the text form Prometheus reads. Admin key. |
-| `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent and old records pruned. |
+| `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent, scheduled emails sent and old records pruned. |
 
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both;
-`cc`, `bcc`, `reply_to`, `headers` and `attachments` are optional. Any
-other field is refused, never silently dropped.
+`cc`, `bcc`, `reply_to`, `headers`, `attachments` and `scheduled_at` are
+optional. Any other field is refused, never silently dropped.
 
 **Attachments.** `attachments` is a list of files, each
 `{"filename", "content", "content_type", "content_id"}`: `content` is the
@@ -104,8 +109,9 @@ it); without one it is a file beside the email. An email carries 10 files and 10
 all unless `CAIRNPOST_MAX_ATTACHMENTS` and `CAIRNPOST_MAX_ATTACHMENT_BYTES`
 say otherwise, and a send's body may be that much larger than any other
 request's. A file is part of the request an `Idempotency-Key` remembers.
-**What a file holds is never kept and never logged**: it is handed to the
-mail provider and let go. Its name, type and size are kept only where
+**What a file holds is never logged, and not kept**: it is handed to the
+mail provider and let go. Only an email that waits to be sent
+(`scheduled_at`) has its files held, until it is sent or cancelled. Its name, type and size are kept only where
 what emails say is. Large files take time to hand on: a server that sends
 them wants a `CAIRNPOST_SEND_TIMEOUT` to match, and a request must arrive
 whole within 30 seconds, or it answers 408 `request_incomplete`. A server
@@ -170,10 +176,76 @@ passed, and is sent again after it, as it would be alone. Send the same
 emails in the same order: a place that holds another email answers
 `invalid_idempotent_request`. A batch's key may be 248 characters.
 
+**Sending later.** Give `scheduled_at`, a time with its zone
+(`"2030-01-31T09:00:00Z"`), and the email is not sent but kept to be sent
+then. The answer has its `id` and its `scheduled_at`, and
+`GET /emails/{id}` says `"state": "scheduled"` until it goes; from then on
+it is an email like any other, under the same id. The time must be to
+come, and 30 days ahead at most unless `CAIRNPOST_SCHEDULE_AHEAD` says
+otherwise.
+
+```sh
+curl http://localhost:8025/emails \
+  -H "Authorization: Bearer $CAIRNPOST_API_KEY" -H "Idempotency-Key: reminder-42" \
+  -d '{"from":"App <app@example.com>","to":"ana@example.org","subject":"Tomorrow","text":"See you at nine.",
+       "scheduled_at":"2030-01-31T09:00:00Z"}'
+# {"id":"01a1d08e-...","scheduled_at":"2030-01-31T09:00:00Z"}
+
+# Another time, or not at all:
+curl -X PATCH http://localhost:8025/emails/01a1d08e-... -H "Authorization: Bearer $CAIRNPOST_API_KEY" \
+  -d '{"scheduled_at":"2030-02-01T09:00:00Z"}'
+curl -X POST http://localhost:8025/emails/01a1d08e-.../cancel -H "Authorization: Bearer $CAIRNPOST_API_KEY"
+```
+
+- **What is checked when.** The request is checked when it is asked for,
+  as a send is. The suppression list is read when the email goes: an
+  address put on it meanwhile is left out, and an email with nobody left
+  in `to` or `cc` is cancelled (`"reason": "suppressed"`). Revoking an
+  API key cancels the emails it asked for that still wait
+  (`"reason": "key_revoked"`), at once, and what they said is deleted
+  then. One being sent at that very moment still goes.
+- **Cancelling and moving.** The key that asked for an email may cancel
+  or move it, and so may an admin key that may read it. Once the email is
+  being sent, was sent or was cancelled, both answer 409 `not_scheduled`.
+  A cancelled email stays on record as `cancelled` for as long as records
+  are kept.
+- **If the provider is not taking mail** when the time comes, the email
+  is tried again, a minute later at first and then less often, until
+  `CAIRNPOST_SCHEDULE_GIVE_UP` (a day) has passed since it was due; then
+  it is `failed`. Between two tries it still reads `scheduled` by its id,
+  while lists and counts show the try that failed. A later try goes to
+  whom the first was to go to, less whoever was suppressed since. If the
+  provider's answer is lost, the email is `unknown` and is not sent
+  again: nobody is there to ask for a second one, and two would be
+  worse. An email this server itself could not send by then is
+  cancelled (`"reason": "failed"`).
+- **Where it is listed.** An email keeps the id it was given when it was
+  asked for, and lists go by id: once sent, it is listed among the emails
+  of the day it was asked for, not of the day it went.
+- **What is kept.** To send an email later, CairnPost must keep what it
+  says and its files: they are held in the database until the email is
+  sent or cancelled and deleted then, whatever
+  `CAIRNPOST_CONTENT_RETENTION` is (with it on, what the email said is
+  kept on from the send, as any email's is). While it waits, an admin key
+  is shown what it says, as `content`. They are never logged. Deleted
+  means from the tables: a backup made meanwhile still has them.
+- **Only so much may wait**: `CAIRNPOST_SCHEDULE_MAX_BYTES` in all (1
+  GiB), words and files. Past it, asking for another answers 503
+  `schedule_full`.
+- An `Idempotency-Key` is remembered from the asking, for
+  `CAIRNPOST_IDEMPOTENCY_TTL` (a day), not until the email goes: within
+  it the same request again answers the same email and the time it waits
+  for now, even after that time has passed, unless the email failed
+  (a failure frees its key, as for any send); after it, the same request
+  is a new email.
+- Emails of a batch may each have a `scheduled_at`.
+
 **An email's state**, from `GET /emails/{id}`:
 
 | State | Meaning |
 |---|---|
+| `scheduled` | It waits to be sent at its `scheduled_at`. |
+| `cancelled` | It was to be sent later and was cancelled first. It was not sent. |
 | `sending` | Handed to the provider; its answer is not in yet. |
 | `sent` | The provider took it. Nothing more is known yet. |
 | `deferred` | The receiving server said "not now"; the provider is retrying. |
@@ -334,6 +406,8 @@ How many emails were sent each hour from each sending domain, and how many
 of them were delivered, bounced and so on, is counted apart from the
 records and kept for `CAIRNPOST_COUNTS_RETENTION`, 62 days by default,
 whatever the records' retention is: numbers only, with no address in them.
+An email that was to be sent later and was cancelled stays on record,
+with nothing of what it said, for the same time as any email's record.
 The pruner runs every `CAIRNPOST_PRUNE_EVERY`, and `GET /health` says
 `"pruning": "running"` or `"failing"`. Mail still goes while it is failing.
 
@@ -363,6 +437,7 @@ The status tells a program what to do:
 | 422 | `recipient_suppressed` | The address is on the sending domain's suppression list, or every address in `to` and `cc` is when the email names several. Nothing was sent now. Do not retry; lift the suppression if it is wrong. If the answer has an `id`, an earlier try under the same `Idempotency-Key` got no answer from the provider and may have gone: the id is that try's. |
 | 409 | `invalid_idempotent_request` | The key was already used with a different request, which was sent. Do not retry. |
 | 409 | `concurrent_idempotent_requests` | A send under this key is in flight, or its answer has not come yet. Retry after `Retry-After`. |
+| 409 | `not_scheduled` | The email to cancel or move does not wait to be sent: it is being sent, was sent, or was cancelled. |
 | 401, 403 | `missing_api_key`, `invalid_api_key`, `domain_not_allowed`, `admin_key_required` | The key is missing, wrong, or not allowed to do this. |
 | 404 | `not_found` | There is no such email, endpoint or suppression, or it is not this key's to see. |
 | 404 | `route_not_found` | There is nothing at this path: the path or the server's address is wrong. |
@@ -372,6 +447,7 @@ The status tells a program what to do:
 | 429 | `rate_limit_exceeded` | The provider's limit is reached; nothing was sent. Retry after `Retry-After`. |
 | 502 | `upstream_unknown` | The provider did not answer; the email may have gone. Retry with the same key. This is the only answer that leaves it open. |
 | 503 | `upstream_unavailable`, `unavailable`, `not_started` | Nothing was sent. Retry later. `not_started` is an email of a batch whose turn did not come. |
+| 503 | `schedule_full` | The emails waiting to be sent hold as much as the server keeps. Nothing was kept or sent. |
 
 When a send fails after it was recorded (`rejected_by_upstream`, 429, 502,
 503 `upstream_unavailable`), the error carries the email's `id`, and
@@ -480,10 +556,11 @@ in the scrape config):
 | `cairnpost_http_requests_total{route,status}` | Requests the API answered. |
 | `cairnpost_http_request_seconds{route}` | How long they took, as a histogram. |
 | `cairnpost_emails_last_day{state}` | Emails begun in the last 24 whole hours, by the state they are in now: each address an email went to is one. |
+| `cairnpost_emails_scheduled` | Emails that wait to be sent. |
 | `cairnpost_webhook_endpoints{state}` | Webhook endpoints that are `on`, `off` or `paused`. |
 | `cairnpost_webhook_endpoints_failing` | Endpoints that are on and have failed every try since their last answer. |
 | `cairnpost_provider_quota`, `cairnpost_provider_quota_used` | The mail provider's allowance, where it tells one. |
-| `cairnpost_part_up{part}` | Whether delivery events are read, webhooks sent and old records pruned; a part that is off is not listed. |
+| `cairnpost_part_up{part}` | Whether delivery events are read, webhooks sent, scheduled emails sent and old records pruned; a part that is off is not listed. |
 | `cairnpost_build_info{version,driver}` | What is running. |
 
 A route is the pattern that matched (`GET /emails/{id}`), never a path as
@@ -546,6 +623,9 @@ on the page that made it.
   handle for it. So the address is in no proxy's log and not in the
   browser's history, it is forgotten when the session ends or when you
   ask to see everything again, and two tabs each keep their own search.
+- The emails that wait to be sent (`scheduled_at`) are on the Emails
+  page's own part, "Scheduled", the next to go out first. One's page
+  shows what it will say and lets you cancel it, after asking.
   A session keeps the twenty addresses looked for or shown last; a page
   narrowed to an older one says so and shows the whole list. The list
   never shows a subject.
@@ -658,8 +738,12 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_MAX_ATTACHMENT_BYTES` | `10485760` | How large an email's files may be in all, as they are, not as they travel (up to 64 MiB). A server holds a send's files in memory while it is sent: about five times their size for each send under way. |
 | `CAIRNPOST_MAX_RECIPIENTS` | `50` | How many addresses one email may name, counting `to`, `cc` and `bcc` (1 to 1000). Set it to what the provider takes or below. |
 | `CAIRNPOST_MAX_BATCH` | `100` | How many emails one `POST /emails/batch` may hold (1 to 1000). |
-| `CAIRNPOST_BATCH_PARALLEL` | `4` | How many emails of a batch are handed to the provider at one time (1 to 64). Keep it below what the provider takes at once. |
+| `CAIRNPOST_BATCH_PARALLEL` | `4` | How many emails of a batch, and how many scheduled emails whose time has come, are handed to the provider at one time (1 to 64). Keep it below what the provider takes at once. |
 | `CAIRNPOST_BATCH_TIMEOUT` | `1m` | How long a batch goes on starting emails, `10m` at most. An email whose turn has not come by then answers `not_started`. The answer may come as late as this, `CAIRNPOST_SEND_TIMEOUT` and 20 seconds more after the request arrived, which may itself take 30 seconds: a proxy in front of the server must wait that long. |
+| `CAIRNPOST_SCHEDULE_AHEAD` | `30d` | How far ahead an email may be asked for with `scheduled_at`: in days or as a duration, between `1h` and `366d`. |
+| `CAIRNPOST_SCHEDULE_MAX_BYTES` | `1073741824` | How much the emails that wait to be sent may hold in all, words and files. Past it, another answers 503 `schedule_full`. |
+| `CAIRNPOST_SCHEDULE_POLL` | `5s` | How often emails whose time has come are looked for (`1s` to `1m`): an email goes out within this of its time. |
+| `CAIRNPOST_SCHEDULE_GIVE_UP` | `24h` | How long after its time an email the provider does not take is still tried again, before it is `failed` (`1m` to `168h`). |
 | `CAIRNPOST_CAPTURE_KEEP` | `100` | How many emails the capture driver holds. |
 | `CAIRNPOST_DNS_TIMEOUT` | `6s` | The most one check of a domain's DNS records may take, in the console and in `domains check`: a second at least, a minute at most. Raise it where the first DNS server is slow to answer. |
 | `CAIRNPOST_DNS_SERVER` | the system's | The one DNS server those checks ask, as an IP address with or without a port (`1.1.1.1`). Set it where the machine's own resolver does not answer as the public internet does: a home router that makes up answers, or one that is silent about names that do not exist. |
@@ -679,7 +763,8 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_WEBHOOK_SECRET_OVERLAP` | `24h` | How long, after an endpoint's signing secret is changed, webhooks are signed with the one before as well. In days or as a duration, `7d` at most; `off` ends the old one at once. |
 | `CAIRNPOST_WEBHOOK_ALLOW_PRIVATE` | `off` | Let an endpoint be plain `http://` and at an address that is not on the public internet: for an application on the same private network. |
 
-`cairnpost send` reads `CAIRNPOST_URL` and `CAIRNPOST_API_KEY`.
+`cairnpost send` reads `CAIRNPOST_URL` and `CAIRNPOST_API_KEY`; `-at`
+with a time (`2030-01-31T09:00:00Z`) has the email sent then.
 
 ## Contributing
 

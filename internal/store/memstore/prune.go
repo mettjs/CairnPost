@@ -93,7 +93,7 @@ func (s *Store) MarkUnanswered(_ context.Context, older time.Duration, limit int
 	defer s.mu.Unlock()
 	n, now := 0, s.Now()
 	for id, m := range s.messages {
-		if n < limit && m.State == store.StateSending && now.Sub(m.CreatedAt) >= older {
+		if n < limit && m.State == store.StateSending && now.Sub(m.UpdatedAt) >= older {
 			// Its record stays kept from when it was sent.
 			s.count(m, m.State, store.StateUnknown)
 			m.State = store.StateUnknown

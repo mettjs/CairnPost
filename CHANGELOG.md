@@ -31,6 +31,14 @@ Every change a user of CairnPost can notice is written here. The format is
   each has its own id and outcome, answered in order, 200 when all were
   taken and 207 when some were not. With an `Idempotency-Key` the same
   batch sent again sends only what did not go.
+- Sending later: `scheduled_at` on `POST /emails` (and on the emails of a
+  batch) keeps an email to be sent at that time, up to
+  `CAIRNPOST_SCHEDULE_AHEAD` ahead. `PATCH /emails/{id}` moves it and
+  `POST /emails/{id}/cancel` cancels it; its state is `scheduled`, then
+  `cancelled` or an ordinary email's. What it says and its files are held
+  until it is sent or cancelled and deleted then. `cairnpost send -at`;
+  a "Scheduled" part of the console's Emails page; `"scheduled"` in
+  `GET /health`; `cairnpost_emails_scheduled`.
 - The `smtp` driver: send through any mail server that takes mail by SMTP
   (`CAIRNPOST_SMTP_*`), secured by STARTTLS or TLS, signed in by PLAIN or
   LOGIN. Such a server reports nothing after it took an email, so records

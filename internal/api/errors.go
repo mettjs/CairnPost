@@ -96,6 +96,13 @@ func (a *app) problemOf(id string, err error) (p problem, wait string) {
 		}
 		p = problem{http.StatusTooManyRequests, "rate_limit_exceeded",
 			"The mail provider's sending limit is reached. Nothing was sent; try again later.", id}
+	case errors.Is(err, mail.ErrScheduleFull):
+		p = problem{http.StatusServiceUnavailable, "schedule_full",
+			"The emails waiting to be sent hold as much as this server is set to keep. Nothing was kept or sent. " +
+				"Try again once some have gone, or send it without scheduled_at.", ""}
+	case errors.Is(err, mail.ErrNotScheduled):
+		p = problem{http.StatusConflict, "not_scheduled",
+			"This email does not wait to be sent: it is being sent, was sent, or was cancelled.", ""}
 	case errors.Is(err, mail.ErrNotStarted):
 		p = problem{http.StatusServiceUnavailable, "not_started",
 			"The batch ended before this email's turn: it ran out of time, the server is stopping or the request was dropped. " +

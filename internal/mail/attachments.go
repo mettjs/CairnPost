@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/mettjs/cairnpost/internal/driver"
 )
@@ -86,7 +87,7 @@ func attachments(r Request, most int, mostBytes int64, inline bool) ([]driver.At
 // fingerprint is a digest of a request keyed by the caller's API key, which
 // is kept nowhere: whoever reads the digest cannot test a guessed body
 // against it.
-func fingerprint(presented string, m driver.Message) []byte {
+func fingerprint(presented string, m driver.Message, at time.Time) []byte {
 	files := m.Attachments
 	m.Attachments = nil
 	// encoding/json writes a struct's fields in order and a map's keys
@@ -101,6 +102,13 @@ func fingerprint(presented string, m driver.Message) []byte {
 			mac.Write(binary.BigEndian.AppendUint64(nil, uint64(len(part))))
 			mac.Write(part)
 		}
+	}
+	// When it is to be sent is part of what was asked: one part where
+	// files come in fours, so it reads as no file.
+	if !at.IsZero() {
+		when := at.UTC().AppendFormat(nil, time.RFC3339Nano)
+		mac.Write(binary.BigEndian.AppendUint64(nil, uint64(len(when))))
+		mac.Write(when)
 	}
 	return mac.Sum(nil)
 }

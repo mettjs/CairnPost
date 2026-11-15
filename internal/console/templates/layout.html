@@ -22,7 +22,7 @@
 </header>
 <nav class="tabs" aria-label="Console">
   <a href="{{.Root}}/" {{if eq .Page "overview"}}aria-current="page"{{end}}>Overview</a>
-  <a href="{{.Root}}/emails" {{if or (eq .Page "emails") (eq .Page "email")}}aria-current="page"{{end}}>Emails</a>
+  <a href="{{.Root}}/emails" {{if or (eq .Page "emails") (eq .Page "email") (eq .Page "cancel")}}aria-current="page"{{end}}>Emails</a>
   <a href="{{.Root}}/suppressions" {{if or (eq .Page "suppressions") (eq .Page "lift")}}aria-current="page"{{end}}>Suppressions</a>
   <a href="{{.Root}}/webhooks" {{if or (eq .Page "webhooks") (eq .Page "endpoint") (eq .Page "remove") (eq .Page "secret")}}aria-current="page"{{end}}>Webhooks</a>
   <a href="{{.Root}}/domains" {{if or (eq .Page "domains") (eq .Page "domain")}}aria-current="page"{{end}}>Domains</a>

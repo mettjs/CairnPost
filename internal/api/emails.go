@@ -43,6 +43,9 @@ type sendBody struct {
 	HTML    string            `json:"html"`
 	Text    string            `json:"text"`
 	Headers map[string]string `json:"headers"`
+	// ScheduledAt is when to send it, as RFC 3339 says a time; left
+	// out, it is sent now.
+	ScheduledAt string `json:"scheduled_at"`
 	// Attachments are files, each with its bytes in base64.
 	Attachments []struct {
 		Filename    string `json:"filename"`
@@ -66,8 +69,26 @@ func (b *sendBody) request() (mail.Request, error) {
 		files = append(files, mail.Attachment{Filename: f.Filename, Type: f.ContentType, ContentID: f.ContentID, Content: raw})
 		b.Attachments[i].Content = ""
 	}
+	at, err := when(b.ScheduledAt)
+	if err != nil {
+		return mail.Request{}, err
+	}
 	return mail.Request{From: b.From, To: b.To, Cc: b.Cc, Bcc: b.Bcc, ReplyTo: b.ReplyTo, Subject: b.Subject,
-		HTML: b.HTML, Text: b.Text, Headers: b.Headers, Attachments: files}, nil
+		HTML: b.HTML, Text: b.Text, Headers: b.Headers, Attachments: files, ScheduledAt: at}, nil
+}
+
+// when reads "scheduled_at": the zero time for none, an *Invalid for
+// what is no time.
+func when(typed string) (time.Time, error) {
+	if typed == "" {
+		return time.Time{}, nil
+	}
+	at, err := time.Parse(time.RFC3339, typed)
+	if err != nil || at.IsZero() {
+		return time.Time{}, &mail.Invalid{Field: "scheduled_at",
+			Reason: `"scheduled_at" must be a time with its zone, such as "2030-01-31T09:00:00Z".`}
+	}
+	return at, nil
 }
 
 // sendEmail is POST /emails: one email, to one address or several. It
@@ -86,7 +107,7 @@ func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 	defer release()
 	var body sendBody
 	if !a.bodyUpTo(w, r, &body, "The body must be JSON with from, to, subject and html or text; "+
-		"cc, bcc, reply_to, headers and attachments are optional. No other field is supported.", max(a.MaxEmailBytes, a.MaxBodyBytes)) {
+		"cc, bcc, reply_to, headers, attachments and scheduled_at are optional. No other field is supported.", max(a.MaxEmailBytes, a.MaxBodyBytes)) {
 		return
 	}
 	req, err := body.request()
@@ -101,7 +122,7 @@ func (a *app) sendEmail(w http.ResponseWriter, r *http.Request) {
 		a.failSend(w, sent.ID, err)
 		return
 	}
-	write(w, http.StatusOK, sentView{sent.ID, sent.Suppressed})
+	write(w, http.StatusOK, sentOf(sent))
 }
 
 // sentView is what a send answers.
@@ -111,6 +132,18 @@ type sentView struct {
 	// they are on the sending domain's suppression list; left out when
 	// it went to all of them.
 	Suppressed []string `json:"suppressed,omitempty"`
+	// ScheduledAt is when it will be sent, for an email that was asked
+	// for ahead of time and waits.
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
+}
+
+func sentOf(r mail.Receipt) sentView {
+	v := sentView{ID: r.ID, Suppressed: r.Suppressed}
+	if !r.ScheduledAt.IsZero() {
+		at := r.ScheduledAt.UTC()
+		v.ScheduledAt = &at
+	}
+	return v
 }
 
 type emailView struct {
@@ -123,10 +156,16 @@ type emailView struct {
 	Recipients []recipientView `json:"recipients"`
 	// Suppressed are the addresses it was asked to go to and did not,
 	// being on the suppression list when it was sent.
-	Suppressed []string    `json:"suppressed,omitempty"`
-	CreatedAt  time.Time   `json:"created_at"`
-	UpdatedAt  time.Time   `json:"updated_at"`
-	Events     []eventView `json:"events"`
+	Suppressed []string `json:"suppressed,omitempty"`
+	// ScheduledAt is when an email that waits will be sent, or would
+	// have been, had it not been cancelled. Reason says why it was
+	// cancelled when nobody asked: "suppressed", "key_revoked" or
+	// "failed".
+	ScheduledAt *time.Time  `json:"scheduled_at,omitempty"`
+	Reason      string      `json:"reason,omitempty"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+	Events      []eventView `json:"events"`
 	// Content is what the email said: there only where the operator keeps
 	// it, while it is kept, and for an admin key that may see the sending
 	// domain.
@@ -174,7 +213,11 @@ func (a *app) getEmail(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Times are answered in UTC, whatever zone the server runs in.
 		view := emailView{ID: m.ID, From: m.Sender, To: m.Recipient, State: m.State, Recipients: []recipientView{},
-			Suppressed: m.LeftOut, CreatedAt: m.CreatedAt.UTC(), UpdatedAt: m.Heard().UTC(), Events: []eventView{}}
+			Suppressed: m.LeftOut, CreatedAt: m.CreatedAt.UTC(), UpdatedAt: m.Heard().UTC(), Events: []eventView{}, Reason: m.Reason}
+		if !m.SendAt.IsZero() {
+			at := m.SendAt.UTC()
+			view.ScheduledAt = &at
+		}
 		for _, r := range m.Recipients {
 			view.Recipients = append(view.Recipients, recipientView{r.Address, r.Kind, r.State, r.UpdatedAt.UTC()})
 		}

@@ -28,6 +28,12 @@ var (
 	// by hand. Nothing is sent, and nothing will be until a suppression is
 	// lifted. An email with other recipients goes to those.
 	ErrSuppressed = errors.New("mail: nobody the email is addressed to in the open can be sent to: each is suppressed for this sending domain")
+	// ErrScheduleFull: the email was to be sent later, and the emails
+	// that wait hold as much as the server is set to keep. Nothing was
+	// kept.
+	ErrScheduleFull = errors.New("mail: the emails waiting to be sent hold as much as they may")
+	// ErrNotScheduled: the email does not wait to be sent (any more).
+	ErrNotScheduled = errors.New("mail: the email does not wait to be sent")
 	// ErrInDoubt: the upstream's answer was lost, so the email may have
 	// gone. It is the only error after which that is so: every other one
 	// means nothing was sent.
@@ -68,6 +74,14 @@ type Options struct {
 	MaxBatch      int
 	BatchParallel int
 	BatchTime     time.Duration
+	// ScheduleAhead is how far ahead an email may be asked for, and
+	// ScheduleRoom how many bytes the emails that wait may hold in all;
+	// 0 is the default of each, a negative ScheduleRoom no bound.
+	ScheduleAhead time.Duration
+	ScheduleRoom  int64
+	// Now is the clock a time asked for is held against; nil is the
+	// wall clock.
+	Now func() time.Time
 	// Stopping is closed when the server is told to stop: a batch then
 	// starts no further email. nil never stops one.
 	Stopping <-chan struct{}
@@ -86,6 +100,9 @@ const (
 	DefaultMaxBatch      = 100
 	DefaultBatchParallel = 4
 	DefaultBatchTime     = time.Minute
+	// And what may wait: how far ahead, and how much in all.
+	DefaultScheduleAhead = 30 * 24 * time.Hour
+	DefaultScheduleRoom  = 1 << 30
 )
 
 // Receipt is what a send answers: the email's id, and the addresses it
@@ -93,18 +110,23 @@ const (
 type Receipt struct {
 	ID         string
 	Suppressed []string
+	// ScheduledAt is when it will be sent, for an email that was not
+	// sent but put to wait; zero for one that was sent.
+	ScheduledAt time.Time
 }
 
 // Store is what the service keeps its records in.
 type Store interface {
 	store.Mail
 	store.Events
+	store.Schedule
 }
 
 // Service sends mail.
 type Service struct {
 	store  store.Mail
 	events store.Events
+	held   store.Schedule
 	driver driver.Driver
 	opt    Options
 	log    *slog.Logger
@@ -136,7 +158,19 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 	if opt.BatchTime == 0 {
 		opt.BatchTime = DefaultBatchTime
 	}
-	return &Service{store: s, events: s, driver: d, opt: opt, log: log}
+	if opt.ScheduleAhead == 0 {
+		opt.ScheduleAhead = DefaultScheduleAhead
+	}
+	switch {
+	case opt.ScheduleRoom == 0:
+		opt.ScheduleRoom = DefaultScheduleRoom
+	case opt.ScheduleRoom < 0:
+		opt.ScheduleRoom = 0
+	}
+	if opt.Now == nil {
+		opt.Now = time.Now
+	}
+	return &Service{store: s, events: s, held: s, driver: d, opt: opt, log: log}
 }
 
 // Send sends one email and answers its id. presented is the caller's API
@@ -181,7 +215,12 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 		Content: s.contentOf(c.msg), KeepContent: s.opt.KeepContent,
 	}
 	if idem != "" {
-		start.Fingerprint = fingerprint(presented, c.msg)
+		start.Fingerprint = fingerprint(presented, c.msg, c.at)
+	}
+	if !c.at.IsZero() {
+		// Kept to be sent later: what it says is kept with it, whether
+		// or not what emails say is kept once they are sent.
+		start.Hold, start.Content, start.ReplayOnly = hold(c, s.opt.ScheduleRoom), nil, c.late
 	}
 	claim, err := s.store.Start(ctx, start)
 	if err != nil {
@@ -189,7 +228,11 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 	}
 	switch claim.Outcome {
 	case store.Replay:
-		return Receipt{ID: claim.ID, Suppressed: claim.Dropped}, nil
+		return Receipt{ID: claim.ID, Suppressed: claim.Dropped, ScheduledAt: s.movedTo(ctx, claim.ID, c.at)}, nil
+	case store.Absent:
+		return Receipt{}, errLate
+	case store.Full:
+		return Receipt{}, ErrScheduleFull
 	case store.InFlight:
 		return Receipt{}, &Busy{After: claim.RetryAfter}
 	case store.Mismatch:
@@ -203,13 +246,16 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 		// never came: that email may have gone.
 		return Receipt{ID: claim.ID}, ErrSuppressed
 	}
+	if !c.at.IsZero() {
+		return Receipt{ID: claim.ID, ScheduledAt: c.at}, nil
+	}
 	msg := c.msg
 	if len(claim.Dropped) > 0 {
 		s.log.Info("mail: an email goes to fewer addresses; the others are suppressed for the sending domain",
 			"domain", c.domain, "message", claim.ID, "left_out", len(claim.Dropped))
 		msg = addressed(msg, claim.Recipients)
 	}
-	return Receipt{ID: claim.ID, Suppressed: claim.Dropped}, s.deliver(ctx, claim.ID, msg)
+	return Receipt{ID: claim.ID, Suppressed: claim.Dropped}, s.deliver(ctx, claim.ID, msg, false)
 }
 
 // addressed is a message that goes to the addresses the store kept, each
@@ -233,7 +279,10 @@ func addressed(m driver.Message, kept []store.Addressee) driver.Message {
 // Neither step stops because the caller hung up: an upstream call cut off
 // midway is an email that may have gone with nobody knowing, so it runs to
 // its own timeout, and the record is written within its own.
-func (s *Service) deliver(ctx context.Context, id string, m driver.Message) error {
+//
+// again says that a send the upstream does not take now will be tried
+// again: its Idempotency-Key then stays as it is.
+func (s *Service) deliver(ctx context.Context, id string, m driver.Message, again bool) error {
 	free := context.WithoutCancel(ctx)
 	sendCtx, cancel := context.WithTimeout(free, s.opt.SendTimeout)
 	upstreamID, err := s.driver.Send(sendCtx, m)
@@ -251,7 +300,11 @@ func (s *Service) deliver(ctx context.Context, id string, m driver.Message) erro
 		// The caller is told only the kind. The cause, which is the
 		// upstream's status and nothing of the email, is for the operator.
 		s.log.Warn("mail: the upstream refused a send; nothing was sent", "message", id, "error", err)
-		if ferr := s.store.Failed(record, id); ferr != nil {
+		failed := s.store.Failed
+		if again && errors.Is(err, driver.ErrUnavailable) {
+			failed = s.store.Unsent
+		}
+		if ferr := failed(record, id); ferr != nil {
 			s.log.Error("mail: a refused send's record could not be updated", "message", id, "error", ferr)
 		}
 		return err

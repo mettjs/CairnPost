@@ -24,6 +24,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/metrics"
 	"github.com/mettjs/cairnpost/internal/prune"
+	"github.com/mettjs/cairnpost/internal/schedule"
 	"github.com/mettjs/cairnpost/internal/session"
 	"github.com/mettjs/cairnpost/internal/stats"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
@@ -167,9 +168,17 @@ func serve(ctx context.Context) error {
 	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention,
 		MaxRecipients: cfg.MaxRecipients, MaxAttachments: attachmentsOf(cfg), MaxAttachmentBytes: cfg.MaxAttachmentBytes,
-		MaxBatch: cfg.MaxBatch, BatchParallel: cfg.BatchParallel, BatchTime: cfg.BatchTimeout, Stopping: ctx.Done()}, log)
-	counted := measured{sent: stats.New(db, 0), endpoints: endpoints, driver: drv, version: version, log: log,
-		parts: map[string]func() bool{"events": eventsHealth(reader), "webhooks": hooks.Healthy, "pruning": pruner.Healthy}}
+		MaxBatch: cfg.MaxBatch, BatchParallel: cfg.BatchParallel, BatchTime: cfg.BatchTimeout, Stopping: ctx.Done(),
+		ScheduleAhead: cfg.Schedule.Ahead, ScheduleRoom: cfg.Schedule.MaxBytes}, log)
+	// Emails asked for ahead of time are sent beside the API when their
+	// time comes, and what is under way is finished when it stops.
+	later := schedule.New(db, mailer, schedule.Options{Poll: cfg.Schedule.Poll, Batch: 50, Parallel: cfg.BatchParallel,
+		GiveUp: cfg.Schedule.GiveUp, Abandoned: cfg.AbandonedAfter()}, time.Now, log)
+	scheduling := make(chan struct{})
+	go func() { defer close(scheduling); later.Run(ctx) }()
+	counted := measured{sent: stats.New(db, 0), endpoints: endpoints, driver: drv, version: version, log: log, waiting: mailer.Waiting,
+		parts: map[string]func() bool{"events": eventsHealth(reader), "webhooks": hooks.Healthy, "pruning": pruner.Healthy,
+			"scheduled": later.Healthy}}
 	var handler http.Handler = api.New(api.Deps{
 		Requests: &metrics.Requests{}, Gauges: counted.gauges,
 		Mail: mailer, Keys: keyring, Suppress: suppressions,
@@ -178,7 +187,7 @@ func serve(ctx context.Context) error {
 		// A batch starts emails for so long, and the last of them may
 		// take a whole send and its record.
 		BatchTime: cfg.BatchTimeout + cfg.SendTimeout + 20*time.Second,
-		Events:    eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy,
+		Events:    eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, Scheduling: later.Healthy,
 	})
 	if cfg.Console.On {
 		// The console is served beside the API, under its own path.
@@ -193,7 +202,7 @@ func serve(ctx context.Context) error {
 		}
 		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppressions, Webhooks: endpoints,
 			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout, cfg.DNSServer), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
-			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, EventsOff: eventsOff,
+			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, Scheduling: later.Healthy, EventsOff: eventsOff,
 			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP,
 			PauseAfter: cfg.Webhook.PauseAfter, Stats: stats.New(db, cfg.Console.BounceWarn), Zone: cfg.Console.Zone,
 			Quota: consoleQuota(drv), Log: log})
@@ -226,9 +235,10 @@ func serve(ctx context.Context) error {
 	stopCtx, cancel := context.WithTimeout(context.Background(), cfg.SendTimeout+5*time.Second)
 	defer cancel()
 	err = srv.Shutdown(stopCtx)
-	<-reading // the reader finishes the batch it holds
-	<-sending // and the webhooks in flight are settled or handed back
-	<-pruning // and the pruner stops after the delete it is in
+	<-reading    // the reader finishes the batch it holds
+	<-sending    // and the webhooks in flight are settled or handed back
+	<-pruning    // and the pruner stops after the delete it is in
+	<-scheduling // and the emails whose time had come are seen through
 	return err
 }
 

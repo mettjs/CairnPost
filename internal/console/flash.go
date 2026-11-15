@@ -20,6 +20,8 @@ var notices = map[string]string{
 	"revoked": "The key was revoked. Anything still using it is refused from now on.",
 	"revoked-own": "You revoked the key you were signed in with, so you are signed out. " +
 		"Sign in with another admin key.",
+	"email-cancelled":     "The email was cancelled. It will not be sent, and what it said is deleted.",
+	"email-not-waiting":   "That email was no longer waiting: it was sent, is being sent, or was cancelled already. Nothing changed.",
 	"ended":               "Your session ended. Sign in again.",
 	"suppressed":          "The address is suppressed. Nothing is sent to it from that domain from now on.",
 	"suppressed-already":  "That address was suppressed for that domain already. Nothing changed.",

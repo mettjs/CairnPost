@@ -99,7 +99,7 @@ func (db *DB) MarkUnanswered(ctx context.Context, older time.Duration, limit int
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT id::text FROM messages
-			WHERE state = 'sending' AND created_at <= now() - make_interval(secs => $1)
+			WHERE state = 'sending' AND updated_at <= now() - make_interval(secs => $1)
 			ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED`, older.Seconds(), limit)
 		if err != nil {
 			return err

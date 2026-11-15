@@ -1,8 +1,36 @@
 {{define "title"}}Emails{{end}}
 {{define "main"}}
 <h1>Emails</h1>
-<p class="lede">Every email sent through this server that is still on record, newest first.{{if .Who.Domain}} You are signed in with a key that manages <code>{{.Who.Domain}}</code>, so you see that domain's emails only.{{end}}</p>
+<p class="lede">{{if eq .Data.Tab "scheduled"}}The emails asked for ahead of time that wait to be sent, the next to go out first.{{else}}Every email sent through this server that is still on record, newest first.{{end}}{{if .Who.Domain}} You are signed in with a key that manages <code>{{.Who.Domain}}</code>, so you see that domain's emails only.{{end}}</p>
 
+{{template "subtabs" .Data.Tabs}}
+{{if eq .Data.Tab "scheduled"}}
+<section aria-labelledby="waiting">
+  <h2 id="waiting" class="sr">Emails waiting to be sent</h2>
+  {{if .Data.Unread}}
+  <p class="problem" role="alert">The emails waiting to be sent could not be read. Reload the page to try again.</p>
+  {{else if not .Data.Waiting}}
+  <p class="empty">No email is waiting to be sent. One appears here when it is asked for with a time to send it at (<code>scheduled_at</code>).</p>
+  {{else}}
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="waiting">
+    <table>
+      <thead><tr><th>To</th><th>From</th><th>Goes out</th><th>Asked for</th></tr></thead>
+      <tbody>
+      {{range .Data.Waiting}}
+      <tr>
+        <td data-label="To"><a href="{{$.Root}}/emails/{{.ID}}">{{(index .Recipients 0).Address}}</a>{{if gt (len .Recipients) 1}} <span class="by">and {{minus (len .Recipients) 1}} more</span>{{end}}</td>
+        <td data-label="From" class="wrap">{{.Sender}}</td>
+        <td data-label="Goes out"><time datetime="{{stamp .SendAt}}">{{when $.Zone .SendAt}}</time>{{if gt .Tries 0}} <span class="by">tried {{.Tries}} {{if eq .Tries 1}}time{{else}}times{{end}}; it will be tried again</span>{{end}}</td>
+        <td data-label="Asked for"><time datetime="{{stamp .CreatedAt}}">{{when $.Zone .CreatedAt}}</time></td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{if .Data.More}}<p class="hint">These are the first {{len .Data.Waiting}} to go out. More are waiting behind them.</p>{{end}}
+  {{end}}
+</section>
+{{else}}
 {{if .Data.Problem}}<p class="problem" role="alert">{{.Data.Problem}}</p>{{end}}
 {{if .Data.Forgotten}}<p class="notice" role="status">The address this page was narrowed to is no longer kept, so every email is shown. Look for it again to narrow the list.</p>{{end}}
 
@@ -49,4 +77,5 @@
   </p>
   {{end}}
 </section>
+{{end}}
 {{end}}

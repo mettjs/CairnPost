@@ -83,7 +83,7 @@ func TestEmailsAreCountedByStateAndStayCountedWhenTheirRecordGoes(t *testing.T) 
 	}
 
 	// A send left unanswered moves to unknown in its count as well.
-	exec(t, `UPDATE messages SET created_at = created_at - interval '3 hours' WHERE sender_domain = $1 AND state = 'sending'`, domain)
+	exec(t, `UPDATE messages SET created_at = created_at - interval '3 hours', updated_at = updated_at - interval '3 hours' WHERE sender_domain = $1 AND state = 'sending'`, domain)
 	for {
 		n, err := db.MarkUnanswered(ctx, time.Hour, 1000)
 		if err != nil {

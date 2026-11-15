@@ -1,0 +1,11 @@
+{{define "title"}}Cancel an email{{end}}
+{{define "main"}}
+<section class="narrow">
+  <h1 class="long">Cancel the email to {{.Data.Recipient}}{{if gt (len .Data.Recipients) 1}} and {{minus (len .Data.Recipients) 1}} more{{end}}?</h1>
+  <p>It is to be sent <time datetime="{{stamp .Data.SendAt}}">{{when $.Zone .Data.SendAt}}</time>. Cancelled, it is not sent, and what it said and its files are deleted. This cannot be undone; to send it after all, it must be asked for again.</p>
+  <form class="actions" method="post" action="{{.Root}}/emails/{{.Data.ID}}/cancel">
+    <button class="danger" type="submit">Cancel email</button>
+    <a href="{{.Root}}/emails/{{.Data.ID}}">Keep it</a>
+  </form>
+</section>
+{{end}}

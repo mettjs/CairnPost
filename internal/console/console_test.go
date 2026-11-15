@@ -66,7 +66,8 @@ func newRigOn(t *testing.T, adjust func(*rig, *console.Deps)) *rig {
 		t.Fatal(err)
 	}
 	r.mail = mail.New(r.s, capture.New(10, func() time.Time { return r.now }),
-		mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour, InDoubtWindow: time.Minute, KeepContent: 24 * time.Hour},
+		mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour, InDoubtWindow: time.Minute, KeepContent: 24 * time.Hour,
+			Now: func() time.Time { return r.now }},
 		slog.New(slog.NewTextHandler(&r.logged, nil)))
 	d := console.Deps{Keys: r.ks, Mail: r.mail, Suppress: suppress.New(r.s),
 		Webhooks: webhook.NewService(r.s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, 24*time.Hour, time.Now), Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",

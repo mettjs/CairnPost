@@ -186,7 +186,7 @@ func TestTheOverviewSaysWhatWasNotSent(t *testing.T) {
 func TestTheOverviewLeadsToWhatNeedsALook(t *testing.T) {
 	down := false
 	r := newRig(t, func(d *console.Deps) {
-		d.PauseAfter, d.Events, d.Pruning = 48*time.Hour, healthy, healthy
+		d.PauseAfter, d.Events, d.Pruning, d.Scheduling = 48*time.Hour, healthy, healthy, healthy
 		d.Sending = func() bool { return !down }
 	})
 	ctx := context.Background()
@@ -253,7 +253,7 @@ func TestTheOverviewLeadsToWhatNeedsALook(t *testing.T) {
 	}
 	// A part that is off by how the server is set up is said, as no fault.
 	quiet := newRig(t, nil)
-	if page := quiet.signedIn(quiet.admin).do("GET", "/keys", nil).Body.String(); !strings.Contains(page, "Working. Off: Delivery events, Webhooks, Pruning") ||
+	if page := quiet.signedIn(quiet.admin).do("GET", "/keys", nil).Body.String(); !strings.Contains(page, "Working. Off: Delivery events, Webhooks, Scheduled emails, Pruning") ||
 		strings.Contains(page, "pulse-failing") {
 		t.Errorf("parts that are off: %s", page)
 	}

@@ -31,7 +31,7 @@ type Pruning interface {
 	// change, once webhooks are no longer signed with them.
 	ForgetSecrets(ctx context.Context, limit int) (int, error)
 	// MarkUnanswered records as unknown the messages still "sending"
-	// that were started older ago: a send is answered or given up long
+	// that were started, or begun again, older ago: a send is answered or given up long
 	// before, so one left like that lost whoever was sending it (the
 	// process ended mid-send), and nothing else would ever say what
 	// became of it. A send that does get its answer after all is
@@ -52,6 +52,10 @@ type Pruning interface {
 	// at is left until the key is gone. A suppression one of them caused
 	// stays, no longer naming it.
 	PruneMessages(ctx context.Context, before time.Time, limit int) (int, error)
+	// PruneCancelled deletes the emails that were to be sent later and
+	// were cancelled at or before a time: only that they were is left
+	// of them by then.
+	PruneCancelled(ctx context.Context, before time.Time, limit int) (int, error)
 	// PruneLifted deletes suppressions lifted at or before a time. A lifted
 	// row is what stops a late event about an email sent before the lift
 	// from suppressing again, so none goes while a message made at or
