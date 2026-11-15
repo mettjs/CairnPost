@@ -71,6 +71,7 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST /emails", a.auth(false, a.sendEmail))
 	mux.Handle("POST /emails/batch", a.auth(false, a.sendBatch))
 	mux.Handle("GET /emails/{id}", a.auth(false, a.getEmail))
+	mux.Handle("GET /emails/{id}/attachments/{place}", a.auth(true, a.getAttachment))
 	mux.Handle("PATCH /emails/{id}", a.auth(false, a.rescheduleEmail))
 	mux.Handle("POST /emails/{id}/cancel", a.auth(false, a.cancelEmail))
 	mux.Handle("GET /limits", a.auth(false, a.limits))
