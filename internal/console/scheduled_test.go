@@ -37,7 +37,7 @@ func TestAWaitingEmailIsShownAndCancelled(t *testing.T) {
 	page := b.do("GET", "/emails/"+got.ID, nil).Body.String()
 	for _, want := range []string{">Scheduled</span>", "It waits to be sent", "Goes out", "Who it goes to", "cy@example.org", "Copy",
 		"/emails/" + got.ID + `/cancel">Cancel this email</a>`, "subject-later", "body-later", "later.pdf",
-		"Kept until the email is sent.", "The files are held until the email is sent, then deleted."} {
+		"Kept until the email is sent.", "The files are held until the email is sent.", `/files/1" download>later.pdf</a>`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the email's page lacks %q", want)
 		}

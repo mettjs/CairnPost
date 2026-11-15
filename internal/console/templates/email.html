@@ -94,9 +94,9 @@
 {{end}}</pre></dd></div>{{end}}
     {{if .Text}}<div><dt>Text</dt><dd><pre class="said" tabindex="0">{{.Text}}</pre></dd></div>{{end}}
     {{if .HTML}}<div><dt>HTML, as source</dt><dd><pre class="said" tabindex="0">{{.HTML}}</pre></dd></div>{{end}}
-    {{if .Attachments}}<div><dt>Files</dt><dd><ul class="files">{{range .Attachments}}
-      <li><span class="long">{{.Filename}}</span><span class="by long">{{.ContentType}}, {{size .Size}}{{if .ContentID}}, shown in the HTML as {{.ContentID}}{{end}}</span></li>{{end}}
-    </ul><span class="by">{{if $.Data.Waits}}The files are held until the email is sent, then deleted.{{else}}What a file held is never kept.{{end}}</span></dd></div>{{end}}
+    {{if .Attachments}}<div><dt>Files</dt><dd><ul class="files">{{range $i, $f := .Attachments}}
+      <li>{{if $f.Kept}}<a class="long" href="{{$.Root}}/emails/{{$.Data.Email.ID}}/files/{{plus $i 1}}" download>{{$f.Filename}}</a>{{else}}<span class="long">{{$f.Filename}}</span>{{end}}<span class="by long">{{$f.ContentType}}, {{size $f.Size}}{{if $f.ContentID}}, shown in the HTML as {{$f.ContentID}}{{end}}</span></li>{{end}}
+    </ul><span class="by">{{if $.Data.Waits}}The files are held until the email is sent. After that they are kept only if this server is set to keep what emails say and their files.{{else if (index .Attachments 0).Kept}}Kept as long as what the email said. A file is saved to your device, never opened here.{{else}}What these files held is not kept: this server keeps what emails say without their files.{{end}}</span></dd></div>{{end}}
   </dl>
   {{end}}
   {{end}}

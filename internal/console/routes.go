@@ -16,6 +16,7 @@ func (c *console) routes() *http.ServeMux {
 	// again, it is the list.
 	mux.Handle("GET "+Root+"/emails/find", c.signed(back("/emails")))
 	mux.Handle("GET "+Root+"/emails/{id}", c.signed(c.emailPage))
+	mux.Handle("GET "+Root+"/emails/{id}/files/{place}", c.signed(c.emailFile))
 	mux.Handle("GET "+Root+"/emails/{id}/cancel", c.signed(c.cancelPage))
 	mux.Handle("POST "+Root+"/emails/{id}/cancel", c.signed(c.cancelEmail))
 	mux.Handle("GET "+Root+"/suppressions", c.signed(c.suppressionsPage))

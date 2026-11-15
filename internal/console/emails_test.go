@@ -209,7 +209,8 @@ func TestAnEmailIsShownAsItWasWritten(t *testing.T) {
 	for _, want := range []string{"ana@example.org", "app@example.com", ">Bounced</span>", "The receiving server refused it.",
 		">Delayed</span>", "<code>451</code>", "for good", "said-first", "said-&lt;b&gt;last&lt;/b&gt;",
 		"subject-one", "the body of subject-one", "&lt;script&gt;alert(", "X-Entity: e-subject-one", "Kept until", "UTC",
-		"file-of-subject-one.pdf", "application/pdf, 21 bytes", "What a file held is never kept."} {
+		"file-of-subject-one.pdf", "application/pdf, 21 bytes",
+		`/emails/` + m.ID + `/files/1" download>file-of-subject-one.pdf</a>`, "A file is saved to your device, never opened here."} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page lacks %q", want)
 		}
@@ -219,6 +220,18 @@ func TestAnEmailIsShownAsItWasWritten(t *testing.T) {
 	}
 	if strings.Contains(page, "FILEBYTES") {
 		t.Fatal("a file's bytes were shown")
+	}
+	// The file itself is handed over to save, and only to one signed in.
+	file := r.call("GET", "/emails/"+m.ID+"/files/1", session, nil)
+	if file.Code != 200 || file.Body.String() != "FILEBYTES-subject-one" || file.Header().Get("Content-Type") != "application/octet-stream" ||
+		!strings.HasPrefix(file.Header().Get("Content-Disposition"), "attachment;") || !strings.HasPrefix(file.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Fatalf("the file: %d %v %q", file.Code, file.Header(), file.Body)
+	}
+	if none := r.call("GET", "/emails/"+m.ID+"/files/2", session, nil); none.Code != 404 {
+		t.Errorf("a file there is not: %d", none.Code)
+	}
+	if out := r.call("GET", "/emails/"+m.ID+"/files/1", "", nil); out.Code == 200 || strings.Contains(out.Body.String(), "FILEBYTES") {
+		t.Errorf("a file read by nobody signed in: %d", out.Code)
 	}
 	if at := order(page, ">Delayed</span>", "said-first"); at[0] > at[1] {
 		t.Error("events are not oldest first")
