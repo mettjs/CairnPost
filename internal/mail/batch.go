@@ -73,11 +73,23 @@ func (s *Service) SendBatch(ctx context.Context, key store.Key, presented, idem 
 			fmt.Sprintf("A batch's Idempotency-Key header must be at most %d printable ASCII characters.", maxIdemKey-batchKeyRoom)}}
 	}
 	ready := make([]checked, len(reqs))
+	memo, filled := found{}, 0
 	for i, r := range reqs {
 		r.keyed = idem != ""
-		c, err := s.checked(key, r)
+		c, err := s.checked(ctx, key, r, memo)
 		if err != nil {
 			return nil, &BatchInvalid{i, err}
+		}
+		// One its template cannot fill is good only as one made before:
+		// asked now, so that none is sent when one cannot be.
+		if c.unfilled != nil && !s.madeBefore(ctx, key, presented, batchKey(idem, i), c) {
+			return nil, &BatchInvalid{i, c.unfilled}
+		}
+		// A few bytes can ask for much: what the templates fill is held
+		// to what a batch itself may be.
+		if filled += c.filled; s.opt.MaxFilled > 0 && filled > s.opt.MaxFilled {
+			return nil, &BatchInvalid{i, &Invalid{"template",
+				fmt.Sprintf("Filled from their templates, the emails of this batch are longer than %d bytes in all. Send it in parts.", s.opt.MaxFilled)}}
 		}
 		ready[i] = c
 	}
@@ -175,4 +187,15 @@ func (b *batchRun) halt(why error) {
 	if b.halted == nil {
 		b.halted = why
 	}
+}
+
+// madeBefore says a request was made before under its key, and
+// answered: nothing is recorded by asking.
+func (s *Service) madeBefore(ctx context.Context, key store.Key, presented, idem string, c checked) bool {
+	claim, err := s.store.Start(ctx, store.Start{
+		KeyID: key.ID, Sender: c.msg.From, Recipients: addressees(c.msg), Driver: s.driver.Name(),
+		IdemKey: idem, TTL: s.opt.IdempotencyTTL, InDoubt: s.opt.InDoubtWindow,
+		Fingerprint: fingerprint(presented, c.msg, c.at, c.asked), ReplayOnly: true,
+	})
+	return err == nil && claim.Outcome == store.Replay
 }

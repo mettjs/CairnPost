@@ -21,6 +21,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/session"
 	"github.com/mettjs/cairnpost/internal/stats"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/templates"
 	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
@@ -33,8 +34,12 @@ type Deps struct {
 	Mail     *mail.Service
 	Suppress *suppress.Service
 	Webhooks *webhook.Service
-	Domains  *domains.Service
-	Sessions *session.Service
+	// Templates are the emails written once to be sent many times, and
+	// TemplateBytes how long one may be.
+	Templates     *templates.Service
+	TemplateBytes int64
+	Domains       *domains.Service
+	Sessions      *session.Service
 	// Stats reads how much was sent and what became of it.
 	Stats *stats.Service
 	// Quota asks the mail provider for its allowance; nil for a provider

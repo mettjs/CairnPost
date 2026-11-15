@@ -23,6 +23,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/templates"
 	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
@@ -65,11 +66,13 @@ func newRigOn(t *testing.T, adjust func(*rig, *console.Deps)) *rig {
 	if r.send, r.sendKey, err = r.ks.Create(context.Background(), "app", store.ScopeSend, ""); err != nil {
 		t.Fatal(err)
 	}
+	written := templates.NewService(r.s, templates.Options{Max: 3, MaxBytes: 2000})
 	r.mail = mail.New(r.s, capture.New(10, func() time.Time { return r.now }),
 		mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour, InDoubtWindow: time.Minute, KeepContent: 24 * time.Hour, KeepFiles: true,
-			Now: func() time.Time { return r.now }},
+			Templates: written,
+			Now:       func() time.Time { return r.now }},
 		slog.New(slog.NewTextHandler(&r.logged, nil)))
-	d := console.Deps{Keys: r.ks, Mail: r.mail, Suppress: suppress.New(r.s),
+	d := console.Deps{Keys: r.ks, Mail: r.mail, Suppress: suppress.New(r.s), Templates: written, TemplateBytes: 2000,
 		Webhooks: webhook.NewService(r.s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, 24*time.Hour, time.Now), Sessions: session.New(r.s, time.Hour), Driver: "fake", Version: "test",
 		EventsOff: "Not read.", Stats: stats.New(r.s, 5), Log: slog.New(slog.NewTextHandler(&r.logged, nil))}
 	d.Domains = domains.New(r.s, &dnscheck.Checker{Resolver: resolver{r}, Timeout: time.Second}, "cloudflare", cloudflare.Records)

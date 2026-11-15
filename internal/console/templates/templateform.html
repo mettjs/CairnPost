@@ -1,0 +1,26 @@
+{{define "templatefields"}}
+    <div class="field">
+      <label for="name">Name</label>
+      <input id="name" name="name" value="{{.Name}}" required spellcheck="false" autocapitalize="off" autocomplete="off" maxlength="64">
+      <p class="hint">How a send asks for it, such as welcome or order-shipped. Small letters, digits, - and _.</p>
+    </div>
+    <div class="field">
+      <label for="subject">Subject</label>
+      <input id="subject" name="subject" value="{{.Subject}}" required autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="html">HTML</label>
+      <textarea id="html" name="html" rows="12" spellcheck="false" autocapitalize="off">{{.HTML}}</textarea>
+      <p class="hint">Write a variable as {{"{{name}}"}}. What a send gives for it is shown as written and is never markup; keep attributes in quotes.</p>
+    </div>
+    <div class="field">
+      <label for="text">Text</label>
+      <textarea id="text" name="text" rows="8">{{.Text}}</textarea>
+      <p class="hint">What is read where HTML is not shown. HTML, text or both.</p>
+    </div>
+    <div class="field">
+      <label for="defaults">Defaults</label>
+      <textarea id="defaults" name="defaults" rows="3" spellcheck="false" autocapitalize="off">{{.Defaults}}</textarea>
+      <p class="hint">Optional. One variable a line, such as name = there: what it is filled with when a send gives no value. A variable with no default must be given by every send.</p>
+    </div>
+{{end}}

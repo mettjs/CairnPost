@@ -22,6 +22,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/store/memstore"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/templates"
 	"github.com/mettjs/cairnpost/internal/webhook"
 )
 
@@ -104,10 +105,12 @@ func newRigBuilt(t *testing.T, s store.Store, adjust func(*api.Deps)) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
+	written := templates.NewService(s, templates.Options{Max: 3, MaxBytes: 4096})
 	deps := api.Deps{
 		Mail: mail.New(s, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
-			InDoubtWindow: time.Minute}, log),
-		Keys: ks, Suppress: suppress.New(s), Ping: s.Ping,
+			InDoubtWindow: time.Minute, Templates: written, MaxFilled: 600}, log),
+		Templates: written,
+		Keys:      ks, Suppress: suppress.New(s), Ping: s.Ping,
 		Webhooks: webhook.NewService(s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, 24*time.Hour, time.Now), Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
 		Captured: func() []api.CapturedEmail {
 			var out []api.CapturedEmail

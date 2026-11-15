@@ -53,6 +53,12 @@ const recordTimeout = 5 * time.Second
 
 // Options are the service's settings.
 type Options struct {
+	// MaxFilled is how long the emails of one batch may be in all once
+	// their templates are filled; 0 for no limit.
+	MaxFilled int
+	// Templates makes an email's words from a template; nil for a
+	// server that has none.
+	Templates Filler
 	// SendTimeout bounds one call to the driver.
 	SendTimeout time.Duration
 	// IdempotencyTTL and InDoubtWindow are store.Start's.
@@ -190,7 +196,7 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 // an earlier try under the same key that was left in doubt, if there was
 // one.
 func (s *Service) Send(ctx context.Context, key store.Key, presented string, r Request) (Receipt, error) {
-	c, err := s.checked(key, r)
+	c, err := s.checked(ctx, key, r, nil)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -199,10 +205,23 @@ func (s *Service) Send(ctx context.Context, key store.Key, presented string, r R
 
 // checked is a request this key may send, found sendable: an *Invalid
 // or ErrDomain otherwise.
-func (s *Service) checked(key store.Key, r Request) (checked, error) {
+func (s *Service) checked(ctx context.Context, key store.Key, r Request, memo found) (checked, error) {
+	var (
+		was      *asked
+		unfilled *Invalid
+	)
+	if r.Template != nil {
+		var err error
+		if r, was, unfilled, err = s.filled(ctx, key, r, memo); err != nil {
+			return checked{}, err
+		}
+	}
 	c, err := check(r, s.opt)
 	if err != nil {
 		return checked{}, err
+	}
+	if c.asked, c.unfilled = was, unfilled; was != nil {
+		c.filled = len(c.msg.Subject) + len(c.msg.HTML) + len(c.msg.Text)
 	}
 	if key.Domain != "" && key.Domain != c.domain {
 		return checked{}, ErrDomain
@@ -218,12 +237,16 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 		Content: s.contentOf(c.msg), KeepContent: s.opt.KeepContent, Files: s.keptFiles(c.msg),
 	}
 	if idem != "" {
-		start.Fingerprint = fingerprint(presented, c.msg, c.at)
+		start.Fingerprint = fingerprint(presented, c.msg, c.at, c.asked)
 	}
 	if !c.at.IsZero() {
 		// Kept to be sent later: what it says is kept with it, whether
 		// or not what emails say is kept once they are sent.
 		start.Hold, start.Content, start.Files, start.ReplayOnly = hold(c, s.opt.ScheduleRoom), nil, nil, c.late
+	}
+	if c.unfilled != nil {
+		// It has no words to send or keep: only its key is asked.
+		start.Hold, start.Content, start.Files, start.ReplayOnly = nil, nil, nil, true
 	}
 	claim, err := s.store.Start(ctx, start)
 	if err != nil {
@@ -233,6 +256,9 @@ func (s *Service) send(ctx context.Context, key store.Key, presented, idem strin
 	case store.Replay:
 		return Receipt{ID: claim.ID, Suppressed: claim.Dropped, ScheduledAt: s.movedTo(ctx, claim.ID, c.at)}, nil
 	case store.Absent:
+		if c.unfilled != nil {
+			return Receipt{}, c.unfilled
+		}
 		return Receipt{}, errLate
 	case store.Full:
 		return Receipt{}, ErrScheduleFull

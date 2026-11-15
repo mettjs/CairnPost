@@ -87,9 +87,15 @@ func attachments(r Request, most int, mostBytes int64, inline bool) ([]driver.At
 // fingerprint is a digest of a request keyed by the caller's API key, which
 // is kept nowhere: whoever reads the digest cannot test a guessed body
 // against it.
-func fingerprint(presented string, m driver.Message, at time.Time) []byte {
+func fingerprint(presented string, m driver.Message, at time.Time, was *asked) []byte {
 	files := m.Attachments
 	m.Attachments = nil
+	if was != nil {
+		// A request that names a template is compared as it was asked,
+		// not by what the template said that day: the same request made
+		// again after the template changed is still the same request.
+		m.Subject, m.HTML, m.Text = was.subject, "", ""
+	}
 	// encoding/json writes a struct's fields in order and a map's keys
 	// sorted, so equal requests encode equally.
 	raw, _ := json.Marshal(m)
@@ -109,6 +115,9 @@ func fingerprint(presented string, m driver.Message, at time.Time) []byte {
 		when := at.UTC().AppendFormat(nil, time.RFC3339Nano)
 		mac.Write(binary.BigEndian.AppendUint64(nil, uint64(len(when))))
 		mac.Write(when)
+	}
+	if was != nil {
+		was.write(mac)
 	}
 	return mac.Sum(nil)
 }

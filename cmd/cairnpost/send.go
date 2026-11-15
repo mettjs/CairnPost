@@ -23,13 +23,15 @@ func sendCommand(ctx context.Context, args []string) error {
 	to := fs.String("to", "", "who it goes to: an address, or several with commas between (required)")
 	cc := fs.String("cc", "", "who gets a copy: an address, or several with commas between")
 	bcc := fs.String("bcc", "", "who gets a copy the others do not see: an address, or several with commas between")
-	subject := fs.String("subject", "", "the subject (required)")
+	subject := fs.String("subject", "", "the subject (required, unless a template gives it)")
 	text := fs.String("text", "", "the plain-text body")
 	html := fs.String("html", "", "the HTML body")
 	idem := fs.String("idempotency-key", "", "a key that makes sending this twice send it once")
 	at := fs.String("at", "", "when to send it, such as 2030-01-31T09:00:00Z; left out, it is sent now")
-	var attach paths
+	template := fs.String("template", "", "the name of a template to make it from, in place of -text and -html")
+	var attach, values paths
 	fs.Var(&attach, "attach", "a file to send with it; give the flag once for each file")
+	fs.Var(&values, "var", "a value for a variable of the template, as name=value; give the flag once for each")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -52,6 +54,12 @@ func sendCommand(ctx context.Context, args []string) error {
 	}
 	if *at != "" {
 		fields["scheduled_at"] = *at
+	}
+	switch use, err := templateOf(*template, values); {
+	case err != nil:
+		return err
+	case use != nil:
+		fields["template"] = use
 	}
 	body, _ := json.Marshal(fields)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(*url, "/")+"/emails", bytes.NewReader(body))
@@ -101,4 +109,24 @@ func several(flag string) []string {
 		}
 	}
 	return out
+}
+
+// templateOf is the template a send names and the values it gives its
+// variables, as the API takes them; nil for none.
+func templateOf(name string, values []string) (map[string]any, error) {
+	if name == "" {
+		if len(values) > 0 {
+			return nil, errors.New("-var gives a template's variable a value: name the template with -template")
+		}
+		return nil, nil
+	}
+	given := map[string]string{}
+	for _, one := range values {
+		variable, value, ok := strings.Cut(one, "=")
+		if !ok || variable == "" {
+			return nil, errors.New("write -var as name=value, such as -var code=4821")
+		}
+		given[variable] = value
+	}
+	return map[string]any{"name": name, "variables": given}, nil
 }

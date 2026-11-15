@@ -112,6 +112,10 @@ type Config struct {
 	// MaxKeys is CAIRNPOST_MAX_KEYS: how many live API keys one sending
 	// domain may have, and how many bound to none. Default 200.
 	MaxKeys int
+	// MaxTemplates is CAIRNPOST_MAX_TEMPLATES: how many templates one
+	// sending domain may have, and how many may serve every domain.
+	// Default 200.
+	MaxTemplates int
 }
 
 // Webhook is how events are delivered to the endpoints that hear about
@@ -337,7 +341,14 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.Console, err = console(getenv); err != nil {
 		return c, err
 	}
-	c.MaxKeys, err = MaxKeys(getenv)
+	if c.MaxKeys, err = MaxKeys(getenv); err != nil {
+		return c, err
+	}
+	templatesMost, err := number(getenv, "CAIRNPOST_MAX_TEMPLATES", 200)
+	if err == nil && templatesMost > 100000 {
+		err = fmt.Errorf("config: CAIRNPOST_MAX_TEMPLATES must be at most 100000 (got %d)", templatesMost)
+	}
+	c.MaxTemplates = int(templatesMost)
 	return c, err
 }
 
