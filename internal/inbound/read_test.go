@@ -92,12 +92,13 @@ func TestAMessageIsReadWithItsBodiesAndFiles(t *testing.T) {
 
 func TestWhatCannotBeReadIsSaidAndNeverFails(t *testing.T) {
 	for name, raw := range map[string]string{
-		"no message at all":   "\x00\x01 not mail",
-		"empty":               "",
-		"a charset not known": "Subject: s\nContent-Type: text/plain; charset=shift_jis\n\n\x83\x65\x83\x58\x83\x67",
-		"base64 that is not":  "Content-Type: application/pdf\nContent-Transfer-Encoding: base64\n\n!!!not base64!!!",
-		"a type that is none": "Content-Type: ;;;\n\nbody",
-		"nested too deep":     strings.Repeat("Content-Type: multipart/mixed; boundary=b\n\n--b\n", 12) + "Content-Type: text/plain\n\ndeep\n",
+		"no message at all":     "\x00\x01 not mail",
+		"empty":                 "",
+		"a charset not known":   "Subject: s\nContent-Type: text/plain; charset=x-nobody-knows\n\n\x83\x65\x83\x58\x83\x67",
+		"bytes not its charset": "Subject: s\nContent-Type: text/plain; charset=shift_jis\n\n\x83\x65\xff\xff",
+		"base64 that is not":    "Content-Type: application/pdf\nContent-Transfer-Encoding: base64\n\n!!!not base64!!!",
+		"a type that is none":   "Content-Type: ;;;\n\nbody",
+		"nested too deep":       strings.Repeat("Content-Type: multipart/mixed; boundary=b\n\n--b\n", 12) + "Content-Type: text/plain\n\ndeep\n",
 	} {
 		got := Parse(crlf(raw))
 		if !got.Partial {
@@ -158,5 +159,40 @@ func TestAFilesNameIsWhatCanBeSeenAndSavedUnder(t *testing.T) {
 		if got := named(given); got != want {
 			t.Errorf("%q is named %q", given, got)
 		}
+	}
+}
+
+// Mail written in the charsets of other scripts reads whole, in its
+// body and in its headers.
+func TestOtherCharsetsAreRead(t *testing.T) {
+	for charset, c := range map[string][2]string{
+		"shift_jis":    {"\x83\x65\x83\x58\x83\x67", "テスト"},
+		"iso-2022-jp":  {"\x1b$B%F%9%H\x1b(B", "テスト"},
+		"gb2312":       {"\xc4\xe3\xba\xc3", "你好"},
+		"big5":         {"\xa7\x41\xa6\x6e", "你好"},
+		"euc-kr":       {"\xbe\xc8\xb3\xe7", "안녕"},
+		"koi8-r":       {"\xf0\xd2\xc9\xd7\xc5\xd4", "Привет"},
+		"windows-1251": {"\xcf\xf0\xe8\xe2\xe5\xf2", "Привет"},
+		"iso-8859-2":   {"\xb3\xf3d\xbc", "łódź"},
+		"iso-8859-15":  {"5 \xa4", "5 €"},
+		"UTF-16LE":     {"h\x00\xe9\x00", "hé"},
+		"utf-16be":     {"\x00h\x00\xe9", "hé"},
+		"utf-16":       {"\x00h\x00\xe9", "hé"},
+		"UTF-16":       {"\xff\xfeh\x00\xe9\x00", "hé"},
+		"Utf-16":       {"\xfe\xff\x00h\x00\xe9", "hé"},
+	} {
+		got := Parse(crlf("Subject: s\nContent-Type: text/plain; charset=" + charset + "\n\n" + c[0]))
+		if got.Partial || got.Text != c[1] {
+			t.Errorf("%s: read %q, partial %v; want %q", charset, got.Text, got.Partial, c[1])
+		}
+	}
+	// A charset browsers refuse to read is shown as far as its bytes
+	// read, never as one mark for all of it.
+	if got := Parse(crlf("Subject: =?iso-2022-kr?Q?hello?=\nContent-Type: text/plain; charset=iso-2022-kr\n\nhello")); !got.Partial ||
+		got.Text != "hello" || got.Subject != "hello" {
+		t.Errorf("iso-2022-kr read %q under %q, partial %v", got.Text, got.Subject, got.Partial)
+	}
+	if got := Parse(crlf("Subject: =?koi8-r?B?8NLJ18XU?=\n\nbody")); got.Partial || got.Subject != "Привет" {
+		t.Errorf("an encoded subject read %q, partial %v", got.Subject, got.Partial)
 	}
 }

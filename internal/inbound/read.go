@@ -67,7 +67,7 @@ type Read struct {
 	// counts from 1.
 	Attachments []Part `json:"attachments,omitempty"`
 	// Partial says some of it could not be read as it was written: a
-	// charset this does not know, or a part that is broken. What is
+	// charset nobody knows, or a part that is broken. What is
 	// here may then be incomplete or marked; the message as it came
 	// holds all of it.
 	Partial bool `json:"partial,omitempty"`
