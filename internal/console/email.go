@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/mettjs/cairnpost/internal/download"
@@ -125,8 +124,7 @@ func (c *console) cancelEmail(w http.ResponseWriter, r *http.Request) {
 // save: while the email waits to be sent, or where the server keeps
 // what emails say and their files. Its name is not logged.
 func (c *console) emailFile(w http.ResponseWriter, r *http.Request) {
-	place, _ := strconv.Atoi(r.PathValue("place"))
-	f, err := c.Mail.FileFor(r.Context(), who(r), r.PathValue("id"), place)
+	f, err := c.Mail.FileFor(r.Context(), who(r), r.PathValue("id"), download.Place(r.PathValue("place")))
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		c.fail(w, r, http.StatusNotFound, "There is no such file. What it held may no longer be kept.")

@@ -116,8 +116,10 @@ func TestFilesAreKeptWithTheWordsAndGoWithThem(t *testing.T) {
 			[]string{now, later}); err != nil {
 			t.Fatal(err)
 		}
-		if rec, _ := ask("GET", "/emails/"+now+"/attachments/1", ""); rec.Code != 404 {
-			t.Errorf("past its time, before it is pruned, the file answers %d", rec.Code)
+		for _, id := range []string{now, later} {
+			if rec, _ := ask("GET", "/emails/"+id+"/attachments/1", ""); rec.Code != 404 {
+				t.Errorf("past its time, before it is pruned, the file answers %d", rec.Code)
+			}
 		}
 		if _, err := db.PruneContents(ctx, 100000); err != nil {
 			t.Fatal(err)

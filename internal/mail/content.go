@@ -98,6 +98,9 @@ func (s *Service) keptFiles(m driver.Message) []store.HeldFile {
 	return out
 }
 
+// maxPlace is past any place a file can have: no email carries so many.
+const maxPlace = 1 << 20
+
 // Attached is a file that went, or is to go, with an email.
 type Attached struct {
 	File
@@ -118,7 +121,11 @@ func (s *Service) FileFor(ctx context.Context, key store.Key, id string, place i
 		return nil, store.ErrNotFound
 	}
 	var f *store.HeldFile
-	if m.State == store.StateScheduled && !m.SendAt.IsZero() {
+	// Decided as Content decides: an email is read as one that waits for
+	// as long as its words are held, so what Content says is kept is.
+	if h, err := s.held.Held(ctx, m.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	} else if err == nil && h.State == store.StateScheduled {
 		_, files, err := s.held.HeldWords(ctx, m.ID)
 		if err != nil {
 			return nil, err
@@ -126,7 +133,7 @@ func (s *Service) FileFor(ctx context.Context, key store.Key, id string, place i
 		if place <= len(files) {
 			f = &files[place-1]
 		}
-	} else if s.opt.KeepContent != 0 {
+	} else if s.opt.KeepContent != 0 && s.opt.KeepFiles && place <= maxPlace {
 		if f, err = s.store.File(ctx, m.ID, place-1, s.opt.KeepContent); err != nil {
 			return nil, err
 		}
@@ -139,7 +146,8 @@ func (s *Service) FileFor(ctx context.Context, key store.Key, id string, place i
 
 // Content answers what a message said, while that is kept; nil when it
 // never was, is past its time, or content is not kept at all. Turning the
-// setting off hides at once what an earlier setting kept.
+// setting off hides at once what an earlier setting kept, and so does
+// turning off the keeping of files for the files.
 //
 // What an email that waits to be sent says is kept until it is sent,
 // whatever the setting, and is answered here too.
@@ -160,5 +168,8 @@ func (s *Service) Content(ctx context.Context, id string) (*Content, error) {
 		return nil, errors.New("mail: a message's kept content is not what was written")
 	}
 	c.KeptUntil = until.UTC()
+	for i := range c.Attachments {
+		c.Attachments[i].Kept = c.Attachments[i].Kept && s.opt.KeepFiles
+	}
 	return &c, nil
 }

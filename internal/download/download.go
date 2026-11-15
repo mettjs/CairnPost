@@ -28,3 +28,19 @@ func Serve(w http.ResponseWriter, name string, content []byte) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
 }
+
+// Place reads a file's place in an address: a whole number from 1,
+// written as digits alone. 0 for anything else, which is no place.
+func Place(s string) int {
+	if s == "" || len(s) > 6 || s[0] == '0' {
+		return 0
+	}
+	n := 0
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return 0
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	return n
+}

@@ -22,8 +22,17 @@ func TestAFileIsOnlyEverSaved(t *testing.T) {
 			h.Get("Cache-Control") != "no-store" || rec.Body.String() != "<script>alert(1)</script>" {
 			t.Errorf("%q: %v %v", name, h, err)
 		}
-		if got, said := params["filename"]; said && got != name {
+		if got := params["filename"]; got != name {
 			t.Errorf("%q came back as %q", name, got)
+		}
+	}
+}
+
+func TestAPlaceIsDigitsFromOne(t *testing.T) {
+	for s, want := range map[string]int{"1": 1, "10": 10, "999999": 999999, "": 0, "0": 0, "01": 0, "+1": 0, "-1": 0, "1a": 0,
+		" 1": 0, "1.0": 0, "1000000": 0, "99999999999999999999": 0, "first": 0} {
+		if got := download.Place(s); got != want {
+			t.Errorf("%q is place %d", s, got)
 		}
 	}
 }

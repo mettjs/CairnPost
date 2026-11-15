@@ -435,7 +435,9 @@ it. Deleted means gone from the tables: a backup made meanwhile still
 holds them until it is itself thrown away. Kept files are stored in the
 database whole, so a server that sends many large ones grows by their
 size for as long as they are kept; `CAIRNPOST_CONTENT_FILES=false` keeps
-the words without them.
+the words without them, and hides at once the files kept before; those
+are deleted when their words are. An email the mail provider refused is
+kept like any other, files and all, until its time is up.
 
 **Errors** are JSON: `{"statusCode": 422, "name": "validation_error", "message": "..."}`.
 The status tells a program what to do:

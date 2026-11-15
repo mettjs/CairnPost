@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/mettjs/cairnpost/internal/download"
 	"github.com/mettjs/cairnpost/internal/store"
@@ -15,8 +14,7 @@ import (
 // operator keeps what emails say and their files, while they are kept.
 // Admin key.
 func (a *app) getAttachment(w http.ResponseWriter, r *http.Request) {
-	place, _ := strconv.Atoi(r.PathValue("place"))
-	f, err := a.Mail.FileFor(r.Context(), callerOf(r).key, r.PathValue("id"), place)
+	f, err := a.Mail.FileFor(r.Context(), callerOf(r).key, r.PathValue("id"), download.Place(r.PathValue("place")))
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		fail(w, http.StatusNotFound, "not_found", "There is no such file: no email has this id, it has no file at this place, or what the file held is not kept.")
