@@ -55,18 +55,22 @@ func exampleOf(t store.Template, variables []templates.Variable) string {
 	if domain == "" {
 		domain = "example.com"
 	}
-	use := map[string]any{"name": t.Name}
+	type use struct {
+		Name      string            `json:"name"`
+		Variables map[string]string `json:"variables,omitempty"`
+	}
 	values := map[string]string{}
 	for _, v := range variables {
 		if v.Required {
 			values[v.Name] = "..."
 		}
 	}
-	if len(values) > 0 {
-		use["variables"] = values
-	}
 	// Names and a domain: nothing here fails to encode.
-	out, _ := json.MarshalIndent(map[string]any{"from": "you@" + domain, "to": "someone@example.org", "template": use}, "", "  ")
+	out, _ := json.MarshalIndent(struct {
+		From     string `json:"from"`
+		To       string `json:"to"`
+		Template use    `json:"template"`
+	}{"you@" + domain, "someone@example.org", use{t.Name, values}}, "", "  ")
 	return string(out)
 }
 

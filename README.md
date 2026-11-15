@@ -76,6 +76,11 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `PATCH /emails/{id}` | Give an email that waits to be sent another time: `{"scheduled_at"}`. |
 | `POST /emails/{id}/cancel` | Cancel an email that waits to be sent. |
 | `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any, or its sending domain's if it is bound to one. Where content is kept, an admin key also sees what the email said, as `content`. |
+| `POST /templates` | Keep a template: `{"name", "subject", "html", "text", "domain", "defaults"}`. Admin key. |
+| `GET /templates` | The templates, each without its bodies. Admin key. |
+| `GET /templates/{id}` | One template, with the variables it names. Admin key. |
+| `PATCH /templates/{id}` | Change a template: any of `name`, `subject`, `html`, `text`, `defaults`. Admin key. |
+| `DELETE /templates/{id}` | Delete a template. Admin key. |
 | `GET /emails/{id}/attachments/{place}` | One of an email's files, as it was sent, to an admin key: only where content and its files are kept, or while the email waits to be sent. `place` counts from 1. |
 | `GET /capture/emails` | The emails the capture driver holds, newest first. Admin key; only with `CAIRNPOST_DRIVER=capture`. |
 | `GET /suppressions` | The addresses not sent to, in order of domain and address. Admin key. `?domain=` narrows to one sending domain. A page is 100 unless `?limit=` says otherwise (1000 at most); when more follow, the answer has a `next` to pass as `?after=`. |
@@ -94,7 +99,8 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `GET /metrics` | The server's numbers in the text form Prometheus reads. Admin key. |
 | `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent, scheduled emails sent and old records pruned. |
 
-`POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both;
+`POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both,
+or a `template` in place of the three;
 `cc`, `bcc`, `reply_to`, `headers`, `attachments` and `scheduled_at` are
 optional. Any other field is refused, never silently dropped.
 
@@ -241,6 +247,57 @@ curl -X POST http://localhost:8025/emails/01a1d08e-.../cancel -H "Authorization:
   (a failure frees its key, as for any send); after it, the same request
   is a new email.
 - Emails of a batch may each have a `scheduled_at`.
+
+**Templates.** A template is an email written once and sent many times: a
+subject and bodies that name variables as `{{name}}`. An admin key keeps
+one with `POST /templates`:
+
+```json
+{"name": "welcome", "subject": "Welcome, {{name}}",
+ "html": "<p>Your code is <b>{{code}}</b></p>", "text": "Your code is {{code}}",
+ "defaults": {"name": "there"}}
+```
+
+and any key sends an email from it by naming it in place of `html` and
+`text`:
+
+```json
+{"from": "app@example.com", "to": "ana@example.org",
+ "template": {"name": "welcome", "variables": {"code": 4821}}}
+```
+
+- **Variables and nothing else.** `{{name}}` or `{{ name }}`, where a name
+  is letters, digits and `_` (50 at most) and does not start with a digit.
+  There are no conditions, loops or calls, and a `{{` that is not a
+  variable is refused when the template is kept. To have an email say
+  `{{`, give it as a value: a value is never read for variables.
+- **Values.** A value is a string or a number, and is written as it is in
+  the subject and the text and escaped in the HTML, so it is shown as
+  written and is never markup. Put in a link's address it is still only
+  escaped: check an address your users typed before you send it. A
+  variable takes the value the send gives, or else its default; one with
+  neither is refused, 422, and so is a value for a variable the template
+  does not name. A value is what the email says: it is never logged and
+  never said in an error.
+- **Subject.** A `subject` given with `template` is used instead of the
+  template's. `html` and `text` are refused beside it.
+- **Whose it is.** A template belongs to a sending domain (`domain`), or to
+  none and then serves every domain. A send from `app@shop.example.com`
+  gets `shop.example.com`'s template of that name, or else the one that
+  serves all. An admin key bound to a domain keeps and sees that domain's
+  templates only. A name is 1 to 64 of `a-z`, `0-9`, `-` and `_`, and a
+  domain may have `CAIRNPOST_MAX_TEMPLATES` of them.
+- **When it is filled.** When the email is asked for. One that waits
+  (`scheduled_at`) keeps what it was filled with, whatever becomes of the
+  template; a change is for the emails asked for from then on. The filled
+  email is held to what any email is, and its subject and bodies may be
+  `CAIRNPOST_MAX_BODY_BYTES` in all.
+- **Asked twice.** Under an `Idempotency-Key`, a request is the same when
+  it names the same template with the same values, even if the template
+  was changed in between: the email is not sent again.
+- A template is kept in the database as it was written, until it is
+  deleted. It is what you wrote, not what one email said: an email made
+  from it is kept, or not, like any other.
 
 **An email's state**, from `GET /emails/{id}`:
 
@@ -671,6 +728,10 @@ on the page that made it.
 - A key made in the console says which key made it, and the server's log
   says who signed in, made a key or revoked one, by the keys' public
   prefixes. If a key leaks, the keys it made can be found.
+- Templates lists the templates, makes one, and shows each as it is
+  written, with the variables it names, what each is filled with when a
+  send gives no value, and a send that uses it. A template is changed and
+  deleted there, after asking.
 - A sending domain may have `CAIRNPOST_MAX_KEYS` live keys (200), and so
   may the keys bound to no domain. Revoking one makes room.
 - The session cookie is marked `Secure`, so the console needs https. To
@@ -766,6 +827,7 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_BOUNCE_WARN` | `5` | The share of a sending domain's emails, in percent, that bounced at which the console's first page marks the domain. `off` marks none. |
 | `CAIRNPOST_CONSOLE_TIMEZONE` | the system's | The time zone the console says times in for a browser that does not say its own, by name (`Europe/Berlin`, `UTC`). Unset, the system's own, which `TZ` sets. |
 | `CAIRNPOST_CONSOLE_PLAIN_HTTP` | `off` | Let the console's session cookie travel without TLS, for a console opened over plain http in development. |
+| `CAIRNPOST_MAX_TEMPLATES` | `200` | How many templates one sending domain may have, and how many may serve every domain. |
 | `CAIRNPOST_MAX_KEYS` | `200` | How many keys that are not revoked one sending domain may have, and how many the keys bound to no domain may be. |
 | `CAIRNPOST_WEBHOOK_TIMEOUT` | `10s` | The most one try at delivering a webhook may take. |
 | `CAIRNPOST_WEBHOOK_RETRIES` | `5s,5m,30m,2h,5h,10h,10h` | The waits before each further try. A webhook is tried once, then once after each wait, then given up. |
@@ -778,7 +840,8 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_WEBHOOK_ALLOW_PRIVATE` | `off` | Let an endpoint be plain `http://` and at an address that is not on the public internet: for an application on the same private network. |
 
 `cairnpost send` reads `CAIRNPOST_URL` and `CAIRNPOST_API_KEY`; `-at`
-with a time (`2030-01-31T09:00:00Z`) has the email sent then.
+with a time (`2030-01-31T09:00:00Z`) has the email sent then, and
+`-template welcome -var code=4821` makes it from a template.
 
 ## Contributing
 

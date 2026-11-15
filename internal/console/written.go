@@ -94,8 +94,12 @@ func templateProblem(bad *templates.Invalid) string {
 	case "domain":
 		return "The sending domain must be a domain, such as mail.example.com, or left empty."
 	}
-	return bad.Reason
+	return formWords.Replace(bad.Reason)
 }
+
+// formWords says a problem's fields as the form calls them.
+var formWords = strings.NewReplacer(`"defaults" gives`, "The defaults give", `In "html"`, "In the HTML", `In "text"`, "In the text",
+	`In "subject"`, "In the subject", `"html"`, "HTML", `"text"`, "text")
 
 // wideForm reads a form as long as a template may be.
 func (c *console) wideForm(w http.ResponseWriter, r *http.Request) bool {

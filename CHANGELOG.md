@@ -39,6 +39,13 @@ Every change a user of CairnPost can notice is written here. The format is
   until it is sent or cancelled and deleted then. `cairnpost send -at`;
   a "Scheduled" part of the console's Emails page; `"scheduled"` in
   `GET /health`; `cairnpost_emails_scheduled`.
+- Templates: `POST /templates` keeps an email written once, with
+  variables as `{{name}}`, and `"template": {"name", "variables"}` on
+  `POST /emails` (and on the emails of a batch) sends one from it. A value
+  is escaped in the HTML. A template belongs to a sending domain or serves
+  all (`CAIRNPOST_MAX_TEMPLATES` to each); `GET`, `PATCH` and `DELETE
+  /templates/{id}`; a Templates page in the console; `cairnpost send
+  -template -var`.
 - The `smtp` driver: send through any mail server that takes mail by SMTP
   (`CAIRNPOST_SMTP_*`), secured by STARTTLS or TLS, signed in by PLAIN or
   LOGIN. Such a server reports nothing after it took an email, so records

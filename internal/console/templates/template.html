@@ -1,6 +1,6 @@
 {{define "title"}}{{.Data.Template.Name}} · Templates{{end}}
 {{define "main"}}
-<p class="back"><a href="{{.Root}}/templates">← Templates</a></p>
+<p class="back"><a href="{{.Root}}/templates">Templates</a></p>
 <h1 class="long">{{.Data.Template.Name}}</h1>
 <p class="lede">{{if .Data.Template.Domain}}A template for emails from <code>{{.Data.Template.Domain}}</code>.{{else}}A template every sending domain's emails can be made from.{{end}} Changed <time datetime="{{stamp .Data.Template.UpdatedAt}}">{{when .Zone .Data.Template.UpdatedAt}}</time>.</p>
 
