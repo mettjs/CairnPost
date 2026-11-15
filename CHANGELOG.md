@@ -53,7 +53,11 @@ Every change a user of CairnPost can notice is written here. The format is
   `email.received`, and read by an admin key: `GET /inbound`,
   `GET /inbound/{id}`, `.../raw`, `.../attachments/{place}`,
   `DELETE /inbound/{id}`. A "Received" part of the console's Emails page;
-  `"inbound"` in `GET /health`; `cairnpost_inbound_emails`.
+  `"inbound"` in `GET /health`; `cairnpost_inbound_emails`. An email is
+  read in whatever charset it is written in.
+- Lists that come in pages (`GET /suppressions`, `GET /inbound`,
+  `GET /webhooks/{id}/deliveries`) share one rule: 50 to a page unless
+  `?limit=` says otherwise, 200 at most, and `?after=` for the next.
 - The `smtp` driver: send through any mail server that takes mail by SMTP
   (`CAIRNPOST_SMTP_*`), secured by STARTTLS or TLS, signed in by PLAIN or
   LOGIN. Such a server reports nothing after it took an email, so records

@@ -68,6 +68,7 @@ func TestWebhookEndpointsAreAnAdminsToManage(t *testing.T) {
 		"an id that is none":   {"GET", "/webhooks/nothing", "", 404, "not_found"},
 		"a change of nothing":  {"PATCH", "/webhooks/nothing", `{"enabled":true}`, 404, "not_found"},
 		"a bad limit":          {"GET", "/webhooks/" + id + "/deliveries?limit=0", "", 422, "validation_error"},
+		"a page too large":     {"GET", "/webhooks/" + id + "/deliveries?limit=201", "", 422, "validation_error"},
 		"a delivery not there": {"POST", "/webhooks/" + id + "/deliveries/nothing/retry", "", 404, "not_found"},
 	} {
 		if code, name, _ := r.do(c.method, c.path, r.admin, "", c.body); code != c.code || name != c.name {

@@ -375,6 +375,7 @@ func TestSuppressionsAreAnAdminsToManage(t *testing.T) {
 	}{
 		"a bad address":       {"POST", "/suppressions", `{"domain":"example.com","address":"nobody"}`, 422, "validation_error"},
 		"a bad limit":         {"GET", "/suppressions?limit=0", "", 422, "validation_error"},
+		"a page too large":    {"GET", "/suppressions?limit=201", "", 422, "validation_error"},
 		"a made-up cursor":    {"GET", "/suppressions?after=AGEAYg", "", 422, "validation_error"},
 		"a domain that hides": {"GET", "/suppressions?domain=a%00b", "", 422, "validation_error"},
 		"a body too large":    {"POST", "/suppressions", `{"domain":"example.com","note":"` + strings.Repeat("n", 5000) + `"}`, 413, "request_too_large"},

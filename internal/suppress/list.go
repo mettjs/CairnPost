@@ -6,18 +6,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mettjs/cairnpost/internal/page"
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
 // List answers a page of the suppressions in force, of one domain or of
 // all (""), and the cursor of the page after it, "" when there is none.
 func (s *Service) List(ctx context.Context, domain, cursor string, limit int) ([]store.Suppression, string, error) {
-	if limit <= 0 {
-		limit = DefaultLimit
-	}
-	if limit > MaxLimit {
-		return nil, "", &Invalid{"limit", fmt.Sprintf(`"limit" must be at most %d.`, MaxLimit)}
-	}
+	limit = page.Size(limit)
 	if domain != "" {
 		var err error
 		if domain, err = domainOf(domain); err != nil {

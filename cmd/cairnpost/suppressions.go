@@ -8,6 +8,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/mettjs/cairnpost/internal/page"
 	"github.com/mettjs/cairnpost/internal/store"
 	"github.com/mettjs/cairnpost/internal/suppress"
 	"github.com/mettjs/cairnpost/internal/webhook"
@@ -88,7 +89,7 @@ func suppressionsCommand(ctx context.Context, args []string) error {
 	fmt.Fprintln(w, "DOMAIN\tADDRESS\tREASON\tSINCE (UTC)\tNOTE")
 	cursor := ""
 	for {
-		page, next, err := svc.List(ctx, *domain, cursor, suppress.MaxLimit)
+		page, next, err := svc.List(ctx, *domain, cursor, page.Hard)
 		if err != nil {
 			return plain(err)
 		}

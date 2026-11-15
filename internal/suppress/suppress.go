@@ -22,12 +22,10 @@ type Invalid struct{ Field, Reason string }
 
 func (e *Invalid) Error() string { return "suppress: " + e.Reason }
 
-// Limits of a list and of a suppression.
+// Limits of a suppression.
 const (
-	DefaultLimit = 100
-	MaxLimit     = 1000
-	MaxNote      = 500
-	maxDomain    = 253
+	MaxNote   = 500
+	maxDomain = 253
 )
 
 // Service is the suppression use cases.

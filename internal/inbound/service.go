@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/mettjs/cairnpost/internal/address"
+	"github.com/mettjs/cairnpost/internal/page"
 	"github.com/mettjs/cairnpost/internal/store"
 )
 
@@ -31,8 +32,6 @@ const (
 	DefaultMaxBytes  = 25 << 20
 	DefaultRoom      = 1 << 30
 	DefaultTolerance = 5 * time.Minute
-	// mostListed is how many emails one page of a list holds.
-	mostListed = 100
 	// maxShown is how long a subject or a sender's name is kept for a list.
 	maxShown = 998
 	// maxAddress is the longest address there can be.
@@ -199,9 +198,7 @@ func (s *Service) List(ctx context.Context, key store.Key, after string, limit i
 	if key.Scope != store.ScopeAdmin {
 		return nil, "", nil
 	}
-	if limit <= 0 || limit > mostListed {
-		limit = mostListed
-	}
+	limit = page.Size(limit)
 	list, err = s.store.ListInbound(ctx, key.Domain, after, limit+1)
 	if len(list) > limit {
 		list, next = list[:limit], list[limit-1].ID

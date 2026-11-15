@@ -840,10 +840,12 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "How many to answer in one page. Left out, the server's own page size is used. The server sets the largest page.",
+            "description": "How many to answer in one page. Every list has the same rule: 50 when left out, 200 at most.",
             "schema": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
             }
           },
           {
@@ -1248,10 +1250,12 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "How many to answer in one page. Left out, the server's own page size is used. The server sets the largest page.",
+            "description": "How many to answer in one page. Every list has the same rule: 50 when left out, 200 at most.",
             "schema": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
             }
           },
           {
@@ -2199,10 +2203,12 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "How many to answer in one page. Left out, the server's own page size is used. The server sets the largest page.",
+            "description": "How many to answer in one page. Every list has the same rule: 50 when left out, 200 at most.",
             "schema": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
             }
           },
           {
