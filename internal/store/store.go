@@ -247,6 +247,7 @@ type Store interface {
 	Sessions
 	Domains
 	Counts
+	Templates
 	// Ping reports whether the store can be reached.
 	Ping(ctx context.Context) error
 }
