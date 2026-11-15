@@ -1,0 +1,13 @@
+# Copy to wrangler.toml, fill in, and deploy with: npx wrangler deploy
+name = "cairnpost-inbound"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+CAIRNPOST_URL = "https://mail.example.com"
+# Optional: a verified destination address that gets an email the server
+# did not take. Without it such an email is refused, and its sender told.
+# FALLBACK_ADDRESS = "postmaster@example.com"
+
+# The secret is not written here. Set it with:
+#   npx wrangler secret put CAIRNPOST_INBOUND_SECRET
