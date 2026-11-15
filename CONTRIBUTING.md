@@ -41,14 +41,18 @@ export CAIRNPOST_TEST_DSN='postgres://cairnpost:cairnpost@localhost:5425/cairnpo
 go test -tags=integration -p 1 ./...
 ```
 
-With the tag and no `CAIRNPOST_TEST_DSN` they fail rather than skip, so a run
+Each package's integration tests make a database of their own on that
+server and drop it when they are done, so they leave nothing in the one
+the address names. The address is a `postgres://` URL, and its user must
+be allowed to create databases. A run that is killed leaves its database
+behind; a later run drops it. With the tag and no `CAIRNPOST_TEST_DSN` they fail rather than skip, so a run
 that tested nothing never reads as green. CI runs all of the above.
 
 ## Conventions
 
 - **Dependencies point inward:** `api → mail → { driver, store }`. Concrete
   implementations are built only in `cmd/cairnpost`. Only `internal/store`
-  issues SQL, and only a driver names its provider's host.
+  issues SQL (and `internal/testdb`, which makes the tests' database), and only a driver names its provider's host.
 - **Small files, one concern each.** No `utils` or `helpers` grab-bags.
 - **The standard library first.** A new dependency is the exception: open an
   issue saying what it replaces before adding one.

@@ -6,6 +6,8 @@ Every change a user of CairnPost can notice is written here. The format is
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-15
+
 ### Added
 
 - `POST /emails`: send one email with an API key. A request with an
@@ -173,3 +175,6 @@ Every change a user of CairnPost can notice is written here. The format is
   Compose file with Postgres 18.
 - Images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`, published with
   each release.
+
+[Unreleased]: https://github.com/mettjs/CairnPost/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/mettjs/CairnPost/releases/tag/v0.1.0
