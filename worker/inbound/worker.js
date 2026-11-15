@@ -103,6 +103,8 @@ export default {
         console.log("the fallback address did not take the email");
       }
     }
-    message.setReject("This address cannot take mail right now. Try again later.");
+    // Refused for good: the sending server does not try again, and
+    // tells its sender at once. Cloudflare ends the sentence itself.
+    message.setReject("This address cannot take mail right now. Send it again later");
   },
 };
