@@ -15,15 +15,23 @@ import (
 // what it said is gone with its files.
 const cancelled = `state = 'cancelled', words = NULL, bytes = 0, claimed_at = NULL, updated_at = now()`
 
+// What ending does once an email is changed.
+const (
+	nothing = iota
+	// forget deletes what it said beside its own row.
+	forget
+	// unsend marks the addresses of a try under way as not sent to.
+	unsend
+)
+
 // taken is the condition an email is one taking's under: $2 is the
 // claim.
 const taken = `state = 'sending' AND claim = $2`
 
-// ending changes one email that fits a condition, and deletes what it
-// said (its files, and what a failed try kept of its words) when told
-// to. Its error for an email that does not fit is ErrTooLate, and
+// ending changes one email that fits a condition, and then does what
+// after says. Its error for an email that does not fit is ErrTooLate, and
 // ErrNotFound for none. $1 is the id; args are $2 on.
-func (db *DB) ending(ctx context.Context, what, id, where, set string, forget bool, args ...any) error {
+func (db *DB) ending(ctx context.Context, what, id, where, set string, after int, args ...any) error {
 	if !uuidShape.MatchString(id) {
 		return store.ErrNotFound
 	}
@@ -42,10 +50,16 @@ func (db *DB) ending(ctx context.Context, what, id, where, set string, forget bo
 			}
 			return store.ErrNotFound
 		}
-		if !forget {
-			return nil
+		switch after {
+		case forget:
+			return forgetWords(ctx, tx, []string{id})
+		case unsend:
+			// With it, in the one step: an email put back to wait has
+			// no address left sending, or it could never be begun again.
+			_, err = tx.Exec(ctx, `
+				UPDATE messages SET state = 'failed', updated_at = now() WHERE email_id = $1::uuid AND state = 'sending'`, id)
 		}
-		return forgetWords(ctx, tx, []string{id})
+		return err
 	})
 	if err != nil && !errors.Is(err, store.ErrTooLate) && !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("postgres: %s a waiting email: %w", what, err)
@@ -68,24 +82,24 @@ func forgetWords(ctx context.Context, tx pgx.Tx, ids []string) error {
 
 // Cancel implements store.Schedule.
 func (db *DB) Cancel(ctx context.Context, id string) error {
-	return db.ending(ctx, "cancel", id, `state = 'scheduled'`, cancelled+`, reason = ''`, true)
+	return db.ending(ctx, "cancel", id, `state = 'scheduled'`, cancelled+`, reason = ''`, forget)
 }
 
 // Drop implements store.Schedule.
 func (db *DB) Drop(ctx context.Context, id string, claim int, reason string) error {
-	return db.ending(ctx, "drop", id, taken, cancelled+`, reason = $3`, true, claim, reason)
+	return db.ending(ctx, "drop", id, taken, cancelled+`, reason = $3`, forget, claim, reason)
 }
 
 // Reschedule implements store.Schedule. A new time is a new start: the
 // tries made for the old one are not held against it.
 func (db *DB) Reschedule(ctx context.Context, id string, at time.Time) error {
-	return db.ending(ctx, "reschedule", id, `state = 'scheduled'`, `send_at = $2, next_try_at = $2, tries = 0, updated_at = now()`, false, at)
+	return db.ending(ctx, "reschedule", id, `state = 'scheduled'`, `send_at = $2, next_try_at = $2, tries = 0, updated_at = now()`, nothing, at)
 }
 
 // Postpone implements store.Schedule.
 func (db *DB) Postpone(ctx context.Context, id string, claim int, wait time.Duration) error {
 	return db.ending(ctx, "postpone", id, taken,
-		`state = 'scheduled', claimed_at = NULL, next_try_at = now() + make_interval(secs => $3), updated_at = now()`, false, claim, wait.Seconds())
+		`state = 'scheduled', claimed_at = NULL, next_try_at = now() + make_interval(secs => $3), updated_at = now()`, unsend, claim, wait.Seconds())
 }
 
 // Release implements store.Schedule.

@@ -148,10 +148,10 @@ func (r *Runner) Pass(ctx context.Context) (taken int, wait time.Duration, err e
 				case ctx.Err() != nil:
 					// The server is stopping: what was not begun waits
 					// for the next one.
-					r.settle(h, r.store.Postpone(r.settling(ctx), h.ID, h.Claim, 0))
+					r.postpone(ctx, h, 0)
 				case held > 0:
 					// The limit was said meanwhile: not begun, no try spent.
-					r.settle(h, r.store.Postpone(r.settling(ctx), h.ID, h.Claim, held))
+					r.postpone(ctx, h, held)
 				default:
 					if asked := r.one(ctx, h); asked > 0 {
 						mu.Lock()
@@ -170,12 +170,28 @@ func (r *Runner) Pass(ctx context.Context) (taken int, wait time.Duration, err e
 	return len(due), wait, nil
 }
 
-// settling is the context what became of a taken email is written down
-// under: its own time, whoever stops meanwhile.
-func (r *Runner) settling(ctx context.Context) context.Context {
+// settle writes down what became of a taken email, in its own time
+// from now, whoever stops meanwhile. When that cannot be written the
+// email stays taken until it is recovered, and it is said.
+func (r *Runner) settle(ctx context.Context, h store.Held, write func(context.Context) error) {
 	bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), passTimeout)
-	_ = cancel // released when its time is up: the write is one statement
-	return bounded
+	defer cancel()
+	if err := write(bounded); err != nil && !errors.Is(err, store.ErrTooLate) && !errors.Is(err, store.ErrNotFound) {
+		r.log.Error("schedule: what became of a waiting email could not be recorded", "message", h.ID, "error", err)
+	}
+}
+
+// postpone, drop and release are the three ways a taken email is let go.
+func (r *Runner) postpone(ctx context.Context, h store.Held, wait time.Duration) {
+	r.settle(ctx, h, func(ctx context.Context) error { return r.store.Postpone(ctx, h.ID, h.Claim, wait) })
+}
+
+func (r *Runner) drop(ctx context.Context, h store.Held, reason string) {
+	r.settle(ctx, h, func(ctx context.Context) error { return r.store.Drop(ctx, h.ID, h.Claim, reason) })
+}
+
+func (r *Runner) release(ctx context.Context, h store.Held) {
+	r.settle(ctx, h, func(ctx context.Context) error { return r.store.Release(ctx, h.ID, h.Claim) })
 }
 
 // one is send for an email whose send may panic: that ends neither the
@@ -188,7 +204,7 @@ func (r *Runner) one(ctx context.Context, h store.Held) (asked time.Duration) {
 			r.log.Error("schedule: sending a waiting email panicked", "message", h.ID, "panic", fmt.Sprint(p))
 			if r.now().Sub(h.SendAt) >= r.opt.GiveUp {
 				// Long past its time: not taken up again and again.
-				r.settle(h, r.store.Drop(r.settling(ctx), h.ID, h.Claim, store.HeldFailed))
+				r.drop(ctx, h, store.HeldFailed)
 			}
 		}
 	}()
@@ -199,7 +215,6 @@ func (r *Runner) one(ctx context.Context, h store.Held) (asked time.Duration) {
 // how long the mail provider asked everything to wait, if it did.
 func (r *Runner) send(ctx context.Context, h store.Held) time.Duration {
 	// What was taken is seen through, whoever stops meanwhile.
-	free := r.settling(ctx)
 	last := r.now().Sub(h.SendAt) >= r.opt.GiveUp
 	err := r.sender.SendHeld(context.WithoutCancel(ctx), h, !last)
 	var throttled *driver.Throttled
@@ -209,16 +224,16 @@ func (r *Runner) send(ctx context.Context, h store.Held) time.Duration {
 		if asked <= 0 {
 			asked = pause
 		}
-		r.settle(h, r.store.Postpone(free, h.ID, h.Claim, asked))
+		r.postpone(ctx, h, asked)
 		return asked
 	case errors.Is(err, driver.ErrUnavailable) && !last:
 		// h.Tries are the tries before this one.
 		wait := min(firstWait<<min(h.Tries, 10), longestWait)
 		r.log.Warn("schedule: the mail provider did not take a waiting email; it will be tried again",
 			"message", h.ID, "try", h.Tries+1, "in", wait.String())
-		r.settle(h, r.store.Postpone(free, h.ID, h.Claim, wait))
+		r.postpone(ctx, h, wait)
 	case errors.Is(err, mail.ErrSuppressed):
-		r.settle(h, r.store.Drop(free, h.ID, h.Claim, store.HeldSuppressed))
+		r.drop(ctx, h, store.HeldSuppressed)
 	case errors.Is(err, mail.ErrGone):
 		// Cancelled, taken again by another, or already handed to the
 		// provider: not this sender's, and nothing here to settle.
@@ -230,24 +245,16 @@ func (r *Runner) send(ctx context.Context, h store.Held) time.Duration {
 		}
 		// Its message is settled, and its wait ended with it; this is
 		// for a record that could not be written.
-		r.settle(h, r.store.Release(free, h.ID, h.Claim))
+		r.release(ctx, h)
 	case last:
 		// A failure of our own before anything was sent, each time
 		// until now: it is given up on, and said to be.
 		r.log.Error("schedule: a waiting email could not be sent and is given up on", "message", h.ID, "error", err)
-		r.settle(h, r.store.Drop(free, h.ID, h.Claim, store.HeldFailed))
+		r.drop(ctx, h, store.HeldFailed)
 	default:
 		// A failure of our own before anything was sent: it waits again.
 		r.log.Error("schedule: a waiting email could not be sent; it will be tried again", "message", h.ID, "error", err)
-		r.settle(h, r.store.Postpone(free, h.ID, h.Claim, firstWait))
+		r.postpone(ctx, h, firstWait)
 	}
 	return 0
-}
-
-// settle says so when what became of a taken email could not be written
-// down: it stays taken until it is recovered.
-func (r *Runner) settle(h store.Held, err error) {
-	if err != nil && !errors.Is(err, store.ErrTooLate) && !errors.Is(err, store.ErrNotFound) {
-		r.log.Error("schedule: what became of a waiting email could not be recorded", "message", h.ID, "error", err)
-	}
 }

@@ -187,3 +187,21 @@ func TestABoundKeyTouchesOnlyItsOwnDomainsWaitingEmails(t *testing.T) {
 		t.Errorf("after the tries: %v", read)
 	}
 }
+
+// A batch made again after the time of one of its emails is still that
+// batch.
+func TestABatchRepeatedAfterAnEmailsTimeIsItsBatch(t *testing.T) {
+	r := laterRig(t, 0, 0)
+	defer func(was time.Time) { at = was }(at)
+	batch := "[" + email("ana@example.org") + "," + later("ben@example.org", "2030-01-02T03:10:00Z") + "]"
+	_, _, first := r.do("POST", "/emails/batch", r.send, "run-9", batch)
+	at = at.Add(10 * time.Minute)
+	code, _, again := r.do("POST", "/emails/batch", r.send, "run-9", batch)
+	a, b := items(t, first), items(t, again)
+	if code != 200 || b[0]["id"] != a[0]["id"] || b[1]["id"] != a[1]["id"] || len(r.drv.held) != 1 {
+		t.Fatalf("%d %v after %v, %d sent", code, again, first, len(r.drv.held))
+	}
+	if code, name, _ := r.do("POST", "/emails/batch", r.send, "", batch); code != 422 || name != "validation_error" {
+		t.Errorf("without a key: %d %s", code, name)
+	}
+}

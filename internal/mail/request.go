@@ -29,6 +29,9 @@ type Request struct {
 	IdemKey string
 	// ScheduledAt is when to send it; zero for now.
 	ScheduledAt time.Time
+	// keyed says it is sent under an Idempotency-Key that is not in
+	// IdemKey: an email of a batch, under the batch's.
+	keyed bool
 }
 
 // Invalid is a request that can never be sent as it is: the caller must
@@ -220,7 +223,7 @@ func check(r Request, opt Options) (checked, error) {
 	late := false
 	if at := r.ScheduledAt; !at.IsZero() {
 		switch now := opt.Now(); {
-		case !at.After(now) && r.IdemKey != "":
+		case !at.After(now) && (r.IdemKey != "" || r.keyed):
 			// The same request, made again after its time: asked of the
 			// key before it is refused.
 			late = true

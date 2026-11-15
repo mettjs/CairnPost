@@ -253,7 +253,8 @@ func split(of []store.Addressee) (addresses, kinds []string) {
 // gone says the email is not to be sent: some address of it is not
 // failed, so it was handed to the upstream already.
 func resume(ctx context.Context, tx pgx.Tx, s store.Start) (id string, kept []store.Addressee, dropped []string, gone bool, err error) {
-	rows, err := tx.Query(ctx, `SELECT recipient, kind, state FROM messages WHERE email_id = $1::uuid ORDER BY id FOR UPDATE`, s.ID)
+	rows, err := tx.Query(ctx, `
+		SELECT recipient, kind, state, left_out FROM messages WHERE email_id = $1::uuid ORDER BY id FOR UPDATE`, s.ID)
 	if err != nil {
 		return "", nil, nil, false, err
 	}
@@ -261,8 +262,13 @@ func resume(ctx context.Context, tx pgx.Tx, s store.Start) (id string, kept []st
 		tried []store.Addressee
 		a     store.Addressee
 		state string
+		left  []string // who was left out before: the first row's
+		was   []string
 	)
-	if _, err := pgx.ForEachRow(rows, []any{&a.Address, &a.Kind, &state}, func() error {
+	if _, err := pgx.ForEachRow(rows, []any{&a.Address, &a.Kind, &state, &was}, func() error {
+		if len(tried) == 0 {
+			left = was
+		}
 		tried, gone = append(tried, a), gone || state != store.StateFailed
 		return nil
 	}); err != nil || gone {
@@ -273,21 +279,44 @@ func resume(ctx context.Context, tx pgx.Tx, s store.Start) (id string, kept []st
 		return id, kept, dropped, false, err
 	}
 	s.Recipients = tried
-	kept, dropped, err = addressed(ctx, tx, s)
+	kept, now, err := addressed(ctx, tx, s)
 	if err != nil || len(kept) == 0 {
-		return "", nil, dropped, false, err
+		return "", nil, now, false, err
 	}
 	addresses, kinds := split(kept)
+	// The email's first row is the one it is read by: it is of an
+	// address the email goes to, so it trades places with one that is
+	// left out now.
+	if first := tried[0].Address; !slices.Contains(addresses, first) {
+		if _, err := tx.Exec(ctx, `
+			UPDATE messages SET recipient = CASE WHEN id = $1::uuid THEN $2 ELSE $3 END
+			WHERE email_id = $1::uuid AND (id = $1::uuid OR recipient = $2)`, s.ID, addresses[0], first); err != nil {
+			return "", nil, nil, false, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE messages m SET state = 'sending', kind = w.kind, updated_at = now()
 		FROM unnest($2::text[], $3::text[]) AS w(recipient, kind)
 		WHERE m.email_id = $1::uuid AND m.recipient = w.recipient`, s.ID, addresses, kinds); err != nil {
 		return "", nil, nil, false, err
 	}
-	// Who was left out before stays left out; who is now, joins them.
-	err = tx.QueryRow(ctx, `
-		UPDATE messages SET left_out = left_out || $2::text[] WHERE id = $1::uuid RETURNING left_out`, s.ID, dropped).Scan(&dropped)
+	dropped = leftOut(left, tried, now)
+	_, err = tx.Exec(ctx, `UPDATE messages SET left_out = $2 WHERE id = $1::uuid`, s.ID, dropped)
 	return s.ID, kept, dropped, false, err
+}
+
+// leftOut is who an email begun again is not sent to: those left out
+// when it was first begun, who have no row, and those of its rows left
+// out now. One of its rows left out on an earlier try and not now is
+// sent to again, and no longer named.
+func leftOut(before []string, rows []store.Addressee, now []string) []string {
+	out := []string{}
+	for _, a := range before {
+		if !slices.ContainsFunc(rows, func(r store.Addressee) bool { return r.Address == a }) {
+			out = append(out, a)
+		}
+	}
+	return append(out, now...)
 }
 
 // Content implements store.Mail. Its age is read on the database's clock.

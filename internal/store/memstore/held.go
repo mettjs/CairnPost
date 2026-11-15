@@ -141,7 +141,10 @@ func (s *Store) Reschedule(_ context.Context, id string, at time.Time) error {
 
 // Postpone implements store.Schedule.
 func (s *Store) Postpone(_ context.Context, id string, claim int, wait time.Duration) error {
-	return s.ending(id, claim, func(h *held) { h.taken, h.next = false, s.Now().Add(wait) })
+	return s.ending(id, claim, func(h *held) {
+		h.taken, h.next = false, s.Now().Add(wait)
+		s.settle(id, store.StateFailed, "", store.StateSending)
+	})
 }
 
 // Release implements store.Schedule.

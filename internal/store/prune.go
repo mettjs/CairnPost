@@ -31,7 +31,7 @@ type Pruning interface {
 	// change, once webhooks are no longer signed with them.
 	ForgetSecrets(ctx context.Context, limit int) (int, error)
 	// MarkUnanswered records as unknown the messages still "sending"
-	// that were started older ago: a send is answered or given up long
+	// that were started, or begun again, older ago: a send is answered or given up long
 	// before, so one left like that lost whoever was sending it (the
 	// process ended mid-send), and nothing else would ever say what
 	// became of it. A send that does get its answer after all is

@@ -43,6 +43,10 @@ CREATE TABLE scheduled_emails (
 
 CREATE INDEX scheduled_emails_due ON scheduled_emails (next_try_at) WHERE state = 'scheduled';
 CREATE INDEX scheduled_emails_by_domain ON scheduled_emails (sender_domain, id DESC);
+-- For finding what a stopped server had taken, and what a revoked key
+-- had asked for.
+CREATE INDEX scheduled_emails_taken ON scheduled_emails (claimed_at) WHERE state = 'sending';
+CREATE INDEX scheduled_emails_by_key ON scheduled_emails (api_key_id) WHERE state = 'scheduled';
 
 -- The files of an email that waits, with what they hold.
 CREATE TABLE scheduled_files (

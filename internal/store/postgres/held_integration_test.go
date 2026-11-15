@@ -301,3 +301,64 @@ func TestARequestIsOnlyLookedUp(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Begun again after its first address was put on the suppression list,
+// an email reads by an address it went to, and names each address left
+// out once, however many tries it takes.
+func TestAnEmailBegunAgainReadsByWhoItWentTo(t *testing.T) {
+	ctx := context.Background()
+	db := open(t)
+	k := key(t, db)
+	domain := k.ID + ".example.com"
+	ana, cy := "ana-"+k.ID+"@example.org", "cy-"+k.ID+"@example.org"
+	c, err := db.Start(ctx, store.Start{KeyID: k.ID, Sender: "app@" + domain, Driver: "test",
+		Recipients: []store.Addressee{{Address: ana, Kind: store.KindTo}, {Address: cy, Kind: store.KindCc}},
+		Hold:       &store.Hold{SendAt: time.Now().Add(-time.Second), Words: []byte("w")}})
+	if err != nil || c.Outcome != store.Started {
+		t.Fatalf("%+v %v", c, err)
+	}
+	id := c.ID
+	try := func() store.Claim {
+		t.Helper()
+		h, ok := taken(t, db, id)
+		if !ok {
+			t.Fatal("not taken")
+		}
+		c, err := db.Start(ctx, store.Start{ID: id, Claim: h.Claim, KeyID: k.ID, Sender: h.Sender, Recipients: h.Recipients, Driver: "test"})
+		if err != nil || c.Outcome != store.Started {
+			t.Fatalf("begun: %+v %v", c, err)
+		}
+		return c
+	}
+	// A try the provider does not take; its addresses are put back by
+	// the postponing itself.
+	h := try()
+	_ = h
+	held, _ := db.Held(ctx, id)
+	if err := db.Postpone(ctx, id, held.Claim, 0); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := db.Message(ctx, id); err != nil || m.State != store.StateFailed {
+		t.Fatalf("put back to wait: %+v %v", m, err)
+	}
+	if _, err := db.Suppress(ctx, store.Suppression{Domain: domain, Address: ana, Reason: store.ReasonManual}); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if c := try(); len(c.Recipients) != 1 || c.Recipients[0].Address != cy || c.Recipients[0].Kind != store.KindTo || len(c.Dropped) != 1 {
+			t.Fatalf("begun again: %+v", c)
+		}
+		held, _ = db.Held(ctx, id)
+		if err := db.Postpone(ctx, id, held.Claim, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	try()
+	if err := db.Sent(ctx, id, "<up>"); err != nil {
+		t.Fatal(err)
+	}
+	m, err := db.Message(ctx, id)
+	if err != nil || m.State != store.StateSent || m.Recipient != cy || len(m.LeftOut) != 1 || m.LeftOut[0] != ana || len(m.Recipients) != 2 {
+		t.Fatalf("the email: %+v %v", m, err)
+	}
+}

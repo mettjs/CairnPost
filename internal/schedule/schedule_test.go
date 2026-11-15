@@ -438,3 +438,58 @@ func TestCancelledBetweenTriesItsWordsAreGone(t *testing.T) {
 		t.Fatalf("it reads %s", r.state(id))
 	}
 }
+
+// forgetful is a store that cannot write down, once, that a try was not
+// taken.
+type forgetful struct {
+	*memstore.Store
+	failed bool
+}
+
+func (f *forgetful) Unsent(ctx context.Context, id string) error {
+	if !f.failed {
+		f.failed = true
+		return errors.New("the database is slow")
+	}
+	return f.Store.Unsent(ctx, id)
+}
+
+// A try the provider did not take is tried again even when that could
+// not be written down: putting the email back to wait says it.
+func TestATryThatCouldNotBeRecordedIsStillTriedAgain(t *testing.T) {
+	r := newRig(t, 0)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	r.mail = mail.New(&forgetful{Store: r.store}, r.drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: 24 * time.Hour,
+		InDoubtWindow: 2 * time.Minute, Now: r.store.Now}, log)
+	r.run = schedule.New(r.store, r.mail, schedule.Options{Poll: time.Second, Batch: 10, Parallel: 2,
+		GiveUp: 3 * time.Hour, Abandoned: 5 * time.Minute}, r.store.Now, log)
+	id := r.later("ana@example.org")
+	r.now = r.now.Add(time.Hour)
+	r.drv.err = driver.ErrUnavailable
+	r.pass()
+	r.drv.err = nil
+	r.now = r.now.Add(time.Minute)
+	r.pass()
+	if r.state(id) != store.StateSent || len(r.drv.held) != 2 {
+		t.Fatalf("%s after %d tries", r.state(id), len(r.drv.held))
+	}
+}
+
+// A try under way is not taken for a send left unanswered because its
+// email was first tried long ago.
+func TestALaterTryIsNotSweptAsAbandoned(t *testing.T) {
+	r := newRig(t, 0)
+	id := r.later("ana@example.org")
+	r.now = r.now.Add(time.Hour)
+	r.drv.err = driver.ErrUnavailable
+	r.pass()
+	r.now = r.now.Add(30 * time.Minute)
+	taken, _ := r.store.TakeDue(context.Background(), 10)
+	if _, err := r.store.Start(context.Background(), store.Start{ID: id, Claim: taken[0].Claim, KeyID: taken[0].KeyID,
+		Sender: taken[0].Sender, Recipients: taken[0].Recipients, Driver: "fake"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := r.store.MarkUnanswered(context.Background(), 5*time.Minute, 10); n != 0 {
+		t.Fatalf("%d rows of a try just begun were swept", n)
+	}
+}

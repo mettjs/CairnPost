@@ -97,7 +97,9 @@ type Schedule interface {
 	// come, limit at most, the longest due first. One whose API key was
 	// revoked meanwhile is cancelled and not answered.
 	TakeDue(ctx context.Context, limit int) ([]Held, error)
-	// Postpone hands a taken email back to wait for another try. It,
+	// Postpone hands a taken email back to wait for another try: any
+	// address of it still sending is marked as not sent to, since the
+	// one who took it says nothing of it is with the upstream. It,
 	// Drop and Release are of one taking (Held.Claim): ErrTooLate once
 	// the email was taken again or is gone.
 	Postpone(ctx context.Context, id string, claim int, wait time.Duration) error

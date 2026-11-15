@@ -186,6 +186,26 @@ func (s *Store) newMessage(st store.Start) (string, []store.Addressee, []string)
 		if len(kept) == 0 {
 			return "", nil, dropped
 		}
+		// The first row is of an address the email goes to: it trades
+		// places with one that is left out now.
+		first := s.messages[st.ID]
+		if !slices.ContainsFunc(kept, func(a store.Addressee) bool { return a.Address == first.Recipient }) {
+			for _, id := range tried {
+				if other := s.messages[id]; other.Recipient == kept[0].Address {
+					other.Recipient, first.Recipient = first.Recipient, other.Recipient
+					s.messages[id], s.messages[st.ID] = other, first
+				}
+			}
+		}
+		// Left out: those with no row, from the first try, and those of
+		// its rows left out now.
+		var left []string
+		for _, a := range first.LeftOut {
+			if !slices.ContainsFunc(was, func(r store.Addressee) bool { return r.Address == a }) {
+				left = append(left, a)
+			}
+		}
+		dropped = append(left, dropped...)
 		for _, id := range tried {
 			m := s.messages[id]
 			if i := slices.IndexFunc(kept, func(a store.Addressee) bool { return a.Address == m.Recipient }); i >= 0 {
@@ -193,8 +213,7 @@ func (s *Store) newMessage(st store.Start) (string, []store.Addressee, []string)
 				m.State, m.Kind, m.UpdatedAt = store.StateSending, kept[i].Kind, now
 			}
 			if id == st.ID {
-				m.LeftOut = append(m.LeftOut, dropped...)
-				dropped = m.LeftOut
+				m.LeftOut = dropped
 			}
 			s.messages[id] = m
 		}
