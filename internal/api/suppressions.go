@@ -75,11 +75,7 @@ func (a *app) listSuppressions(w http.ResponseWriter, r *http.Request) {
 // addSuppression is POST /suppressions: stop sending to an address from a
 // domain. Adding one that is there already changes nothing and says so.
 func (a *app) addSuppression(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Domain  string `json:"domain"`
-		Address string `json:"address"`
-		Note    string `json:"note"`
-	}
+	var body suppressBody
 	if !a.body(w, r, &body, `The body must be JSON with "domain" and "address"; "note" is optional.`) {
 		return
 	}
@@ -93,4 +89,11 @@ func (a *app) addSuppression(w http.ResponseWriter, r *http.Request) {
 		code = http.StatusOK // it was suppressed already; nothing changed
 	}
 	write(w, code, map[string]any{"domain": s.Domain, "address": s.Address, "added": added})
+}
+
+// suppressBody is what POST /suppressions takes.
+type suppressBody struct {
+	Domain  string `json:"domain"`
+	Address string `json:"address"`
+	Note    string `json:"note"`
 }

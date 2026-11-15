@@ -1,0 +1,3877 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CairnPost",
+    "version": "0.1.0",
+    "summary": "A transactional email gateway.",
+    "description": "CairnPost sends email through a mail provider and says what became of each one. Every call answers JSON unless it says otherwise, every time is UTC, and every error is one shape: a status, a `name` a program can switch on, and a `message` for a person. A request body with a field that is not described here is refused, never read in part. What a server limits (addresses, files, the size of a batch) is set by whoever runs it, so it is not written here. A path that takes another method answers 405 `method_not_allowed` with an `Allow` header, and a path that is no call answers 404 `route_not_found`.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://cairnpost.example.com",
+      "description": "Your own server."
+    }
+  ],
+  "tags": [
+    {
+      "name": "Emails",
+      "description": "Send emails and read what became of them."
+    },
+    {
+      "name": "Templates",
+      "description": "Emails written once to be sent many times."
+    },
+    {
+      "name": "Suppressions",
+      "description": "The addresses a sending domain does not send to."
+    },
+    {
+      "name": "Webhooks",
+      "description": "URLs that are told what becomes of emails."
+    },
+    {
+      "name": "Receiving",
+      "description": "Emails that come for an address of a sending domain."
+    },
+    {
+      "name": "Server",
+      "description": "How the server stands."
+    }
+  ],
+  "security": [
+    {
+      "key": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": [
+          "Server"
+        ],
+        "summary": "Whether the server can do its work",
+        "description": "Needs no key. Says the driver, the version and whether each part is running.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The server and its database are up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "description": "The database does not answer. `status` is `unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/limits": {
+      "get": {
+        "operationId": "getLimits",
+        "tags": [
+          "Server"
+        ],
+        "summary": "The mail provider's sending allowance",
+        "description": "How much the mail provider will still send, so a caller can know before it runs out.",
+        "security": [
+          {
+            "key": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The allowance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "driver": {
+                      "type": "string"
+                    },
+                    "quota": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/Quota"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Null for a provider that has no allowance to tell."
+                    }
+                  },
+                  "required": [
+                    "driver",
+                    "quota"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "description": "The mail provider is being asked too often. `name` is one of: `rate_limit_exceeded`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "502": {
+            "description": "The mail provider did not answer about its limits. `name` is one of: `upstream_unknown`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The key could not be checked, or the mail provider refused to say its limits. `name` is one of: `unavailable`, `upstream_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "getMetrics",
+        "tags": [
+          "Server"
+        ],
+        "summary": "The server's numbers",
+        "description": "The text form Prometheus reads. A key bound to a sending domain is told of that domain's emails and endpoints only.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The numbers.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/emails": {
+      "post": {
+        "operationId": "sendEmail",
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Send one email",
+        "description": "To one address or several. It answers once the mail provider has taken the email, or, with `scheduled_at`, once it is kept to be sent then.",
+        "security": [
+          {
+            "key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A name of your own for this request. The same request sent again under the same name is the same email and is answered as the first was, so a send whose answer was lost is safe to repeat.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The email.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendEmail"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The email was taken.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sent"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "409": {
+            "description": "The `Idempotency-Key` cannot be used this way now. `name` is one of: `invalid_idempotent_request`, `concurrent_idempotent_requests`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "description": "The email is wrong as it stands, every address it names is suppressed, or the mail provider refused it for good. `name` is one of: `validation_error`, `recipient_suppressed`, `rejected_by_upstream`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The mail provider's sending limit is reached. Nothing was sent. `name` is one of: `rate_limit_exceeded`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "502": {
+            "description": "The mail provider did not answer, so the email may or may not have gone. Send it again with the same `Idempotency-Key`. `name` is one of: `upstream_unknown`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Nothing was sent. Try again later. `name` is one of: `unavailable`, `upstream_unavailable`, `schedule_full`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails/batch": {
+      "post": {
+        "operationId": "sendBatch",
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Send several emails",
+        "description": "Each is an email as `POST /emails` takes it. All are checked first, and one that could never be sent refuses the batch with nothing sent. After that the batch answers 200 or 207, never an error of one email's own. How many a batch may hold is set by the server. With an `Idempotency-Key` a batch is safe to send again as it was.",
+        "security": [
+          {
+            "key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A name of your own for this request. The same request sent again under the same name is the same email and is answered as the first was, so a send whose answer was lost is safe to repeat.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "A list of emails.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SendEmail"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The mail provider took every one. `data` says what became of each, in their order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BatchItem"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "Some were not taken. `data` says what became of each, in their order. One that was not sent carries `error`, the answer it would have had alone, whose `name` is one of: `recipient_suppressed`, `rejected_by_upstream`, `invalid_idempotent_request`, `concurrent_idempotent_requests`, `rate_limit_exceeded`, `upstream_unavailable`, `upstream_unknown`, `schedule_full`, `not_started`, `unavailable`. The `Retry-After` header is the longest wait any of them asks for.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BatchItem"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "description": "The server is taking as many large emails as it can hold, or could not check the batch. Nothing was sent. `name` is one of: `unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails/{id}": {
+      "get": {
+        "operationId": "getEmail",
+        "tags": [
+          "Emails"
+        ],
+        "summary": "What became of an email",
+        "description": "Its state, each address and each event. A key sees the emails it sent. An admin key sees any, or its sending domain's if it is bound to one, and what the email said where the server keeps that.",
+        "security": [
+          {
+            "key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Email"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "rescheduleEmail",
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Give a waiting email another time",
+        "description": "For an email that waits to be sent.",
+        "security": [
+          {
+            "key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The new time.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Reschedule"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The email, with its new time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sent"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "409": {
+            "description": "The email does not wait to be sent: it is being sent, was sent, or was cancelled. `name` is one of: `not_scheduled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/emails/{id}/cancel": {
+      "post": {
+        "operationId": "cancelEmail",
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Cancel a waiting email",
+        "description": "An email that waits to be sent will not be, and what it said is deleted.",
+        "security": [
+          {
+            "key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "cancelled"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "state"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The email does not wait to be sent: it is being sent, was sent, or was cancelled. `name` is one of: `not_scheduled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/emails/{id}/attachments/{place}": {
+      "get": {
+        "operationId": "getEmailAttachment",
+        "tags": [
+          "Emails"
+        ],
+        "summary": "One of an email's files",
+        "description": "There while the email waits to be sent, and afterwards only where the server keeps what emails say and their files, while they are kept.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the email.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "place",
+            "in": "path",
+            "required": true,
+            "description": "The file's place among the email's files, counted from 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 999999
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's bytes, always answered as a file to save.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "`attachment`, with the file's name.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/capture/emails": {
+      "get": {
+        "operationId": "listCapturedEmails",
+        "tags": [
+          "Emails"
+        ],
+        "summary": "The emails kept instead of sent",
+        "description": "Newest first. This call is there only when the server runs a development driver that keeps emails instead of sending them; otherwise the path answers 404 `route_not_found`.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The emails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CapturedEmail"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/suppressions": {
+      "get": {
+        "operationId": "listSuppressions",
+        "tags": [
+          "Suppressions"
+        ],
+        "summary": "The addresses not sent to",
+        "description": "In order of domain and address.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "query",
+            "description": "Narrows it to one sending domain.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many to answer in one page. Left out, the server's own page size is used. The server sets the largest page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "The `next` of the page before, to read the page that follows it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Suppression"
+                      }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "There when more follow: pass it as `after` to read the next page."
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "addSuppression",
+        "tags": [
+          "Suppressions"
+        ],
+        "summary": "Stop sending to an address",
+        "description": "From one sending domain. Adding one that is there already changes nothing and says so.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The address and its sending domain.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSuppression"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "It was suppressed already. Nothing changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "domain": {
+                      "type": "string"
+                    },
+                    "address": {
+                      "type": "string"
+                    },
+                    "added": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "address",
+                    "added"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Added.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "domain": {
+                      "type": "string"
+                    },
+                    "address": {
+                      "type": "string"
+                    },
+                    "added": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "address",
+                    "added"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/suppressions/lift": {
+      "post": {
+        "operationId": "liftSuppressions",
+        "tags": [
+          "Suppressions"
+        ],
+        "summary": "Send to an address again",
+        "description": "Or to every suppressed address of a domain. The address is in the body, never the URL.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Give `address`, or `all`: true.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiftSuppressions"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lifted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "lifted": {
+                      "type": "integer",
+                      "description": "How many were lifted."
+                    }
+                  },
+                  "required": [
+                    "lifted"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/inbound": {
+      "post": {
+        "operationId": "receiveEmail",
+        "tags": [
+          "Receiving"
+        ],
+        "summary": "Hand on an email that came",
+        "description": "Called by whoever takes the sending domain's incoming mail, not by a client. It carries no API key: the headers are signed under the secret that side and this server both hold, and are checked before any of the email is read. The signature is `v1=` and the HMAC-SHA256, in hex, of the timestamp, the two addresses and the digest, each behind its length as eight bytes, big end first. A server with no inbound secret answers 404 `inbound_off`.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "X-CairnPost-Timestamp",
+            "in": "header",
+            "required": true,
+            "description": "When it was handed on, in seconds since 1970.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CairnPost-To",
+            "in": "header",
+            "required": true,
+            "description": "The address it came for, as the sending server gave it. Whatever is not a printable ASCII character, and `%`, is written as `%` and two hex digits.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CairnPost-From",
+            "in": "header",
+            "required": false,
+            "description": "The address it came from, written the same way. Empty for a bounce.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CairnPost-Digest",
+            "in": "header",
+            "required": true,
+            "description": "The SHA-256 of the body, in hex.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CairnPost-Signature",
+            "in": "header",
+            "required": true,
+            "description": "The signature of the other four.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The email as it came. How large it may be is set by the server.",
+          "content": {
+            "message/rfc822": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "It was handed on before, and is kept once.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Kept.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The headers were not signed by the holder of this server's inbound secret, or too long ago. `name` is one of: `invalid_signature`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "This server takes no emails. `name` is one of: `inbound_off`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "description": "The email was not kept. Try again later. `name` is one of: `unavailable`, `inbound_full`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listReceived",
+        "tags": [
+          "Receiving"
+        ],
+        "summary": "The emails that came",
+        "description": "Those still kept, newest first, without what they say.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many to answer in one page. Left out, the server's own page size is used. The server sets the largest page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "The `next` of the page before, to read the page that follows it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the emails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Received"
+                      }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "There when more follow: pass it as `after` to read the next page."
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/inbound/{id}": {
+      "get": {
+        "operationId": "getReceived",
+        "tags": [
+          "Receiving"
+        ],
+        "summary": "An email that came, as it reads",
+        "description": "Its subject, sender, bodies, headers and the files it carries.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the email that came.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The email, with `content`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Received"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteReceived",
+        "tags": [
+          "Receiving"
+        ],
+        "summary": "Delete an email that came",
+        "description": "Before its time is up.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the email that came.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted. No body."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/inbound/{id}/raw": {
+      "get": {
+        "operationId": "getReceivedRaw",
+        "tags": [
+          "Receiving"
+        ],
+        "summary": "An email that came, as it came",
+        "description": "Every byte, as a file to save.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the email that came.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's bytes, always answered as a file to save.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "`attachment`, with the file's name.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/inbound/{id}/attachments/{place}": {
+      "get": {
+        "operationId": "getReceivedAttachment",
+        "tags": [
+          "Receiving"
+        ],
+        "summary": "One file of an email that came",
+        "description": "As a file to save.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the email that came.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "place",
+            "in": "path",
+            "required": true,
+            "description": "The file's place among the email's files, counted from 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 999999
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's bytes, always answered as a file to save.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "`attachment`, with the file's name.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/templates": {
+      "post": {
+        "operationId": "createTemplate",
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Keep a template",
+        "description": "An email written once to be sent many times. A variable is written `{{name}}`. How many templates there may be is set by the server.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The template.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewTemplate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The template.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "409": {
+            "description": "A template of this name is already there for that sending domain. `name` is one of: `name_taken`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listTemplates",
+        "tags": [
+          "Templates"
+        ],
+        "summary": "The templates",
+        "description": "Each without its bodies.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "query",
+            "description": "Narrows it to one sending domain.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The templates.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Template"
+                      }
+                    },
+                    "more": {
+                      "type": "boolean",
+                      "description": "True when the list is cut short. Ask for one sending domain's with `domain`."
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "more"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/templates/{id}": {
+      "get": {
+        "operationId": "getTemplate",
+        "tags": [
+          "Templates"
+        ],
+        "summary": "One template",
+        "description": "With its bodies and the variables it names.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the template.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The template.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateTemplate",
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Change a template",
+        "description": "What is named is changed, the rest stays. An email asked for from now on is made from it.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the template.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "What to change.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeTemplate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The template as it now is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "409": {
+            "description": "The name is in use, or the template was changed by others while this change was made. `name` is one of: `name_taken`, `changed_meanwhile`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTemplate",
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Delete a template",
+        "description": "Emails already asked for are not changed.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the template.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted. No body."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "post": {
+        "operationId": "createWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Have a URL told what becomes of emails",
+        "description": "The answer carries the signing `secret`, and no later answer does.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The endpoint.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewEndpoint"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The endpoint, with its `secret`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Endpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listWebhooks",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "The webhook endpoints",
+        "description": "Every endpoint the key may manage.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Endpoint"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "get": {
+        "operationId": "getWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "One webhook endpoint",
+        "description": "As it now stands.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the webhook endpoint.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The endpoint.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Endpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Change a webhook endpoint",
+        "description": "What is named is changed, the rest stays. It does not end a pause: `POST /webhooks/{id}/resume` does.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the webhook endpoint.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "What to change.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeEndpoint"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The endpoint as it now is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Endpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "408": {
+            "$ref": "#/components/responses/Incomplete"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Remove a webhook endpoint",
+        "description": "With all it was owed.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the webhook endpoint.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted. No body."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/deliveries": {
+      "get": {
+        "operationId": "listDeliveries",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "What an endpoint was sent",
+        "description": "And how each went, newest first.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the webhook endpoint.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Narrows it to one state.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "delivered",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many to answer in one page. Left out, the server's own page size is used. The server sets the largest page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "The `next` of the page before, to read the page that follows it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the webhooks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Delivery"
+                      }
+                    },
+                    "next": {
+                      "type": "string",
+                      "description": "There when more follow: pass it as `after` to read the next page."
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/deliveries/{delivery}/retry": {
+      "post": {
+        "operationId": "retryDelivery",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Try a webhook now",
+        "description": "Once more if it was given up, or without waiting for its next try if it is pending.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the webhook endpoint.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delivery",
+            "in": "path",
+            "required": true,
+            "description": "The webhook's id, as a list of deliveries names it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "It will be tried now.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/test": {
+      "post": {
+        "operationId": "testWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Try an endpoint out",
+        "description": "Sends it a signed webhook of type `webhook.test` now and says how it answered. Only the status and the kind of failure are said, never the endpoint's own words.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the webhook endpoint.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How the endpoint answered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "delivered": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "description": "The endpoint's answer, when it gave one."
+                    },
+                    "failure": {
+                      "type": "string",
+                      "description": "Why it failed, when it did.",
+                      "enum": [
+                        "timeout",
+                        "refused",
+                        "dns",
+                        "tls",
+                        "blocked",
+                        "status",
+                        "other"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "delivered"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/secret": {
+      "post": {
+        "operationId": "rotateWebhookSecret",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Give an endpoint a new signing secret",
+        "description": "The answer carries the new `secret`, said this once, and `previous_secret_until`: until then webhooks are signed with the old one too.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the webhook endpoint.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The endpoint, with its new `secret`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Endpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/resume": {
+      "post": {
+        "operationId": "resumeWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "End an endpoint's pause",
+        "description": "And send what it is owed. One that is not paused is answered as it is.",
+        "security": [
+          {
+            "key": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the webhook endpoint.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The endpoint.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Endpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "key": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key: `Authorization: Bearer cp_...`. A call that asks for `admin` needs a key with the admin scope."
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "No API key came with the request, or the key is not valid. `name` is one of: `missing_api_key`, `invalid_api_key`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The key may not do this: the call needs an admin key, or the key is bound to another sending domain. `name` is one of: `admin_key_required`, `domain_not_allowed`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "There is no such record. A path that is no call of the API answers `route_not_found`, which is not a missing record. `name` is one of: `not_found`, `route_not_found`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Incomplete": {
+        "description": "The request body did not arrive whole in time. Nothing was done. `name` is one of: `request_incomplete`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "The request body is larger than the server takes. `name` is one of: `request_too_large`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Invalid": {
+        "description": "The request is wrong as it stands and will not succeed if sent again unchanged. `message` says what to change. `name` is one of: `validation_error`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Failed": {
+        "description": "Something went wrong in the server. `name` is one of: `internal_error`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "The server could not do it now. Nothing was done. Try again shortly. `name` is one of: `unavailable`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "description": "The HTTP status, again."
+          },
+          "name": {
+            "type": "string",
+            "description": "What went wrong, as a name a program can switch on."
+          },
+          "message": {
+            "type": "string",
+            "description": "What went wrong and what to do, as a sentence for a person."
+          },
+          "id": {
+            "type": "string",
+            "description": "The email's id, when the send got far enough to have one. `GET /emails/{id}` says what became of it."
+          }
+        },
+        "required": [
+          "statusCode",
+          "name",
+          "message"
+        ],
+        "description": "Every error's body."
+      },
+      "SendEmail": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "An email address, bare or with a name: `Ada <ada@example.com>`."
+          },
+          "to": {
+            "description": "One address, or a list of them.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "cc": {
+            "description": "One address, or a list of them.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bcc": {
+            "description": "One address, or a list of them.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reply_to": {
+            "type": "string",
+            "description": "The address answers go to."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string",
+            "description": "The email as HTML."
+          },
+          "text": {
+            "type": "string",
+            "description": "The email as plain text."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Headers of the email, by name."
+          },
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When to send it, as a time with its zone. Left out, it is sent now."
+          },
+          "template": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The template's name."
+              },
+              "variables": {
+                "type": "object",
+                "description": "What to fill the template's variables with, by name.",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false,
+            "description": "A template to make the email from, in place of `html` and `text`. The template's subject is used unless `subject` is given."
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "filename": {
+                  "type": "string",
+                  "description": "A name, not a path."
+                },
+                "content": {
+                  "type": "string",
+                  "contentEncoding": "base64",
+                  "description": "The file's bytes in base64."
+                },
+                "content_type": {
+                  "type": "string",
+                  "description": "A media type. Left out, it is told from the filename's ending."
+                },
+                "content_id": {
+                  "type": "string",
+                  "description": "Give it one and the HTML can show the file: `<img src=\"cid:logo\">` for `logo`."
+                }
+              },
+              "required": [
+                "filename",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Files to send with the email. How many and how large is set by the server."
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false,
+        "description": "One email. It needs `subject` and `html` or `text` or both, or a `template`, which gives all three. A field that is not listed here is refused, never dropped. How many addresses an email may name is set by the server."
+      },
+      "Sent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The email's id."
+          },
+          "suppressed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses it was not sent to, being on the sending domain's suppression list. Left out when it went to all."
+          },
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it will be sent, for an email that waits."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "ItemProblem": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "description": "The HTTP status, again."
+          },
+          "name": {
+            "type": "string",
+            "description": "What went wrong, as a name a program can switch on."
+          },
+          "message": {
+            "type": "string",
+            "description": "What went wrong and what to do, as a sentence for a person."
+          },
+          "id": {
+            "type": "string",
+            "description": "The email's id, when the send got far enough to have one. `GET /emails/{id}` says what became of it."
+          },
+          "retry_after": {
+            "type": "integer",
+            "description": "The seconds its `Retry-After` header would have said, had it been sent alone."
+          }
+        },
+        "required": [
+          "statusCode",
+          "name",
+          "message"
+        ],
+        "description": "Why one email of a batch was not sent: the answer it would have had alone."
+      },
+      "BatchItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The email's id. An error can carry one too, as a send's does."
+          },
+          "suppressed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it will be sent, for an email that waits."
+          },
+          "error": {
+            "$ref": "#/components/schemas/ItemProblem"
+          }
+        },
+        "description": "What became of one email of a batch: its id, or why it was not sent."
+      },
+      "Recipient": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "to",
+              "cc",
+              "bcc"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "description": "What became of the email at this address."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When that was last heard."
+          }
+        },
+        "required": [
+          "address",
+          "kind",
+          "state",
+          "updated_at"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "delivered",
+              "deferred",
+              "bounced",
+              "complained",
+              "failed"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it happened."
+          },
+          "to": {
+            "type": "string",
+            "description": "The address it happened at."
+          },
+          "permanent": {
+            "type": "boolean",
+            "description": "For a bounce: the address will never take mail."
+          },
+          "code": {
+            "type": "string",
+            "description": "The receiving server's status, such as `5.1.1`."
+          },
+          "reason": {
+            "type": "string",
+            "description": "The mail provider's short name for what happened."
+          },
+          "detail": {
+            "type": "string",
+            "description": "The receiving server's own sentence. Shown under the rule for an email's content, since it can quote the email."
+          }
+        },
+        "required": [
+          "type",
+          "at",
+          "to"
+        ],
+        "description": "One thing that happened to an email after it was sent."
+      },
+      "File": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "content_id": {
+            "type": "string",
+            "description": "Set for a file the HTML shows."
+          },
+          "size": {
+            "type": "integer",
+            "description": "Its size in bytes."
+          },
+          "kept": {
+            "type": "boolean",
+            "description": "True when what the file held can still be read."
+          }
+        },
+        "required": [
+          "filename",
+          "content_type",
+          "size"
+        ],
+        "description": "What a file sent with an email was, without its bytes."
+      },
+      "Content": {
+        "type": "object",
+        "properties": {
+          "from_name": {
+            "type": "string"
+          },
+          "reply_to": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Headers of the email, by name."
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/File"
+            }
+          },
+          "kept_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it stops being shown. It is deleted soon after."
+          }
+        },
+        "required": [
+          "subject",
+          "kept_until"
+        ],
+        "description": "What an email said. There only where the server keeps it, while it is kept, and for an admin key."
+      },
+      "Email": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string",
+            "description": "The first address the email was sent to. `recipients` has every one."
+          },
+          "state": {
+            "type": "string",
+            "description": "What became of the email.",
+            "enum": [
+              "scheduled",
+              "sending",
+              "sent",
+              "deferred",
+              "delivered",
+              "bounced",
+              "complained",
+              "failed",
+              "unknown",
+              "cancelled"
+            ]
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          },
+          "suppressed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses it was asked to go to and did not, being on the suppression list."
+          },
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When an email that waits will be sent, or would have been had it not been cancelled."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it was cancelled when nobody asked.",
+            "enum": [
+              "suppressed",
+              "key_revoked",
+              "failed"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was asked for."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When something was last heard of it."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          },
+          "content": {
+            "$ref": "#/components/schemas/Content"
+          }
+        },
+        "required": [
+          "id",
+          "from",
+          "to",
+          "state",
+          "recipients",
+          "created_at",
+          "updated_at",
+          "events"
+        ]
+      },
+      "CapturedEmail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was kept."
+          },
+          "from": {
+            "type": "string"
+          },
+          "from_name": {
+            "type": "string"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reply_to": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Headers of the email, by name."
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/File"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "from",
+          "to",
+          "subject"
+        ],
+        "description": "An email a development driver kept instead of sending."
+      },
+      "Quota": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "How many emails the provider sends in one period."
+          },
+          "per": {
+            "type": "string",
+            "description": "The period, as the provider names it."
+          },
+          "used": {
+            "type": "integer"
+          },
+          "over": {
+            "type": "boolean",
+            "description": "True when the allowance is used up."
+          },
+          "resets_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the period ends, if the provider says."
+          }
+        },
+        "required": [
+          "limit",
+          "per",
+          "used",
+          "over"
+        ],
+        "description": "The mail provider's sending allowance and how much of it is used."
+      },
+      "Suppression": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The sending domain."
+          },
+          "address": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "bounce",
+              "complaint",
+              "manual"
+            ]
+          },
+          "email_id": {
+            "type": "string",
+            "description": "The email whose bounce or complaint caused it."
+          },
+          "note": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was added."
+          }
+        },
+        "required": [
+          "domain",
+          "address",
+          "reason",
+          "created_at"
+        ],
+        "description": "An address a sending domain does not send to."
+      },
+      "Variable": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "default": {
+            "type": "string",
+            "description": "What it is filled with when a send gives it no value. Absent for one a send must give."
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "required"
+        ],
+        "description": "A variable a template names, written `{{name}}` in it."
+      },
+      "Template": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string",
+            "description": "The sending domain it belongs to. Absent for one that serves every domain."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string",
+            "description": "Left out of a list."
+          },
+          "text": {
+            "type": "string",
+            "description": "Left out of a list."
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Variable"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was made."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was last changed."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "subject",
+          "variables",
+          "created_at",
+          "updated_at"
+        ],
+        "description": "An email written once to be sent many times."
+      },
+      "Endpoint": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "domain": {
+            "type": "string",
+            "description": "The sending domain it hears about. Absent for all."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "address.suppressed",
+                "email.bounced",
+                "email.complained",
+                "email.delivered",
+                "email.delivery_delayed",
+                "email.failed",
+                "email.received"
+              ]
+            },
+            "description": "The types it hears about. Empty for all."
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was made."
+          },
+          "failing_since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Set while every try since then has failed."
+          },
+          "paused_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Set while the endpoint is paused for failing too long. It is still owed what happens, and nothing is sent to it."
+          },
+          "previous_secret_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Set after the signing secret was changed. Until then webhooks are signed with the one before as well."
+          },
+          "secret": {
+            "type": "string",
+            "description": "The signing secret. Said once: when the endpoint is made, and when its secret is changed."
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "events",
+          "enabled",
+          "created_at"
+        ],
+        "description": "A URL that is told what becomes of emails."
+      },
+      "Delivery": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The webhook's id, as the endpoint was given it."
+          },
+          "email_id": {
+            "type": "string",
+            "description": "The email the webhook is about. Absent for one about no email."
+          },
+          "type": {
+            "type": "string",
+            "description": "The webhook's type, such as `email.delivered`."
+          },
+          "inbound_id": {
+            "type": "string",
+            "description": "The email that came, for an `email.received`."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "delivered",
+              "failed"
+            ],
+            "description": "`failed` is given up."
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "last_status": {
+            "type": "integer",
+            "description": "The endpoint's last answer."
+          },
+          "last_failure": {
+            "type": "string",
+            "enum": [
+              "timeout",
+              "refused",
+              "dns",
+              "tls",
+              "blocked",
+              "status",
+              "other"
+            ],
+            "description": "Why the last try failed."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was first owed."
+          },
+          "attempted_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was last tried."
+          },
+          "delivered_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the endpoint took it."
+          },
+          "next_attempt_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it is tried next, while pending."
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "state",
+          "attempts",
+          "created_at"
+        ],
+        "description": "One webhook an endpoint was sent, and how it went."
+      },
+      "Header": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ]
+      },
+      "ReceivedFile": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "content_id": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "description": "Its size in bytes."
+          }
+        },
+        "required": [
+          "filename",
+          "content_type",
+          "size"
+        ],
+        "description": "A file that came with an email."
+      },
+      "ReceivedContent": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reply_to": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the email says it was written."
+          },
+          "text": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Header"
+            }
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivedFile"
+            },
+            "description": "Its files, in the order they came. A file's place counts from 1."
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "True when some of it could not be read as it was written. The email as it came holds all of it."
+          }
+        },
+        "required": [
+          "subject",
+          "from"
+        ],
+        "description": "An email that came, as it reads. The email as it came is the record; this is a reading of it."
+      },
+      "Received": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string",
+            "description": "The address it came for."
+          },
+          "from": {
+            "type": "string",
+            "description": "Who it came from, as the sending server said. Absent for a bounce."
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it came."
+          },
+          "kept_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it stops being shown. It is deleted soon after."
+          },
+          "size": {
+            "type": "integer",
+            "description": "Its size in bytes."
+          },
+          "content": {
+            "$ref": "#/components/schemas/ReceivedContent"
+          }
+        },
+        "required": [
+          "id",
+          "to",
+          "received_at",
+          "kept_until",
+          "size"
+        ],
+        "description": "An email that came for an address of a sending domain. `content` is left out of a list."
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "driver": {
+            "type": "string",
+            "description": "The mail provider's driver in use."
+          },
+          "version": {
+            "type": "string"
+          },
+          "events": {
+            "type": "string",
+            "enum": [
+              "off",
+              "reading",
+              "failing"
+            ]
+          },
+          "webhooks": {
+            "type": "string",
+            "enum": [
+              "off",
+              "sending",
+              "failing"
+            ]
+          },
+          "pruning": {
+            "type": "string",
+            "enum": [
+              "off",
+              "running",
+              "failing"
+            ]
+          },
+          "scheduled": {
+            "type": "string",
+            "enum": [
+              "off",
+              "sending",
+              "failing"
+            ]
+          },
+          "inbound": {
+            "type": "string",
+            "enum": [
+              "off",
+              "on"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "driver",
+          "version",
+          "events",
+          "webhooks",
+          "pruning",
+          "scheduled",
+          "inbound"
+        ]
+      },
+      "Reschedule": {
+        "type": "object",
+        "properties": {
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The time to send the email at, with its zone."
+          }
+        },
+        "required": [
+          "scheduled_at"
+        ],
+        "additionalProperties": false
+      },
+      "AddSuppression": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "description": "One line of your own."
+          }
+        },
+        "required": [
+          "domain",
+          "address"
+        ],
+        "additionalProperties": false
+      },
+      "LiftSuppressions": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string",
+            "description": "The address to send to again."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "True to lift every suppression of the domain, in place of `address`."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "bounce",
+              "complaint",
+              "manual"
+            ],
+            "description": "With `all`, narrows it to one reason."
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false
+      },
+      "NewTemplate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string",
+            "description": "The sending domain it is for. Left out, it is for the key's own sending domain, or for every domain when the key is bound to none."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "defaults": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What a variable is filled with when a send gives it no value, by name."
+          }
+        },
+        "required": [
+          "name",
+          "subject"
+        ],
+        "additionalProperties": false,
+        "description": "It needs `html` or `text` or both."
+      },
+      "ChangeTemplate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "defaults": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What a variable is filled with when a send gives it no value, by name."
+          }
+        },
+        "additionalProperties": false,
+        "description": "What is named is changed, the rest stays."
+      },
+      "NewEndpoint": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "domain": {
+            "type": "string",
+            "description": "The sending domain it is for. Left out, it is for the key's own sending domain, or for every domain when the key is bound to none."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "address.suppressed",
+                "email.bounced",
+                "email.complained",
+                "email.delivered",
+                "email.delivery_delayed",
+                "email.failed",
+                "email.received"
+              ]
+            },
+            "description": "The types it hears about. Empty for all."
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "ChangeEndpoint": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "address.suppressed",
+                "email.bounced",
+                "email.complained",
+                "email.delivered",
+                "email.delivery_delayed",
+                "email.failed",
+                "email.received"
+              ]
+            },
+            "description": "The types it hears about. Empty for all."
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "False stops it being told anything new. It does not end a pause."
+          }
+        },
+        "additionalProperties": false,
+        "description": "What is named is changed, the rest stays."
+      }
+    }
+  }
+}

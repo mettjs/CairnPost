@@ -162,6 +162,9 @@ Every change a user of CairnPost can notice is written here. The format is
   domain, and what became of them, counted apart from the emails' records
   and kept for `CAIRNPOST_COUNTS_RETENTION` (62 days) whatever
   `CAIRNPOST_RETENTION` is.
+- `openapi.json`: the whole API written down for programs (OpenAPI 3.1),
+  for client generators and API browsers. A test holds its calls, keys,
+  fields and listed values to the code.
 - `cairnpost serve`, `migrate`, `send` and `version`; a Dockerfile and a
   Compose file with Postgres 18.
 - Images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`, published with

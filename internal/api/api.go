@@ -73,43 +73,16 @@ type Deps struct {
 func New(d Deps) http.Handler {
 	a := &app{Deps: d}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", a.health)
-	mux.Handle("POST /emails", a.auth(false, a.sendEmail))
-	mux.Handle("POST /emails/batch", a.auth(false, a.sendBatch))
-	mux.Handle("GET /emails/{id}", a.auth(false, a.getEmail))
-	mux.Handle("GET /emails/{id}/attachments/{place}", a.auth(true, a.getAttachment))
-	mux.Handle("PATCH /emails/{id}", a.auth(false, a.rescheduleEmail))
-	mux.Handle("POST /emails/{id}/cancel", a.auth(false, a.cancelEmail))
-	mux.Handle("GET /limits", a.auth(false, a.limits))
-	mux.Handle("GET /metrics", a.auth(true, a.metrics))
-	mux.Handle("GET /suppressions", a.auth(true, a.listSuppressions))
-	mux.Handle("POST /suppressions", a.auth(true, a.addSuppression))
-	mux.Handle("POST /suppressions/lift", a.auth(true, a.liftSuppressions))
-	if d.Inbound != nil {
-		mux.HandleFunc("POST /inbound", a.receive)
-		mux.Handle("GET /inbound", a.auth(true, a.listInbound))
-		mux.Handle("GET /inbound/{id}", a.auth(true, a.getInbound))
-		mux.Handle("GET /inbound/{id}/raw", a.auth(true, a.getInboundRaw))
-		mux.Handle("GET /inbound/{id}/attachments/{place}", a.auth(true, a.getInboundFile))
-		mux.Handle("DELETE /inbound/{id}", a.auth(true, a.deleteInbound))
-	}
-	mux.Handle("POST /templates", a.auth(true, a.createTemplate))
-	mux.Handle("GET /templates", a.auth(true, a.listTemplates))
-	mux.Handle("GET /templates/{id}", a.auth(true, a.getTemplate))
-	mux.Handle("PATCH /templates/{id}", a.auth(true, a.updateTemplate))
-	mux.Handle("DELETE /templates/{id}", a.auth(true, a.deleteTemplate))
-	mux.Handle("POST /webhooks", a.auth(true, a.createWebhook))
-	mux.Handle("GET /webhooks", a.auth(true, a.listWebhooks))
-	mux.Handle("GET /webhooks/{id}", a.auth(true, a.getWebhook))
-	mux.Handle("PATCH /webhooks/{id}", a.auth(true, a.updateWebhook))
-	mux.Handle("DELETE /webhooks/{id}", a.auth(true, a.deleteWebhook))
-	mux.Handle("GET /webhooks/{id}/deliveries", a.auth(true, a.listDeliveries))
-	mux.Handle("POST /webhooks/{id}/deliveries/{delivery}/retry", a.auth(true, a.retryDelivery))
-	mux.Handle("POST /webhooks/{id}/test", a.auth(true, a.testWebhook))
-	mux.Handle("POST /webhooks/{id}/secret", a.auth(true, a.rotateWebhookSecret))
-	mux.Handle("POST /webhooks/{id}/resume", a.auth(true, a.resumeWebhook))
-	if d.Captured != nil {
-		mux.Handle("GET /capture/emails", a.auth(true, a.captured))
+	for _, r := range routes {
+		if r.when != nil && !r.when(d) {
+			continue
+		}
+		serve := r.serve(a)
+		if r.key == KeyNone {
+			mux.Handle(r.pattern, serve)
+			continue
+		}
+		mux.Handle(r.pattern, a.auth(r.key == KeyAdmin, serve))
 	}
 	return a.logged(unrouted(mux))
 }
