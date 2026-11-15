@@ -234,7 +234,7 @@ func (s *Store) newMessage(st store.Start) (string, []store.Addressee, []string)
 		s.count(m, "", m.State)
 	}
 	if email != "" && st.Content != nil {
-		s.contents[email] = content{raw: bytes.Clone(st.Content()), sent: now, expires: now.Add(st.KeepContent)}
+		s.contents[email] = content{raw: bytes.Clone(st.Content()), files: slices.Clone(st.Files), sent: now, expires: now.Add(st.KeepContent)}
 	}
 	return email, kept, dropped
 }
@@ -242,7 +242,9 @@ func (s *Store) newMessage(st store.Start) (string, []store.Addressee, []string)
 // content is words kept: an email's, or a receiving server's about it.
 // sent is when the email was, and expires when the words are to go.
 type content struct {
-	raw           []byte
+	raw []byte
+	// files are an email's files, kept with its words.
+	files         []store.HeldFile
 	sent, expires time.Time
 }
 
@@ -266,6 +268,19 @@ func (s *Store) Content(_ context.Context, id string, keep time.Duration) ([]byt
 		return nil, time.Time{}, nil
 	}
 	return bytes.Clone(c.raw), until, nil
+}
+
+// File implements store.Mail.
+func (s *Store) File(_ context.Context, id string, place int, keep time.Duration) (*store.HeldFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, kept := s.contents[id]
+	if _, shown := c.shown(s.Now(), keep); !kept || !shown || place < 0 || place >= len(c.files) {
+		return nil, nil
+	}
+	f := c.files[place]
+	f.Content = bytes.Clone(f.Content)
+	return &f, nil
 }
 
 // setState moves one address's row.

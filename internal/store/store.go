@@ -197,6 +197,9 @@ type Start struct {
 	// recorded, and the store keeps the answer as it comes, unread.
 	Content     func() []byte
 	KeepContent time.Duration
+	// Files are the email's files, to be kept with what it said and for
+	// as long; none when what it said is not kept, or its files are not.
+	Files []HeldFile
 }
 
 // Mail keeps messages and the idempotency keys they were sent under.
@@ -227,6 +230,9 @@ type Mail interface {
 	// than keep. Nil otherwise: what is past its time is not answered
 	// even before it is pruned, nor what a longer setting once kept.
 	Content(ctx context.Context, id string, keep time.Duration) ([]byte, time.Time, error)
+	// File answers one of the files kept with what a message said, by
+	// its place from 0, under Content's rule; nil when there is none.
+	File(ctx context.Context, id string, place int, keep time.Duration) (*HeldFile, error)
 }
 
 // Store is everything, as the composition root holds it.
