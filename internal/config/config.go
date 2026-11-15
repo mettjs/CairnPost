@@ -112,6 +112,8 @@ type Config struct {
 	// MaxKeys is CAIRNPOST_MAX_KEYS: how many live API keys one sending
 	// domain may have, and how many bound to none. Default 200.
 	MaxKeys int
+	// Inbound is how emails that come are taken and kept.
+	Inbound Inbound
 	// MaxTemplates is CAIRNPOST_MAX_TEMPLATES: how many templates one
 	// sending domain may have, and how many may serve every domain.
 	// Default 200.
@@ -343,6 +345,13 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if c.MaxKeys, err = MaxKeys(getenv); err != nil {
 		return c, err
+	}
+	if c.Inbound, err = inbound(getenv); err != nil {
+		return c, err
+	}
+	if c.Inbound.Secret != "" && c.MaxUploadBytes < c.Inbound.MaxBytes {
+		return c, fmt.Errorf("config: CAIRNPOST_MAX_UPLOAD_BYTES (%d) must be at least CAIRNPOST_INBOUND_MAX_BYTES (%d), "+
+			"or one email that comes could not be taken", c.MaxUploadBytes, c.Inbound.MaxBytes)
 	}
 	templatesMost, err := number(getenv, "CAIRNPOST_MAX_TEMPLATES", 200)
 	if err == nil && templatesMost > 100000 {

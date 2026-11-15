@@ -15,6 +15,8 @@ type delivery struct {
 	event store.Event
 	// about is the suppression it tells of, for one that tells of no event.
 	about *store.Suppression
+	// came is the email that came it tells of, for one that tells of that.
+	came *store.Inbound
 	// taken is until when a try in progress holds it, nil for none.
 	taken *time.Time
 }
@@ -58,11 +60,17 @@ func (s *Store) TakeDeliveries(_ context.Context, max, perEndpoint int, busy []s
 			d.NextAt.After(now) || !free || taken[end.ID] == perEndpoint {
 			continue
 		}
+		// An email that came and whose time is up is told of no more.
+		if d.came != nil {
+			if _, shown := s.shownInbound(d.came.ID); !shown {
+				continue
+			}
+		}
 		taken[end.ID]++
 		until := now.Add(lease)
 		d.Attempts, d.AttemptedAt, d.taken = d.Attempts+1, &now, &until
-		due := store.Due{Delivery: d.Delivery, Endpoint: s.shown(end), Suppression: d.about}
-		if d.about == nil {
+		due := store.Due{Delivery: d.Delivery, Endpoint: s.shown(end), Suppression: d.about, Inbound: d.came}
+		if d.about == nil && d.came == nil {
 			// The email is named by its own id, and the address is the
 			// one the event is about.
 			due.Event, due.Message = d.event, s.messages[d.MessageID]

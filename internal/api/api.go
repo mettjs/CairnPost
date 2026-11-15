@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mettjs/cairnpost/internal/driver"
+	"github.com/mettjs/cairnpost/internal/inbound"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/metrics"
@@ -24,6 +25,8 @@ type Deps struct {
 	Keys     *keys.Service
 	Suppress *suppress.Service
 	Webhooks *webhook.Service
+	// Inbound takes the emails that come and reads them.
+	Inbound *inbound.Service
 	// Templates are the emails written once to be sent many times.
 	Templates *templates.Service
 	// Ping reports whether the store answers, for GET /health.
@@ -82,6 +85,14 @@ func New(d Deps) http.Handler {
 	mux.Handle("GET /suppressions", a.auth(true, a.listSuppressions))
 	mux.Handle("POST /suppressions", a.auth(true, a.addSuppression))
 	mux.Handle("POST /suppressions/lift", a.auth(true, a.liftSuppressions))
+	if d.Inbound != nil {
+		mux.HandleFunc("POST /inbound", a.receive)
+		mux.Handle("GET /inbound", a.auth(true, a.listInbound))
+		mux.Handle("GET /inbound/{id}", a.auth(true, a.getInbound))
+		mux.Handle("GET /inbound/{id}/raw", a.auth(true, a.getInboundRaw))
+		mux.Handle("GET /inbound/{id}/attachments/{place}", a.auth(true, a.getInboundFile))
+		mux.Handle("DELETE /inbound/{id}", a.auth(true, a.deleteInbound))
+	}
 	mux.Handle("POST /templates", a.auth(true, a.createTemplate))
 	mux.Handle("GET /templates", a.auth(true, a.listTemplates))
 	mux.Handle("GET /templates/{id}", a.auth(true, a.getTemplate))
@@ -190,7 +201,10 @@ func (a *app) logged(next http.Handler) http.Handler {
 func (a *app) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version, "events": "off", "webhooks": "off", "pruning": "off", "scheduled": "off"}
+	body := map[string]string{"status": "ok", "driver": a.Driver, "version": a.Version, "events": "off", "webhooks": "off", "pruning": "off", "scheduled": "off", "inbound": "off"}
+	if a.Inbound != nil && a.Inbound.On() {
+		body["inbound"] = "on"
+	}
 	if a.Sending != nil {
 		body["webhooks"] = "sending"
 		if !a.Sending() {

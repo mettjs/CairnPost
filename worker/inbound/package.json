@@ -1,0 +1,5 @@
+{
+  "name": "cairnpost-inbound",
+  "private": true,
+  "type": "module"
+}

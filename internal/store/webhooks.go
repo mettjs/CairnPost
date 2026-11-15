@@ -65,9 +65,11 @@ type Delivery struct {
 	ID         string
 	EndpointID string
 	// Kind and MessageID are the event's; for a suppression told on its
-	// own, Kind is KindSuppressed and MessageID "".
+	// own, Kind is KindSuppressed and MessageID "". For an email that
+	// came, Kind is KindReceived and InboundID its id.
 	Kind      string
 	MessageID string
+	InboundID string
 	State     string
 	Attempts  int
 	// NextAt is when a pending delivery is tried next.
@@ -90,6 +92,9 @@ type Due struct {
 	// Suppression is set, and Event and Message are not, for a delivery
 	// that tells of a suppression on its own.
 	Suppression *Suppression
+	// Inbound is set, and nothing else, for a delivery that tells of an
+	// email that came: its id, addresses and time only.
+	Inbound *Inbound
 }
 
 // Webhooks keeps the endpoints and what they are owed. An event recorded

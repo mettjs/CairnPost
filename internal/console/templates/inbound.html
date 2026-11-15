@@ -1,0 +1,53 @@
+{{define "title"}}Received email{{end}}
+{{define "main"}}
+<p class="back"><a href="{{.Root}}/emails?tab=received">Received emails</a></p>
+<h1 class="long">Email for {{.Data.Email.Recipient}}</h1>
+<p class="lede">It came <time datetime="{{stamp .Data.Email.ReceivedAt}}">{{when .Zone .Data.Email.ReceivedAt}}</time> and is kept until <time datetime="{{stamp .Data.Email.ExpiresAt}}">{{when .Zone .Data.Email.ExpiresAt}}</time>, then deleted.</p>
+
+<dl class="facts">
+  <div><dt>Came for</dt><dd class="long">{{.Data.Email.Recipient}}</dd></div>
+  <div><dt>Came from</dt><dd class="long">{{if .Data.Email.Sender}}{{.Data.Email.Sender}}{{else}}Nobody: a mail server's own notice, such as a bounce{{end}}<br><span class="by">As the sending server said. The From below is what the email says of itself, and need not be the same.</span></dd></div>
+  <div><dt>Size</dt><dd>{{size .Data.Email.Bytes}}</dd></div>
+</dl>
+
+<section aria-labelledby="said">
+  <h2 id="said">What it says</h2>
+  <p class="hint">Shown as it was written, not as a mail program would draw it.{{if .Data.Says.Partial}} Part of it could not be read as it was written, so what is here may be incomplete or marked; the email as it came holds all of it.{{end}}</p>
+  <dl class="facts">
+    <div><dt>Subject</dt><dd class="long">{{if .Data.Says.Subject}}{{.Data.Says.Subject}}{{else}}<span class="by">None</span>{{end}}</dd></div>
+    <div><dt>From</dt><dd class="long">{{if .Data.Says.From}}{{.Data.Says.From}}{{else}}<span class="by">Not said</span>{{end}}</dd></div>
+    {{with .Data.Says.To}}<div><dt>To</dt><dd class="long">{{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}</dd></div>{{end}}
+    {{with .Data.Says.Cc}}<div><dt>Cc</dt><dd class="long">{{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}</dd></div>{{end}}
+    {{with .Data.Says.ReplyTo}}<div><dt>Replies go to</dt><dd class="long">{{.}}</dd></div>{{end}}
+    {{if not .Data.Says.Date.IsZero}}<div><dt>Dated</dt><dd><time datetime="{{stamp .Data.Says.Date}}">{{when $.Zone .Data.Says.Date}}</time></dd></div>{{end}}
+    {{with .Data.Says.Text}}<div><dt>Text</dt><dd><pre class="said" tabindex="0">{{.}}</pre></dd></div>{{end}}
+    {{with .Data.Says.HTML}}<div><dt>HTML, as source</dt><dd><pre class="said" tabindex="0">{{.}}</pre></dd></div>{{end}}
+    {{if and (not .Data.Says.Text) (not .Data.Says.HTML)}}<div><dt>Body</dt><dd><span class="by">It has no text to show.</span></dd></div>{{end}}
+    {{if .Data.Says.Attachments}}<div><dt>Files</dt><dd><ul class="files">{{range $i, $f := .Data.Says.Attachments}}
+      <li><a class="long" href="{{$.Root}}/inbound/{{$.Data.Email.ID}}/files/{{plus $i 1}}" download>{{$f.Filename}}</a><span class="by long">{{$f.ContentType}}, {{size $f.Size}}{{if $f.ContentID}}, shown in the HTML as {{$f.ContentID}}{{end}}</span></li>{{end}}
+    </ul><span class="by">A stranger sent these. A file is saved to your device, never opened here.</span></dd></div>{{end}}
+  </dl>
+</section>
+
+{{if .Data.Says.Headers}}
+<details class="fold">
+  <summary>Its headers</summary>
+  <pre class="said" tabindex="0">{{range .Data.Says.Headers}}{{.Name}}: {{.Value}}
+{{end}}</pre>
+</details>
+{{end}}
+<details class="fold">
+  <summary>Its name in the API</summary>
+  <dl class="facts"><div><dt>In the API</dt><dd><code>{{.Data.Email.ID}}</code></dd></div></dl>
+</details>
+
+<section aria-labelledby="whole">
+  <h2 id="whole">The email as it came</h2>
+  <p>Every byte of it, as a file a mail program can open. <a href="{{.Root}}/inbound/{{.Data.Email.ID}}/raw" download>Save it</a></p>
+</section>
+
+<section aria-labelledby="remove">
+  <h2 id="remove">Delete it</h2>
+  <p>It is deleted when its time is up. To delete it now: <a class="danger" href="{{.Root}}/inbound/{{.Data.Email.ID}}/delete">Delete this email</a></p>
+</section>
+{{end}}

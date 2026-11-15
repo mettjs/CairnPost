@@ -97,7 +97,33 @@ func TestATemplatesValuesAreKeptAndLoggedNowhere(t *testing.T) {
 			t.Fatalf("the email was filled as %+v", m)
 		}
 	}
+	// The template gone, what was asked before under a key is answered
+	// as it was, alone and in a batch, and nothing new is.
+	batch := `[{"from":"app@` + domain + `","to":"batch-` + k.Prefix + `@example.org","template":{"name":"mark","variables":{"code":"VALUEMARKQ"}}}]`
+	if code, out := ask("POST", "/emails/batch", "tpl-b", batch); code != 200 {
+		t.Fatalf("the batch: %d %v", code, out)
+	}
 	everywhere, elsewhere := dump(t, dsn), dump(t, dsn, "templates")
+	if code, _ := ask("DELETE", "/templates/"+made["id"].(string), "", ""); code != 204 {
+		t.Fatalf("the template deleted: %d", code)
+	}
+	if code, out := send("tpl-1", `"code":"VALUEMARKQ"`); code != 200 {
+		t.Errorf("the repeat, the template gone: %d %v", code, out)
+	}
+	if code, out := ask("POST", "/emails/batch", "tpl-b", batch); code != 200 {
+		t.Errorf("the batch again, the template gone: %d %v", code, out)
+	}
+	for _, idem := range []string{"", "tpl-new"} {
+		if code, _ := send(idem, `"code":"VALUEMARKQ"`); code != 422 {
+			t.Errorf("a new request, the template gone (key %q): %d", idem, code)
+		}
+	}
+	if code, _ := ask("POST", "/emails/batch", "tpl-b2", batch); code != 422 {
+		t.Errorf("a new batch, the template gone: %d", code)
+	}
+	if n := len(held.Held()); n != 2 {
+		t.Errorf("%d emails went", n)
+	}
 	if !strings.Contains(everywhere, "TPLSUBJECTQ") || !strings.Contains(elsewhere, k.ID) {
 		t.Fatal("the dump cannot read the template, or is empty of this test; the check proves nothing")
 	}

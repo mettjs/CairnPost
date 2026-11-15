@@ -46,6 +46,14 @@ Every change a user of CairnPost can notice is written here. The format is
   all (`CAIRNPOST_MAX_TEMPLATES` to each); `GET`, `PATCH` and `DELETE
   /templates/{id}`; a Templates page in the console; `cairnpost send
   -template -var`.
+- Receiving email: with `CAIRNPOST_INBOUND_SECRET` set, the Worker in
+  `worker/inbound` hands on the emails Cloudflare receives for your
+  addresses, signed, to `POST /inbound`. Each is kept as it came for
+  `CAIRNPOST_INBOUND_RETENTION` (7 days), told to endpoints as
+  `email.received`, and read by an admin key: `GET /inbound`,
+  `GET /inbound/{id}`, `.../raw`, `.../attachments/{place}`,
+  `DELETE /inbound/{id}`. A "Received" part of the console's Emails page;
+  `"inbound"` in `GET /health`; `cairnpost_inbound_emails`.
 - The `smtp` driver: send through any mail server that takes mail by SMTP
   (`CAIRNPOST_SMTP_*`), secured by STARTTLS or TLS, signed in by PLAIN or
   LOGIN. Such a server reports nothing after it took an email, so records

@@ -17,6 +17,7 @@ import (
 
 	"github.com/mettjs/cairnpost/internal/api"
 	"github.com/mettjs/cairnpost/internal/driver"
+	"github.com/mettjs/cairnpost/internal/inbound"
 	"github.com/mettjs/cairnpost/internal/keys"
 	"github.com/mettjs/cairnpost/internal/mail"
 	"github.com/mettjs/cairnpost/internal/store"
@@ -56,6 +57,9 @@ type down struct{ store.Store }
 func (down) Start(context.Context, store.Start) (store.Claim, error) {
 	return store.Claim{}, errors.New("the database is gone")
 }
+
+// inboundSecret is what the rig's emails are handed on under.
+const inboundSecret = "inbound-secret-of-the-test-rig-0123456789"
 
 type rig struct {
 	t           *testing.T
@@ -110,6 +114,7 @@ func newRigBuilt(t *testing.T, s store.Store, adjust func(*api.Deps)) *rig {
 		Mail: mail.New(s, drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: time.Hour,
 			InDoubtWindow: time.Minute, Templates: written, MaxFilled: 600}, log),
 		Templates: written,
+		Inbound:   inbound.New(s, inbound.Options{Secret: inboundSecret, Room: 4000}),
 		Keys:      ks, Suppress: suppress.New(s), Ping: s.Ping,
 		Webhooks: webhook.NewService(s, webhook.NewPoster(time.Second, true, 2, "test", time.Now), true, 20, 24*time.Hour, time.Now), Driver: "fake", Version: "test", MaxBodyBytes: 4096, Log: log,
 		Captured: func() []api.CapturedEmail {

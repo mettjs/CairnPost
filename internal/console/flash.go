@@ -27,6 +27,7 @@ var notices = map[string]string{
 	"suppressed-already":  "That address was suppressed for that domain already. Nothing changed.",
 	"lifted":              "The suppression was lifted. Emails go to that address again.",
 	"lifted-already":      "That address was no longer suppressed. Nothing changed.",
+	"inbound-deleted":     "The email was deleted.",
 	"template-made":       "The template was made. A send can name it now.",
 	"template-changed":    "The template was changed. Emails asked for from now on are made from it.",
 	"template-deleted":    "The template was deleted. A send that names it is refused.",

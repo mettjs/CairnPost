@@ -36,6 +36,10 @@ The [changelog](CHANGELOG.md) says what exists.
   otherwise.
   The `capture` driver, a development tool whose purpose is to show you the
   email, holds the last few in memory only, readable with an admin key.
+- It can take mail as well as send it: a small Worker, in `worker/inbound`,
+  hands on the emails that come for your domains' addresses, and CairnPost
+  keeps each for a short time for your application to read (see
+  "Receiving email"). Off unless you set it up.
 - It does not track opens or clicks.
 - It is for transactional email: it does not send newsletters or manage
   audiences.
@@ -67,7 +71,9 @@ curl http://localhost:8025/capture/emails -H "Authorization: Bearer $CAIRNPOST_A
 
 ## API
 
-Every call but `/health` needs `Authorization: Bearer <key>`.
+Every call but `/health` needs `Authorization: Bearer <key>`. One more
+takes no key: `POST /inbound`, which the mail provider's side calls and
+signs with a secret of its own (see "Receiving email").
 
 | Call | Does |
 |---|---|
@@ -76,6 +82,11 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `PATCH /emails/{id}` | Give an email that waits to be sent another time: `{"scheduled_at"}`. |
 | `POST /emails/{id}/cancel` | Cancel an email that waits to be sent. |
 | `GET /emails/{id}` | What became of an email, and each event that happened to it. A key sees its own emails; an admin key sees any, or its sending domain's if it is bound to one. Where content is kept, an admin key also sees what the email said, as `content`. |
+| `GET /inbound` | The emails that came and are still kept, newest first, without what they say. `?limit=` and `?after=` page it. Admin key. |
+| `GET /inbound/{id}` | One email that came, as it reads: subject, sender, bodies, headers and the files it carries. Admin key. |
+| `GET /inbound/{id}/raw` | The email as it came, every byte. Admin key. |
+| `GET /inbound/{id}/attachments/{place}` | One of its files; `place` counts from 1. Admin key. |
+| `DELETE /inbound/{id}` | Delete it before its time. Admin key. |
 | `POST /templates` | Keep a template: `{"name", "subject", "html", "text", "domain", "defaults"}`. Admin key. |
 | `GET /templates` | The templates, each without its bodies. Admin key. |
 | `GET /templates/{id}` | One template, with the variables it names. Admin key. |
@@ -97,7 +108,7 @@ Every call but `/health` needs `Authorization: Bearer <key>`.
 | `POST /webhooks/{id}/resume` | End an endpoint's pause, and send what it is owed. One that is not paused is answered as it is. Admin key. |
 | `GET /limits` | The provider's sending allowance and how much of it is used, so you know before it runs out. `quota` is `null` for a provider with none to tell. |
 | `GET /metrics` | The server's numbers in the text form Prometheus reads. Admin key. |
-| `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent, scheduled emails sent and old records pruned. |
+| `GET /health` | Whether the service and its database are up; the driver, the version, and whether delivery events are being read, webhooks sent, scheduled emails sent, old records pruned, and emails that come taken. |
 
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both,
 or a `template` in place of the three;
@@ -372,6 +383,7 @@ sending domain or all of them, and the event types you name or all of them:
 | `email.bounced` | It refused the email. `data.bounce.type` says how. |
 | `email.complained` | The recipient marked the email as spam. |
 | `email.failed` | The provider took the email and then did not send it. |
+| `email.received` | An email came for an address of a sending domain, and is kept to be read. |
 | `address.suppressed` | An address was put on the suppression list because of a bounce or a complaint about an email CairnPost has no record of. |
 
 ```json
@@ -415,6 +427,20 @@ complaint suppresses the address, that is told on its own, once:
 
 An email on record never sends this: its own webhook says `suppressed`.
 Nor does a suppression added by hand.
+
+An email that came for one of your addresses is told the same way, with
+the id to read it by and never what it says:
+
+```json
+{
+  "type": "email.received",
+  "created_at": "2026-01-02T03:04:05Z",
+  "data": {"inbound_id": "0195…", "from": "ana@example.org", "to": ["help@mail.example.com"],
+           "received_at": "2026-01-02T03:04:05Z"}
+}
+```
+
+An endpoint that hears about every event hears about these too.
 
 Each webhook is signed as [Standard Webhooks](https://www.standardwebhooks.com/)
 describes, which is also how Svix signs, so a library for either verifies
@@ -537,6 +563,85 @@ When a send fails after it was recorded (`rejected_by_upstream`, 429, 502,
 503 `upstream_unavailable`), the error carries the email's `id`, and
 `GET /emails/{id}` says what became of it.
 
+## Receiving email
+
+CairnPost can keep the emails that come for your domains' addresses, so
+an application can read a reply or a message sent to `help@`. It listens
+on no mail port: the mail provider receives the email and a small Worker
+hands it on. It is off until `CAIRNPOST_INBOUND_SECRET` is set.
+
+**Setting it up**, with Cloudflare:
+
+1. Make a secret and give it to the server:
+   `CAIRNPOST_INBOUND_SECRET=$(openssl rand -hex 32)`.
+2. Deploy the Worker in [`worker/inbound`](worker/inbound): copy
+   `wrangler.toml.example` to `wrangler.toml`, set `CAIRNPOST_URL` to the
+   server's address, run `npx wrangler secret put CAIRNPOST_INBOUND_SECRET`
+   with the same secret, then `npx wrangler deploy`.
+3. In Cloudflare's Email Routing for the domain, send the addresses you
+   want (or the catch-all) to that Worker.
+
+**What happens to an email.** The Worker posts it to `POST /inbound` as it
+came, with who it is for and from, and a signature. CairnPost checks the
+signature before it reads any of the email, keeps the email, and tells
+your endpoints with an `email.received` webhook. Your application then
+reads it with an admin key: `GET /inbound/{id}` for what it says,
+`.../attachments/{place}` for a file, `.../raw` for every byte.
+
+- **Kept for a time.** `CAIRNPOST_INBOUND_RETENTION`, 7 days unless set.
+  When its time is up an email stops being shown at once and is deleted
+  at the pruner's next pass, with any webhook still owed for it. Deleted
+  means gone from the tables: a backup made meanwhile still holds it.
+  `DELETE /inbound/{id}` deletes one sooner. An email whose time is up
+  is told to no endpoint any more.
+- **Who reads it.** Admin keys only, and one bound to a sending domain
+  only the emails for that domain's addresses. What an email says is
+  never logged and never in a webhook. Anyone who can read the database
+  can read the emails kept.
+- **A stranger wrote it.** Treat every part as untrusted. The console
+  shows text as text and HTML as source, and files are only ever saved,
+  never opened. `from` beside the email is what the sending server said;
+  the `From` inside `content` is what the email says of itself, and
+  either can be made up. CairnPost does not judge spam or check who sent
+  it: the headers the mail provider added (`Authentication-Results`,
+  `Received-SPF`) are in `content.headers` for you to go by.
+- **How it reads.** `content` is a reading of the email: its first plain
+  text and first HTML as bodies (1 MiB of each), every other part as a
+  file, and its headers by name, the mail provider's verdicts first (200
+  of them, 4 KiB of each). Text in
+  UTF-8, Latin-1 and Windows-1252 is read; in another charset it is
+  shown as far as it reads. `"partial": true` says the reading is not
+  all of the email: for that, or because it was cut to those lengths. The email as
+  it came (`/raw`) always holds all of it.
+- **Handed on twice**, the same email for the same address is kept once,
+  and the first one's id is answered.
+- **Limits.** An email may be `CAIRNPOST_INBOUND_MAX_BYTES` (25 MiB, the
+  most Cloudflare receives), and the emails kept
+  `CAIRNPOST_INBOUND_ROOM_BYTES` in all (1 GiB): with no room left the
+  next is refused with 503 `inbound_full` until some are deleted. Kept
+  emails are stored in the database whole.
+- **When the server does not take one** (it is down or full), the Worker
+  tries a few times, some seconds apart; a refusal that trying again
+  cannot change (a wrong secret) is not tried again. Then it forwards the email to
+  its `FALLBACK_ADDRESS` if it has one, or refuses it, so the sender is
+  told it did not arrive. It is never dropped unsaid.
+- `GET /health` says `"inbound": "on"` or `"off"`.
+
+**The hand-over**, for anything else that would hand emails on: `POST
+/inbound` with the email as the body and five headers.
+`X-CairnPost-Timestamp` is the time in seconds since 1970, within five
+minutes of the server's; `X-CairnPost-To` and `X-CairnPost-From` the
+addresses the sending server gave (From is empty for a bounce);
+`X-CairnPost-Digest` the SHA-256 of the body in hex;
+`X-CairnPost-Signature` is `v1=` and the HMAC-SHA256, in hex, under the
+secret, of the timestamp, To, From and digest, each behind its length as
+eight bytes, big end first. In To and From, whatever is not a printable
+ASCII character, and `%`, is written as its UTF-8 bytes, each `%` and two
+hex digits; they are signed as written. It answers 201 with the email's
+`id` and 200 when it was handed on before. 401 `invalid_signature`, 404
+`inbound_off`, 413 and 422 will not change by trying again; 408 and 503
+(`unavailable`, `inbound_full`, with `Retry-After`) may.
+
 ## Drivers
 
 **`cloudflare`** sends through [Cloudflare Email Sending](https://developers.cloudflare.com/email-service/).
@@ -641,6 +746,7 @@ in the scrape config):
 | `cairnpost_http_request_seconds{route}` | How long they took, as a histogram. |
 | `cairnpost_emails_last_day{state}` | Emails begun in the last 24 whole hours, by the state they are in now: each address an email went to is one. |
 | `cairnpost_emails_scheduled` | Emails that wait to be sent. |
+| `cairnpost_inbound_emails` | Emails that came and are kept. Only where the server takes them. |
 | `cairnpost_webhook_endpoints{state}` | Webhook endpoints that are `on`, `off` or `paused`. |
 | `cairnpost_webhook_endpoints_failing` | Endpoints that are on and have failed every try since their last answer. |
 | `cairnpost_provider_quota`, `cairnpost_provider_quota_used` | The mail provider's allowance, where it tells one. |
@@ -744,6 +850,11 @@ on the page that made it.
 - A key made in the console says which key made it, and the server's log
   says who signed in, made a key or revoked one, by the keys' public
   prefixes. If a key leaks, the keys it made can be found.
+- The Emails page has a "Received" part: the emails that came and are
+  kept, with who each is for and from and its subject. An email's page
+  shows what it says as text and source, its headers, and its files to
+  save; the whole email can be saved as it came, and deleted after
+  asking.
 - Templates lists the templates, makes one, and shows each as it is
   written, with the variables it names, what each is filled with when a
   send gives no value, and a send that uses it. A template is changed and
@@ -843,6 +954,10 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_BOUNCE_WARN` | `5` | The share of a sending domain's emails, in percent, that bounced at which the console's first page marks the domain. `off` marks none. |
 | `CAIRNPOST_CONSOLE_TIMEZONE` | the system's | The time zone the console says times in for a browser that does not say its own, by name (`Europe/Berlin`, `UTC`). Unset, the system's own, which `TZ` sets. |
 | `CAIRNPOST_CONSOLE_PLAIN_HTTP` | `off` | Let the console's session cookie travel without TLS, for a console opened over plain http in development. |
+| `CAIRNPOST_INBOUND_SECRET` | none | What whoever hands on the emails that come signs with: at least 32 characters. Unset, the server takes none. |
+| `CAIRNPOST_INBOUND_RETENTION` | `7d` | How long an email that came is kept: a time such as `48h` or `7d`, between `1h` and `30d`. |
+| `CAIRNPOST_INBOUND_MAX_BYTES` | `26214400` | How long an email that comes may be. |
+| `CAIRNPOST_INBOUND_ROOM_BYTES` | `1073741824` | How many bytes the emails kept may be in all. |
 | `CAIRNPOST_MAX_TEMPLATES` | `200` | How many templates one sending domain may have, and how many may serve every domain. |
 | `CAIRNPOST_MAX_KEYS` | `200` | How many keys that are not revoked one sending domain may have, and how many the keys bound to no domain may be. |
 | `CAIRNPOST_WEBHOOK_TIMEOUT` | `10s` | The most one try at delivering a webhook may take. |
