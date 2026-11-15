@@ -227,8 +227,8 @@ curl -X POST http://localhost:8025/emails/01a1d08e-.../cancel -H "Authorization:
 - **What is kept.** To send an email later, CairnPost must keep what it
   says and its files: they are held in the database until the email is
   sent or cancelled and deleted then, whatever
-  `CAIRNPOST_CONTENT_RETENTION` is (with it on, what the email said is
-  kept on from the send, as any email's is). While it waits, an admin key
+  `CAIRNPOST_CONTENT_RETENTION` is (with it on, what the email said and its
+  files are kept on from the send, as any email's are). While it waits, an admin key
   is shown what it says, as `content`. They are never logged. Deleted
   means from the tables: a backup made meanwhile still has them.
 - **Only so much may wait**: `CAIRNPOST_SCHEDULE_MAX_BYTES` in all (1
