@@ -176,6 +176,13 @@ input {
   border: 1px solid var(--muted); border-radius: var(--radius);
   padding: 0.6rem 0.75rem; height: 2.75rem; width: 100%;
 }
+/* A body is written in the type it is read in as source. */
+textarea {
+  font: 0.85rem/1.55 var(--mono); color: var(--text); background: var(--raised);
+  border: 1px solid var(--muted); border-radius: var(--radius);
+  padding: 0.6rem 0.75rem; width: 100%; min-height: 5rem; max-height: 60vh; resize: vertical;
+}
+textarea:hover { border-color: var(--text); }
 input:hover { border-color: var(--text); }
 input::placeholder { color: var(--muted); opacity: 1; }
 input[readonly] { background: var(--sunk); color: var(--soft); }

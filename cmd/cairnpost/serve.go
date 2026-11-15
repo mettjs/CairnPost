@@ -29,6 +29,7 @@ import (
 	"github.com/mettjs/cairnpost/internal/stats"
 	"github.com/mettjs/cairnpost/internal/store/postgres"
 	"github.com/mettjs/cairnpost/internal/suppress"
+	"github.com/mettjs/cairnpost/internal/templates"
 	"github.com/mettjs/cairnpost/internal/webhook"
 	"github.com/mettjs/cairnpost/migrations"
 )
@@ -165,7 +166,8 @@ func serve(ctx context.Context) error {
 	// neither can be given a rule the other lacks.
 	endpoints := webhook.NewService(db, poster, cfg.Webhook.AllowPrivate, cfg.Webhook.MaxEndpoints, cfg.Webhook.SecretOverlap, time.Now)
 	suppressions := suppress.New(db)
-	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout,
+	written := templates.NewService(db, templates.Options{Max: cfg.MaxTemplates, MaxBytes: int(cfg.MaxBodyBytes)})
+	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout, Templates: written,
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention, KeepFiles: cfg.ContentFiles,
 		MaxRecipients: cfg.MaxRecipients, MaxAttachments: attachmentsOf(cfg), MaxAttachmentBytes: cfg.MaxAttachmentBytes,
 		MaxBatch: cfg.MaxBatch, BatchParallel: cfg.BatchParallel, BatchTime: cfg.BatchTimeout, Stopping: ctx.Done(),
@@ -182,7 +184,7 @@ func serve(ctx context.Context) error {
 	var handler http.Handler = api.New(api.Deps{
 		Requests: &metrics.Requests{}, Gauges: counted.gauges,
 		Mail: mailer, Keys: keyring, Suppress: suppressions,
-		Webhooks: endpoints, Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
+		Webhooks: endpoints, Templates: written, Ping: db.Ping, Captured: captured, Quota: quotaOf(drv),
 		Driver: drv.Name(), Version: version, MaxBodyBytes: cfg.MaxBodyBytes, MaxEmailBytes: emailBytes(cfg), MaxUploadBytes: cfg.MaxUploadBytes, Log: log,
 		// A batch starts emails for so long, and the last of them may
 		// take a whole send and its record.
@@ -201,6 +203,7 @@ func serve(ctx context.Context) error {
 				"An email's record stops at \"sent\", and a bounce is never known."
 		}
 		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppressions, Webhooks: endpoints,
+			Templates: written, TemplateBytes: cfg.MaxBodyBytes,
 			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout, cfg.DNSServer), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
 			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, Scheduling: later.Healthy, EventsOff: eventsOff,
 			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP,

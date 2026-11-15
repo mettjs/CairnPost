@@ -84,11 +84,11 @@ func parse() pages {
 		panic(err)
 	}
 	for _, name := range names {
-		if name == "templates/layout.html" || name == "templates/hookform.html" || name == "templates/parts.html" {
+		if name == "templates/layout.html" || name == "templates/hookform.html" || name == "templates/templateform.html" || name == "templates/parts.html" {
 			continue // parts of pages, not pages
 		}
 		page := name[len("templates/") : len(name)-len(".html")]
-		out[page] = template.Must(template.New("layout.html").Funcs(helpers).ParseFS(templateFiles, "templates/layout.html", "templates/hookform.html", "templates/parts.html", name))
+		out[page] = template.Must(template.New("layout.html").Funcs(helpers).ParseFS(templateFiles, "templates/layout.html", "templates/hookform.html", "templates/templateform.html", "templates/parts.html", name))
 	}
 	return out
 }

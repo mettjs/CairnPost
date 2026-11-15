@@ -1,0 +1,11 @@
+{{define "title"}}Delete a template{{end}}
+{{define "main"}}
+<section class="narrow">
+  <h1>Delete this template?</h1>
+  <p class="long">A send that names <code>{{.Data.Name}}</code>{{if .Data.Domain}} from <code>{{.Data.Domain}}</code>{{end}} is refused from then on. Emails already sent, and those that wait to be sent, keep what they say. This cannot be undone.</p>
+  <form class="actions" method="post" action="{{.Root}}/templates/{{.Data.ID}}/delete">
+    <button class="danger" type="submit">Delete template</button>
+    <a href="{{.Root}}/templates/{{.Data.ID}}">Keep it</a>
+  </form>
+</section>
+{{end}}

@@ -1,0 +1,54 @@
+{{define "title"}}Templates{{end}}
+{{define "main"}}
+<h1>Templates</h1>
+<p class="lede">A template is an email written once and sent many times: a send names it and gives a value for each of its variables.{{if .Data.Bound}} You are signed in with a key that manages <code>{{.Data.Bound}}</code>, so you see and make that domain's templates only.{{end}}</p>
+
+{{template "subtabs" .Data.Tabs}}
+
+{{if eq .Data.Tab "new"}}
+<section aria-labelledby="new" class="narrow">
+  <h2 id="new" class="sr">Make a template</h2>
+  {{if .Data.Problem}}<p class="problem" role="alert">The template was not made. {{.Data.Problem}}</p>{{end}}
+  <form method="post" action="{{.Root}}/templates">
+    {{template "templatefields" .Data.Form}}
+    <div class="field">
+      <label for="domain">Sending domain</label>
+      {{if .Data.Bound}}
+      <input id="domain" name="domain" value="{{.Data.Bound}}" readonly>
+      <p class="hint">Fixed to the domain your own key manages.</p>
+      {{else}}
+      <input id="domain" name="domain" value="{{.Data.Form.Domain}}" spellcheck="false" autocapitalize="off">
+      <p class="hint">Optional. Leave empty for a template every domain's emails can be made from. A domain's own template comes before one of the same name that serves all.</p>
+      {{end}}
+    </div>
+    <button type="submit">Make template</button>
+  </form>
+</section>
+{{else}}
+<section aria-labelledby="all">
+  <h2 id="all" class="sr">Templates</h2>
+  {{if .Data.Unread}}
+  <p class="problem" role="alert">The templates could not be read. Reload the page to try again.</p>
+  {{else if not .Data.Templates}}
+  <p class="empty"><b>There are no templates yet.</b> Every email is sent with its own subject and body. <a href="{{.Root}}/templates?tab=new">Make a template</a></p>
+  {{else}}
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="all">
+    <table>
+      <thead><tr><th>Name</th><th>Sending domain</th><th>Subject</th><th>Variables</th><th>Changed</th></tr></thead>
+      <tbody>
+      {{range .Data.Templates}}
+      <tr>
+        <td data-label="Name"><a href="{{$.Root}}/templates/{{.ID}}">{{.Name}}</a></td>
+        <td data-label="Sending domain">{{if .Domain}}<code>{{.Domain}}</code>{{else}}Any{{end}}</td>
+        <td data-label="Subject" class="wrap">{{.Subject}}</td>
+        <td data-label="Variables" class="wrap">{{if not .Variables}}None{{else}}{{range $i, $v := .Variables}}{{if $i}}, {{end}}<code>{{$v.Name}}</code>{{end}}{{end}}</td>
+        <td data-label="Changed"><time datetime="{{stamp .UpdatedAt}}" title="{{when $.Zone .UpdatedAt}}">{{day $.Zone .UpdatedAt}}</time></td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+</section>
+{{end}}
+{{end}}

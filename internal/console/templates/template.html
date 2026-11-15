@@ -1,0 +1,61 @@
+{{define "title"}}{{.Data.Template.Name}} · Templates{{end}}
+{{define "main"}}
+<p class="back"><a href="{{.Root}}/templates">← Templates</a></p>
+<h1 class="long">{{.Data.Template.Name}}</h1>
+<p class="lede">{{if .Data.Template.Domain}}A template for emails from <code>{{.Data.Template.Domain}}</code>.{{else}}A template every sending domain's emails can be made from.{{end}} Changed <time datetime="{{stamp .Data.Template.UpdatedAt}}">{{when .Zone .Data.Template.UpdatedAt}}</time>.</p>
+
+{{template "subtabs" .Data.Tabs}}
+
+{{if eq .Data.Tab "edit"}}
+<section aria-labelledby="change" class="narrow">
+  <h2 id="change" class="sr">Change it</h2>
+  {{if .Data.Problem}}<p class="problem" role="alert">The change was not saved. {{.Data.Problem}}</p>{{end}}
+  <form method="post" action="{{.Root}}/templates/{{.Data.Template.ID}}">
+    {{template "templatefields" .Data.Form}}
+    <button type="submit">Save changes</button>
+  </form>
+  <p class="hint after">Every email asked for from now on is made from what it says now. An email that already waits to be sent keeps what it was filled with.</p>
+</section>
+
+<section aria-labelledby="remove">
+  <h2 id="remove">Delete it</h2>
+  <p>A send that names it is refused from then on. <a class="danger" href="{{.Root}}/templates/{{.Data.Template.ID}}/delete">Delete this template</a></p>
+</section>
+{{else}}
+<section aria-labelledby="says">
+  <h2 id="says" class="sr">What it says</h2>
+  <dl class="facts">
+    <div><dt>Subject</dt><dd class="long">{{.Data.Template.Subject}}</dd></div>
+    {{if .Data.Template.HTML}}<div><dt>HTML, as source</dt><dd><pre class="said" tabindex="0">{{.Data.Template.HTML}}</pre></dd></div>{{end}}
+    {{if .Data.Template.Text}}<div><dt>Text</dt><dd><pre class="said" tabindex="0">{{.Data.Template.Text}}</pre></dd></div>{{end}}
+  </dl>
+</section>
+
+<section aria-labelledby="variables">
+  <h2 id="variables">Variables</h2>
+  {{if not .Data.Variables}}
+  <p class="empty">It names no variable: every email made from it says the same.</p>
+  {{else}}
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="variables">
+    <table>
+      <thead><tr><th>Name</th><th>When a send gives no value</th></tr></thead>
+      <tbody>
+      {{range .Data.Variables}}
+      <tr>
+        <td data-label="Name"><code>{{.Name}}</code></td>
+        <td data-label="When a send gives no value" class="wrap">{{if .Required}}The send is refused{{else if .Default}}Filled with <q>{{.Default}}</q>{{else}}Left empty{{end}}</td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+</section>
+
+<section aria-labelledby="use">
+  <h2 id="use">Send an email from it</h2>
+  <p>Post this to <code>/emails</code>, with a value in place of each "...". Leave out <code>html</code> and <code>text</code>; a <code>subject</code> given with it is used instead of the template's.</p>
+  <pre class="said" tabindex="0">{{.Data.Example}}</pre>
+</section>
+{{end}}
+{{end}}
