@@ -6,6 +6,8 @@ Every change a user of CairnPost can notice is written here. The format is
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-15
+
 ### Changed
 
 - A send the mail provider refuses because the sending domain is not set
@@ -191,5 +193,6 @@ Every change a user of CairnPost can notice is written here. The format is
 - Images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`, published with
   each release.
 
-[Unreleased]: https://github.com/mettjs/CairnPost/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mettjs/CairnPost/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/mettjs/CairnPost/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mettjs/CairnPost/releases/tag/v0.1.0

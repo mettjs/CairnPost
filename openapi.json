@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CairnPost",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "summary": "A transactional email gateway.",
     "description": "CairnPost sends email through a mail provider and says what became of each one. Every call answers JSON unless it says otherwise, every time is UTC, and every error is one shape: a status, a `name` a program can switch on, and a `message` for a person. A request body with a field that is not described here is refused, never read in part. What a server limits (addresses, files, the size of a batch) is set by whoever runs it, so it is not written here. A path that takes another method answers 405 `method_not_allowed` with an `Allow` header, and a path that is no call answers 404 `route_not_found`.",
     "license": {
