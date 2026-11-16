@@ -6,6 +6,21 @@ Every change a user of CairnPost can notice is written here. The format is
 
 ## [Unreleased]
 
+### Changed
+
+- A send the mail provider refuses because the sending domain is not set
+  up with it now answers 422 `sender_domain_not_ready`, where it answered
+  422 `rejected_by_upstream` like one bad email. Cloudflare gives the same
+  answer for both, so CairnPost reads the domain's DNS after such a
+  refusal: when none of the records the provider asks is in place, the
+  refusal is taken to be the domain's. The message names one of them and
+  says how to check. A program that acts on
+  `rejected_by_upstream` should handle the new name too, and treat it as
+  the sender failing: no email from that domain goes out until it is set
+  up. It is still a 422, and an email in a batch carries it the same way.
+  A lookup that fails leaves the answer as it was, and so does a domain
+  with any of those records in place.
+
 ## [0.1.0] - 2026-11-15
 
 ### Added

@@ -319,7 +319,7 @@ func TestAnEmailTakenAgainIsNotSentByWhoTookItFirst(t *testing.T) {
 // An email the provider refused for good, or took, waits no more from
 // that moment: a server that stops right then leaves nothing to send.
 func TestASettledEmailIsNotRecoveredAndSentAgain(t *testing.T) {
-	for name, answer := range map[string]error{"refused": driver.ErrRejected, "taken": nil, "lost": errors.New("dropped")} {
+	for name, answer := range map[string]error{"refused": driver.ErrRejected, "refused, likely for its domain": &mail.SenderDomain{Domain: "example.com"}, "taken": nil, "lost": errors.New("dropped")} {
 		r := newRig(t, 0)
 		id := r.later("ana@example.org")
 		r.now = r.now.Add(time.Hour)

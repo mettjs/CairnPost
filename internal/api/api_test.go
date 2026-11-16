@@ -193,6 +193,8 @@ func TestEveryRefusalHasItsStatus(t *testing.T) {
 		{why: "what is no address among several", key: "send", body: `{"from":"a@example.com","to":["b@example.org","nobody"],"subject":"s","text":"t"}`, code: 422, name: "validation_error"},
 		{why: "too large", key: "send", body: `{"text":"` + strings.Repeat("x", 5000) + `"}`, code: 413, name: "request_too_large"},
 		{why: "refused for good", key: "send", body: good, driverErr: driver.ErrRejected, code: 422, name: "rejected_by_upstream"},
+		{why: "refused, from a domain whose DNS is not set up", key: "send", body: good,
+			driverErr: &mail.SenderDomain{Domain: "example.com"}, code: 422, name: "sender_domain_not_ready"},
 		{why: "at the limit", key: "send", body: good, driverErr: &driver.Throttled{After: 90 * time.Second}, code: 429, name: "rate_limit_exceeded", retryAfter: "90"},
 		{why: "upstream down", key: "send", body: good, driverErr: driver.ErrUnavailable, code: 503, name: "upstream_unavailable"},
 		{why: "answer lost", key: "send", idem: "lost", body: good, driverErr: errors.New("reset"), code: 502, name: "upstream_unknown"},
