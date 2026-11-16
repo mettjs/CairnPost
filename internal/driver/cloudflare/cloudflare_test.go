@@ -103,6 +103,8 @@ func TestEveryAnswerHasItsKind(t *testing.T) {
 		{"a malformed request", 400, failure(10001), refused},
 		{"an invalid email: address, header or sender domain", 400, failure(10202), refused},
 		{"too big", 400, failure(10200), refused},
+		{"no content length", 400, failure(10201), refused},
+		{"too big for the edge", 413, failure(10200), refused},
 		{"a 400 that is not about the email", 400, failure(6003), later},
 		{"a bad token or a wrong account", 401, failure(10000), later},
 		{"not entitled", 403, failure(10105), later},
@@ -136,6 +138,11 @@ func TestEveryAnswerHasItsKind(t *testing.T) {
 		}
 		if err != nil && strings.Contains(err.Error(), "ana@example.org") {
 			t.Errorf("%s: the error echoes the address: %v", c.why, err)
+		}
+		// One answer alone is given for a bad email and for a sender
+		// domain the account does not know: only it is marked so.
+		if unclear := errors.Is(err, driver.ErrSenderUnclear); unclear != strings.Contains(c.body, `"code":10202`) {
+			t.Errorf("%s: said to leave the sender's domain open: %v", c.why, unclear)
 		}
 	}
 }

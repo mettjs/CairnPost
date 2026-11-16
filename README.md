@@ -551,6 +551,7 @@ The status tells a program what to do:
 | Status | Name | Meaning |
 |---|---|---|
 | 422 | `validation_error`, `rejected_by_upstream` | The request is at fault and will never succeed. Do not retry. |
+| 422 | `sender_domain_not_ready` | The mail provider refused the email, and none of the DNS records the provider asks of the sending domain is in place: the domain is likely not set up with the provider, which then refuses every email from it. Nothing was sent. Do not retry this email, and treat it as the sender failing, not as one bad email: set the domain up, check it with `cairnpost domains check`, then send again (the same `Idempotency-Key` may be used). |
 | 422 | `recipient_suppressed` | The address is on the sending domain's suppression list, or every address in `to` and `cc` is when the email names several. Nothing was sent now. Do not retry; lift the suppression if it is wrong. If the answer has an `id`, an earlier try under the same `Idempotency-Key` got no answer from the provider and may have gone: the id is that try's. |
 | 409 | `invalid_idempotent_request` | The key was already used with a different request, which was sent. Do not retry. |
 | 409 | `concurrent_idempotent_requests` | A send under this key is in flight, or its answer has not come yet. Retry after `Retry-After`. |
@@ -568,7 +569,8 @@ The status tells a program what to do:
 | 503 | `upstream_unavailable`, `unavailable`, `not_started` | Nothing was sent. Retry later. `not_started` is an email of a batch whose turn did not come. |
 | 503 | `schedule_full` | The emails waiting to be sent hold as much as the server keeps. Nothing was kept or sent. |
 
-When a send fails after it was recorded (`rejected_by_upstream`, 429, 502,
+When a send fails after it was recorded (`rejected_by_upstream`,
+`sender_domain_not_ready`, 429, 502,
 503 `upstream_unavailable`), the error carries the email's `id`, and
 `GET /emails/{id}` says what became of it.
 
@@ -684,9 +686,19 @@ measured against the live service:
 - Cloudflare has no idempotency of its own: the same request twice is two
   emails. CairnPost's `Idempotency-Key` is what makes it one.
 - Cloudflare answers the same refusal for a bad address, a header it does
-  not allow, and a sender domain the account has not onboarded. CairnPost
-  passes each on as 422 `rejected_by_upstream`. If a send from a new domain
-  is refused, check that the domain is onboarded.
+  not allow, and a sender domain the account has not onboarded: the whole
+  answer is the same. So CairnPost looks at the sending domain's DNS when
+  it gets that answer. If none of the three records Cloudflare adds when
+  a domain is onboarded is in place (each not found, or not Cloudflare's),
+  the send answers 422 `sender_domain_not_ready`; otherwise 422
+  `rejected_by_upstream`. A domain with one of them in place is taken to
+  be set up, and a lookup that fails changes nothing. It reads DNS only,
+  through the resolver `CAIRNPOST_DNS_SERVER` names: a domain onboarded on
+  another Cloudflare account has the records and is still refused as
+  `rejected_by_upstream`, and a resolver that answers "no such name" for
+  names that exist makes such a refusal look like the domain's. The look
+  takes 3 seconds at most, after the send is recorded as failed, and what
+  it found is kept for 30 seconds, for up to 256 domains.
 - A wrong token or account id is never the email's fault: sends answer 503,
   nothing is dropped, and the server's log names Cloudflare's status.
 

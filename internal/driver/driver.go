@@ -5,6 +5,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -62,7 +63,9 @@ type Driver interface {
 	// errors come in three kinds, and a caller acts on the kind alone:
 	//
 	//   - wrapping ErrRejected: the message itself is at fault and will
-	//     never be taken. Nothing was sent.
+	//     never be taken. Nothing was sent. An ErrSenderUnclear among
+	//     them: the upstream did not say whether the fault is the
+	//     message's or its sender domain's.
 	//   - wrapping ErrUnavailable (a *Throttled among them): the upstream
 	//     said no for now: its limit, its outage, our credentials. Nothing
 	//     was sent; trying later may work.
@@ -72,6 +75,12 @@ type Driver interface {
 
 // ErrRejected is an upstream refusing a message for good.
 var ErrRejected = errors.New("driver: the upstream refused this message")
+
+// ErrSenderUnclear is an upstream refusing a message for good with an
+// answer it also gives for a sender domain it does not know: from the
+// answer alone, one bad email and a domain nothing will ever be sent
+// from look the same. It is an ErrRejected.
+var ErrSenderUnclear = fmt.Errorf("%w, or its sender's domain", ErrRejected)
 
 // ErrUnavailable is an upstream that cannot take mail now, and said so.
 var ErrUnavailable = errors.New("driver: the upstream is not taking mail now")

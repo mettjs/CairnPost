@@ -99,9 +99,13 @@ var errUnread = errors.New("cloudflare: a success whose answer could not be read
 
 // messageAtFault are the error numbers Cloudflare gives a 400 whose cause
 // is the email itself, as measured: 10001 a malformed request, 10200 too
-// big, 10201 no content length, 10202 an invalid email (a bad address, a
-// forbidden header, a sender domain the account has not onboarded).
-var messageAtFault = []int{10001, 10200, 10201, 10202}
+// big, 10201 no content length.
+var messageAtFault = []int{10001, 10200, 10201}
+
+// invalidEmail is the 400 Cloudflare gives a bad address, a forbidden
+// header and a sender domain the account has not onboarded alike: the
+// whole answer was measured to be the same for each, number and text.
+const invalidEmail = 10202
 
 // signInDown is the error number of a 503 that means Cloudflare's own
 // sign-in is unreachable: the request was not carried out.
@@ -111,7 +115,9 @@ const signInDown = 10100
 // one of the driver's three kinds. It says a status and Cloudflare's error
 // number, never its text, which can echo an address.
 //
-//   - Refused for good: a 400 with one of messageAtFault, a 413, a 422.
+//   - Refused for good: a 400 with one of messageAtFault, a 413, a 422;
+//     and a 400 with invalidEmail, which does not say whether the email
+//     or its sender's domain is at fault.
 //   - Nothing sent, try later: 429; any other 4xx (the token, the
 //     entitlement, the account, the route: an operator's to fix, never a
 //     reason to drop the message); a 503 from Cloudflare's sign-in; a 2xx
@@ -129,6 +135,8 @@ func (a answer) refusal() error {
 		return fmt.Errorf("%s: a success that says it failed: %w", said, driver.ErrUnavailable)
 	case a.status == http.StatusTooManyRequests:
 		return fmt.Errorf("%s: %w", said, &driver.Throttled{After: a.after})
+	case a.status == http.StatusBadRequest && a.code == invalidEmail:
+		return fmt.Errorf("%s: %w", said, driver.ErrSenderUnclear)
 	case a.status == http.StatusBadRequest && slices.Contains(messageAtFault, a.code),
 		a.status == http.StatusRequestEntityTooLarge, a.status == http.StatusUnprocessableEntity:
 		return fmt.Errorf("%s: %w", said, driver.ErrRejected)

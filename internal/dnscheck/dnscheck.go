@@ -112,6 +112,19 @@ func (c *Checker) Check(ctx context.Context, domain string, records []driver.Rec
 	return out, nil
 }
 
+// Records looks up the records an upstream asks and nothing else, at
+// once, for as long as ctx lets it: for a caller that has no use for
+// the DMARC record and little time.
+func (c *Checker) Records(ctx context.Context, records []driver.Record) []Result {
+	out := make([]Result, len(records))
+	var wg sync.WaitGroup
+	for i, r := range records {
+		wg.Go(func() { out[i] = c.one(ctx, r) })
+	}
+	wg.Wait()
+	return out
+}
+
 // one looks one record up.
 func (c *Checker) one(ctx context.Context, r driver.Record) Result {
 	res := Result{Record: r}

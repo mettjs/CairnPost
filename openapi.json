@@ -292,7 +292,7 @@
             "$ref": "#/components/responses/TooLarge"
           },
           "422": {
-            "description": "The email is wrong as it stands, every address it names is suppressed, or the mail provider refused it for good. `name` is one of: `validation_error`, `recipient_suppressed`, `rejected_by_upstream`.",
+            "description": "The email is wrong as it stands, every address it names is suppressed, or the mail provider refused it for good. `sender_domain_not_ready` is such a refusal from a domain that has none of the DNS records the provider asks in place: the domain is likely not set up with the provider, and no email from it will be sent until it is. `name` is one of: `validation_error`, `recipient_suppressed`, `rejected_by_upstream`, `sender_domain_not_ready`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -413,7 +413,7 @@
             }
           },
           "207": {
-            "description": "Some were not taken. `data` says what became of each, in their order. One that was not sent carries `error`, the answer it would have had alone, whose `name` is one of: `recipient_suppressed`, `rejected_by_upstream`, `invalid_idempotent_request`, `concurrent_idempotent_requests`, `rate_limit_exceeded`, `upstream_unavailable`, `upstream_unknown`, `schedule_full`, `not_started`, `unavailable`. The `Retry-After` header is the longest wait any of them asks for.",
+            "description": "Some were not taken. `data` says what became of each, in their order. One that was not sent carries `error`, the answer it would have had alone, whose `name` is one of: `recipient_suppressed`, `rejected_by_upstream`, `sender_domain_not_ready`, `invalid_idempotent_request`, `concurrent_idempotent_requests`, `rate_limit_exceeded`, `upstream_unavailable`, `upstream_unknown`, `schedule_full`, `not_started`, `unavailable`. The `Retry-After` header is the longest wait any of them asks for.",
             "content": {
               "application/json": {
                 "schema": {

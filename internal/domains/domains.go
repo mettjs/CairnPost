@@ -22,6 +22,7 @@ type Service struct {
 	checker  *dnscheck.Checker
 	records  func(domain string) []driver.Record
 	provider string
+	seen     memo
 }
 
 // New returns the service. The records asked of a domain are the

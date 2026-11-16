@@ -65,6 +65,7 @@ func (a *app) problemOf(id string, err error) (p problem, wait string) {
 		invalid   *mail.Invalid
 		busy      *mail.Busy
 		throttled *driver.Throttled
+		sender    *mail.SenderDomain
 	)
 	switch {
 	case errors.As(err, &invalid):
@@ -89,6 +90,8 @@ func (a *app) problemOf(id string, err error) (p problem, wait string) {
 		p = problem{http.StatusConflict, "concurrent_idempotent_requests",
 			"A send with this Idempotency-Key is in flight, or its answer has not come yet. " +
 				"Try again after the time in the Retry-After header.", ""}
+	case errors.As(err, &sender):
+		p = problem{http.StatusUnprocessableEntity, "sender_domain_not_ready", senderWords(sender), id}
 	case errors.Is(err, driver.ErrRejected):
 		p = problem{http.StatusUnprocessableEntity, "rejected_by_upstream",
 			"The mail provider refused this email for good. Check the addresses, the headers, and the size and kind of its files.", id}

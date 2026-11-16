@@ -59,6 +59,10 @@ type Options struct {
 	// Templates makes an email's words from a template; nil for a
 	// server that has none.
 	Templates Filler
+	// Domains tells a domain the upstream does not know from an email
+	// it refuses, where the upstream's answer does not; nil leaves every
+	// such refusal the email's.
+	Domains Readiness
 	// SendTimeout bounds one call to the driver.
 	SendTimeout time.Duration
 	// IdempotencyTTL and InDoubtWindow are store.Start's.
@@ -190,7 +194,7 @@ func New(s Store, d driver.Driver, opt Options, log *slog.Logger) *Service {
 // ErrSuppressed: a hidden copy alone is not sent.
 //
 // An error is an *Invalid, ErrDomain, ErrSuppressed, a *Busy (ErrInFlight), ErrMismatch,
-// a driver's ErrRejected or ErrUnavailable, ErrInDoubt, or a failure of
+// a driver's ErrRejected (a *SenderDomain among them) or ErrUnavailable, ErrInDoubt, or a failure of
 // our own before anything was sent. The id comes back beside an error
 // whenever the send got far enough to have one; beside ErrSuppressed it is
 // an earlier try under the same key that was left in doubt, if there was
@@ -336,7 +340,7 @@ func (s *Service) deliver(ctx context.Context, id string, m driver.Message, agai
 		if ferr := failed(record, id); ferr != nil {
 			s.log.Error("mail: a refused send's record could not be updated", "message", id, "error", ferr)
 		}
-		return err
+		return s.senderOf(ctx, id, m.From, err)
 	default:
 		// The answer was lost. The message's fate is unknown, and its key
 		// stays in flight until the in-doubt window lets a retry through.

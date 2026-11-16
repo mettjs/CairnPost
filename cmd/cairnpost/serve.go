@@ -170,7 +170,8 @@ func serve(ctx context.Context) error {
 	came := inbound.New(db, inbound.Options{Secret: cfg.Inbound.Secret, Keep: cfg.Inbound.Retention,
 		MaxBytes: cfg.Inbound.MaxBytes, Room: cfg.Inbound.RoomBytes})
 	written := templates.NewService(db, templates.Options{Max: cfg.MaxTemplates, MaxBytes: int(cfg.MaxBodyBytes)})
-	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout, Templates: written, MaxFilled: int(max(emailBytes(cfg), cfg.MaxBodyBytes)),
+	senders := domains.New(db, dnscheck.New(cfg.DNSTimeout, cfg.DNSServer), drv.Name(), recordsFor(drv.Name()))
+	mailer := mail.New(db, drv, mail.Options{SendTimeout: cfg.SendTimeout, Domains: senders, Templates: written, MaxFilled: int(max(emailBytes(cfg), cfg.MaxBodyBytes)),
 		IdempotencyTTL: cfg.IdempotencyTTL, InDoubtWindow: cfg.InDoubtWindow, KeepContent: cfg.ContentRetention, KeepFiles: cfg.ContentFiles,
 		MaxRecipients: cfg.MaxRecipients, MaxAttachments: attachmentsOf(cfg), MaxAttachmentBytes: cfg.MaxAttachmentBytes,
 		MaxBatch: cfg.MaxBatch, BatchParallel: cfg.BatchParallel, BatchTime: cfg.BatchTimeout, Stopping: ctx.Done(),
@@ -210,7 +211,7 @@ func serve(ctx context.Context) error {
 		}
 		pages := console.New(console.Deps{Keys: keyring, Mail: mailer, Suppress: suppressions, Webhooks: endpoints,
 			Templates: written, TemplateBytes: cfg.MaxBodyBytes, Inbound: came,
-			Domains: domains.New(db, dnscheck.New(cfg.DNSTimeout, cfg.DNSServer), drv.Name(), recordsFor(drv.Name())), Sessions: session.New(db, cfg.Console.Session),
+			Domains: senders, Sessions: session.New(db, cfg.Console.Session),
 			Events: eventsHealth(reader), Sending: hooks.Healthy, Pruning: pruner.Healthy, Scheduling: later.Healthy, EventsOff: eventsOff,
 			Driver: drv.Name(), Version: version, PlainHTTP: cfg.Console.PlainHTTP,
 			PauseAfter: cfg.Webhook.PauseAfter, Stats: stats.New(db, cfg.Console.BounceWarn), Zone: cfg.Console.Zone,
