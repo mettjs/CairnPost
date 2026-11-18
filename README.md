@@ -119,6 +119,15 @@ needs, what it takes and what it answers. Feed it to a client generator
 or an API browser. A test holds its calls, the key each needs, and the
 fields and listed values of what they take and answer to the code.
 
+There is a client for three languages. Each has no dependencies, covers
+the whole API, and verifies the webhooks CairnPost sends:
+
+| Language | Install | Repository |
+|---|---|---|
+| Go | `go get github.com/mettjs/cairnpost-go` | [cairnpost-go](https://github.com/mettjs/cairnpost-go) |
+| Node.js | `npm install cairnpost` | [cairnpost-node](https://github.com/mettjs/cairnpost-node) |
+| Python | `pip install cairnpost` | [cairnpost-python](https://github.com/mettjs/cairnpost-python) |
+
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both,
 or a `template` in place of the three;
 `cc`, `bcc`, `reply_to`, `headers`, `attachments` and `scheduled_at` are
