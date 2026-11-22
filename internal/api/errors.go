@@ -40,9 +40,14 @@ func fail(w http.ResponseWriter, code int, name, message string) {
 	write(w, code, problem{StatusCode: code, Name: name, Message: message})
 }
 
-// seconds is a wait as a Retry-After value: whole seconds, at least one.
+// longestWait is the most seconds a client reads as a wait. A longer one
+// is read as none, and the caller comes back at once.
+const longestWait = 999_999_999
+
+// seconds is a wait as a Retry-After value: whole seconds, at least one
+// and at most the longest a client reads.
 func seconds(d time.Duration) string {
-	return strconv.Itoa(max(1, int(math.Ceil(d.Seconds()))))
+	return strconv.Itoa(min(longestWait, max(1, int(math.Ceil(d.Seconds())))))
 }
 
 // failSend answers a send that did not happen. The status is the contract:
