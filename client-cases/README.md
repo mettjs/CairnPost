@@ -13,7 +13,8 @@ route with the key the route asks, and sends a body and a query the route
 takes. Every answer a client must take fits what
 [`openapi.json`](../openapi.json) describes for that call and status.
 Every error name the API describes has a case, on a call and with a status
-the API describes it for. Every key a client must take is one the server
+the API describes it for. Every idempotency key a client must send is one
+the server takes. Every key a client must take is one the server
 makes. Every webhook a client must read is signed as the server signs and,
 when it is of a type the server sends, has the body the server writes.
 
@@ -35,6 +36,7 @@ part of it, and the value is then judged as it stands.
 | `calls.json` | Every call a client has: the route, the key it needs, what goes on the wire for it, and an answer of the server's that the client must take. |
 | `answers.json` | Answers a client must refuse, and answers it must take. |
 | `errors.json` | Refusals, and what the client must say of each. |
+| `idempotency.json` | Idempotency keys a client must send as they are, and ones it must refuse before sending. |
 | `keys.json` | API keys a client must take, with what it sends for each, and ones it must refuse. |
 | `webhooks.json` | Webhooks, each with its headers and body, and whether it is read or why it is refused. |
 
@@ -110,6 +112,26 @@ must say every field of `want`: `code` and `detail` are the server's
 repeat the answer's `message` anywhere: what is not CairnPost's own could
 be an echo of the email.
 
+## idempotency.json
+
+```json
+{"taken": ["welcome-42", "order 42, the welcome email"], "refused": [" welcome-42", "cl\u00e9-42"]}
+```
+
+Each is an `Idempotency-Key` given to a send, and to a send of a batch.
+With one under `taken`, the header goes out byte for byte, in the one
+request the call makes. With one under `refused`, the call fails as a
+wrong argument does, no request is made, and the error does not repeat
+the key. A key is taken when it holds only printable ASCII, from the space
+to `~`, and has no space at either end: a header carries nothing else as
+it is, and a key changed on the way would quietly make the send not
+idempotent. The server takes the same, up to 256 characters, and a little
+less for a batch.
+
+The empty key is in neither list. To the Go client it is no key, since
+that is what a text not set is in Go; the others refuse it, where no key
+is said by leaving it out.
+
 ## keys.json
 
 ```json
@@ -179,7 +201,7 @@ read.
 ## Changing a case
 
 Change it here, with the server change it belongs to. Run `go test ./...`.
-Then copy the five JSON files into each client (`testdata/cases` in Go,
+Then copy the JSON files into each client (`testdata/cases` in Go,
 `test/cases` in Node.js, `tests/cases` in Python), name this commit in the
 copy's `SOURCE` file, and run the client's tests. Each client's CI
 compares its copy with the commit it names.
