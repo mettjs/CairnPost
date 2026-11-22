@@ -128,6 +128,12 @@ the whole API, and verifies the webhooks CairnPost sends:
 | Node.js | `npm install cairnpost` | [cairnpost-node](https://github.com/mettjs/cairnpost-node) |
 | Python | `pip install cairnpost` | [cairnpost-python](https://github.com/mettjs/cairnpost-python) |
 
+The three are held to one set of cases, kept in
+[`client-cases`](client-cases): what each call sends, the answers a client
+must take and those it must refuse, what an error says to do, and which
+webhooks are the endpoint's. They are plain JSON, so a client in another
+language can run them too.
+
 `POST /emails` takes `from`, `to`, `subject`, and `html` or `text` or both,
 or a `template` in place of the three;
 `cc`, `bcc`, `reply_to`, `headers`, `attachments` and `scheduled_at` are
