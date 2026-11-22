@@ -79,8 +79,11 @@ func (e clientEvent) written() []byte {
 // server sends, has the body this package writes for it.
 func TestTheClientCasesAreWebhooksAsTheyAreSent(t *testing.T) {
 	var file struct {
-		Secret string `json:"secret"`
-		Cases  []struct {
+		Secret  string `json:"secret"`
+		Secrets struct {
+			Taken, Refused []string
+		} `json:"secrets"`
+		Cases []struct {
 			Name    string            `json:"name"`
 			Headers map[string]string `json:"headers"`
 			Body    string            `json:"body"`
@@ -100,6 +103,28 @@ func TestTheClientCasesAreWebhooksAsTheyAreSent(t *testing.T) {
 	key, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(file.Secret, secretPrefix))
 	if err != nil || Reveal(key) != file.Secret || len(file.Cases) == 0 {
 		t.Fatalf("the secret is %q, of %d cases: %v", file.Secret, len(file.Cases), err)
+	}
+	// A secret a client must take is one this server gives, but for a
+	// space, a tab or a line break around it: no more is asked of a
+	// client, since each language drops other characters of its own. One
+	// it must refuse is none this server gives.
+	given := func(secret string) bool {
+		encoded, ok := strings.CutPrefix(secret, secretPrefix)
+		made, err := base64.StdEncoding.DecodeString(encoded)
+		return ok && err == nil && len(made) > 0 && Reveal(made) == secret
+	}
+	for _, secret := range file.Secrets.Taken {
+		if !given(strings.Trim(secret, " \t\r\n")) {
+			t.Errorf("%q is to be taken as a secret, and is none this server gives", secret)
+		}
+	}
+	for _, secret := range file.Secrets.Refused {
+		if given(secret) {
+			t.Errorf("%q is to be refused as a secret, and is one this server gives", secret)
+		}
+	}
+	if len(file.Secrets.Taken) == 0 || len(file.Secrets.Refused) == 0 {
+		t.Error("the file holds no secret to take, or none to refuse")
 	}
 	signed, ours := 0, map[string]bool{TypeTest: false}
 	for _, name := range Types() {

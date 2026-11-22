@@ -102,7 +102,8 @@ be an echo of the email.
 
 `secret` is the endpoint's signing secret and `now` the clock, in Unix
 seconds, for every case. `secrets` lists values a verifier must take as a
-secret and values it must refuse. Each case is:
+secret and values it must refuse. One to take is a secret the server
+gives, with at most a space, a tab or a line break around it. Each case is:
 
 ```json
 {
