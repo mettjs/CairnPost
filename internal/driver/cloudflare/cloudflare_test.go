@@ -179,21 +179,24 @@ func TestTheLimitSaysHowLongToWait(t *testing.T) {
 	}
 }
 
-// A wait Cloudflare says any other way than in 1 to 9 digits is none: a
-// sign, a fraction, and a number long enough to wrap round into a wait
-// of no time or less.
-func TestAWaitSaidAnyOtherWayIsNone(t *testing.T) {
+// A wait is read in seconds, and one too large to count is the longest
+// there is: multiplied out as it stands it would wrap round into no
+// wait at all, or into a fraction of a second.
+func TestAWaitTooLongToCountIsTheLongest(t *testing.T) {
 	for said, want := range map[string]time.Duration{
-		"1": time.Second, "007": 7 * time.Second, "999999999": 999_999_999 * time.Second,
-		"": 0, "0": 0, "+7": 0, "-7": 0, "7.5": 0, "7s": 0, "1000000000": 0,
-		"9223372037": 0, "18446744074": 0, "9223372036854775807": 0, "99999999999999999999": 0,
-		"Sun, 06 Nov 1994 08:49:37 GMT": 0,
+		"1": time.Second, "007": 7 * time.Second, "+7": 7 * time.Second, "999999999": driver.LongestWait,
+		"1000000000": driver.LongestWait, "9223372036": driver.LongestWait, "9223372037": driver.LongestWait,
+		"18446744074": driver.LongestWait, "9223372036854775807": driver.LongestWait,
+		"9223372036854775808": driver.LongestWait, "99999999999999999999": driver.LongestWait,
+		"": 0, "0": 0, "-7": 0, "-99999999999999999999": 0, "7.5": 0, "7s": 0, "Sun, 06 Nov 1994 08:49:37 GMT": 0,
 	} {
 		s := &stand{status: 429, body: `{"success":false,"errors":[{"code":10004}],"result":null}`, header: map[string]string{"Retry-After": said}}
 		_, err := s.serve(t).Send(context.Background(), message)
 		var throttled *driver.Throttled
-		if !errors.As(err, &throttled) || throttled.After != want {
-			t.Errorf("Retry-After %q: %v, a wait of %v, not %v", said, err, throttled, want)
+		if !errors.As(err, &throttled) {
+			t.Errorf("Retry-After %q: %v", said, err)
+		} else if throttled.After != want {
+			t.Errorf("Retry-After %q: a wait of %v, not %v", said, throttled.After, want)
 		}
 	}
 }
