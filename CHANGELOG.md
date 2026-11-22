@@ -12,6 +12,9 @@ Every change a user of CairnPost can notice is written here. The format is
   years) in a `Retry-After` header or in a batch's `retry_after`. A
   longer one, which only a mail provider's own answer could ask for, was
   written in ten digits, and the clients read that as no wait at all.
+- With the `cloudflare` driver, a wait Cloudflare says in more than nine
+  digits, or with a sign in front, is no longer read. A very long one
+  wrapped round into no wait, or into a wait of one second.
 
 ## [0.1.1] - 2026-11-15
 
