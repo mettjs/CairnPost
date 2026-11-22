@@ -105,9 +105,9 @@ func TestTheClientCasesAreWebhooksAsTheyAreSent(t *testing.T) {
 		t.Fatalf("the secret is %q, of %d cases: %v", file.Secret, len(file.Cases), err)
 	}
 	// A secret a client must take is one this server gives, but for a
-	// space, a tab or a line break around it: no more is asked of a
-	// client, since each language drops other characters of its own. One
-	// it must refuse is none this server gives.
+	// space, a tab or a line break around it. Those are all a client
+	// drops, so one it must refuse is none this server gives even with
+	// them dropped: the two lists are told apart by one rule.
 	given := func(secret string) bool {
 		encoded, ok := strings.CutPrefix(secret, secretPrefix)
 		made, err := base64.StdEncoding.DecodeString(encoded)
@@ -119,7 +119,7 @@ func TestTheClientCasesAreWebhooksAsTheyAreSent(t *testing.T) {
 		}
 	}
 	for _, secret := range file.Secrets.Refused {
-		if given(secret) {
+		if given(strings.Trim(secret, " \t\r\n")) {
 			t.Errorf("%q is to be refused as a secret, and is one this server gives", secret)
 		}
 	}
