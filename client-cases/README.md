@@ -15,7 +15,8 @@ takes. Every answer a client must take fits what
 Every error name the API describes has a case, on a call and with a status
 the API describes it for. Every idempotency key a client must send is one
 the server takes. Every key a client must take is one the server
-makes. Every webhook a client must read is signed as the server signs and,
+makes. Every wait in the cases is the one the rule below gives, and a
+wait the server writes is one a client reads. Every webhook a client must read is signed as the server signs and,
 when it is of a type the server sends, has the body the server writes.
 
 ## What is dropped around a value
@@ -38,6 +39,7 @@ part of it, and the value is then judged as it stands.
 | `errors.json` | Refusals, and what the client must say of each. |
 | `idempotency.json` | Idempotency keys a client must send as they are, and ones it must refuse before sending. |
 | `keys.json` | API keys a client must take, with what it sends for each, and ones it must refuse. |
+| `waits.json` | What the server may say of how long to wait before trying again, and the wait a client must read in each. |
 | `webhooks.json` | Webhooks, each with its headers and body, and whether it is read or why it is refused. |
 
 A runner fails when a file holds a field it does not know, names a call
@@ -131,6 +133,61 @@ less for a batch.
 The empty key is in neither list. To the Go client it is no key, since
 that is what a text not set is in Go; the others refuse it, where no key
 is said by leaving it out.
+
+## waits.json
+
+```json
+{
+  "header": [{"given": "7", "seconds": 7}, {"given": "+7", "seconds": null}],
+  "batch": [{"given": "30.0", "seconds": 30}, {"given": "\"30\"", "seconds": null}],
+  "read": [{"now": 1898856000500, "given": "Mon, 04 Mar 2030 12:00:01 GMT", "seconds": 1}]
+}
+```
+
+A refusal may say how long to wait before trying again. A client says
+that wait in its error, and a caller sleeps for it, so a wait read wrong
+is a caller that hammers the server or one that sleeps for years.
+`seconds` is the wait the client must say, `null` for none.
+
+A wait is said in the `Retry-After` header of a refusal. Around its value
+a space, a tab, a carriage return and a line feed are dropped, and
+nothing else. What is left is a wait in one of two forms:
+
+- 1 to 9 digits, `0` to `9`: that many seconds. The server writes this
+  form.
+- A date exactly as HTTP writes one now, `Sun, 06 Nov 1994 08:49:37 GMT`,
+  which a proxy in front of the server may write. The value must be,
+  letter for letter, how that time is written: the names as they are
+  spelled there, two digits for the day and for each part of the time,
+  four for the year, the day of the week that day falls on. The wait is
+  the seconds from now until then, a part of a second counted as a whole
+  one, so that a caller never comes back early.
+
+Anything else is no wait: a sign, a fraction, the two older forms of a
+date, a date that never comes (31 Feb) or names the wrong day of the
+week. So is a wait of nothing or less, and one of more than 999,999,999
+seconds (about 31 years): no server means it, and a number that large
+does not fit in every language's measure of time. When the header comes
+more than once, its values are read as one, with a comma and a space
+between them, which is how HTTP says to read them and all that some
+languages hand over. Two waits said so are none.
+
+Under `header`, `given` is the header's value in a refusal the client is
+answered over HTTP. Every date there is fixed and asks for no wait
+whatever the day the cases are run.
+
+Under `read`, `given` is the value as the client's reading of the answer
+hands it over, and `now` is the time it is read at, in milliseconds since
+1970. A client reads it with that clock, not through an answer: that is
+where a date still to come is held to its wait, and where a character no
+test server writes the same way twice is put around a value.
+
+Under `batch`, `given` is the `retry_after` of one email's error in a
+batch's answer, as the JSON is written: put it into the answer as it
+stands, not read and written again. It is a wait when it is a whole
+number from 1 to 999,999,999, however the number is written (`30`,
+`30.0`, `3e1`). Anything else is no wait, and the answer is still read:
+the email's error is said with its name, and the call does not fail.
 
 ## keys.json
 

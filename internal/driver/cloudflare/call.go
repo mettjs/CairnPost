@@ -63,9 +63,7 @@ func (d *Driver) askUpTo(ctx context.Context, limit int64, method, path string, 
 	}
 	defer res.Body.Close()
 	a := answer{status: res.StatusCode}
-	if n, err := strconv.Atoi(res.Header.Get("Retry-After")); err == nil && n > 0 {
-		a.after = time.Duration(n) * time.Second
-	}
+	a.after = waitSaid(res.Header.Get("Retry-After"))
 	var envelope struct {
 		Success *bool           `json:"success"`
 		Result  json.RawMessage `json:"result"`
@@ -145,4 +143,21 @@ func (a answer) refusal() error {
 		return fmt.Errorf("%s: %w", said, driver.ErrUnavailable)
 	}
 	return errors.New(said)
+}
+
+// waitSaid reads a Retry-After as Cloudflare writes one: 1 to 9 digits
+// of seconds, which is also all a client of this server reads. strconv
+// alone takes a sign, and a number so long that the wait made of it
+// wraps round into none, or into a fraction of a second.
+func waitSaid(after string) time.Duration {
+	if len(after) == 0 || len(after) > 9 {
+		return 0
+	}
+	for i := 0; i < len(after); i++ {
+		if after[i] < '0' || after[i] > '9' {
+			return 0
+		}
+	}
+	n, _ := strconv.Atoi(after)
+	return time.Duration(n) * time.Second
 }
