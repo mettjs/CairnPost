@@ -145,19 +145,17 @@ func (a answer) refusal() error {
 	return errors.New(said)
 }
 
-// waitSaid reads a Retry-After as Cloudflare writes one: 1 to 9 digits
-// of seconds, which is also all a client of this server reads. strconv
-// alone takes a sign, and a number so long that the wait made of it
-// wraps round into none, or into a fraction of a second.
+// waitSaid reads a Retry-After said in seconds; anything else is no
+// wait. A number too large to count is the longest wait there is:
+// multiplied out as it stands it wraps round into no wait at all, or
+// into a fraction of a second.
 func waitSaid(after string) time.Duration {
-	if len(after) == 0 || len(after) > 9 {
+	n, err := strconv.ParseInt(after, 10, 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) || n <= 0 {
 		return 0
 	}
-	for i := 0; i < len(after); i++ {
-		if after[i] < '0' || after[i] > '9' {
-			return 0
-		}
+	if n > int64(driver.LongestWait/time.Second) {
+		return driver.LongestWait
 	}
-	n, _ := strconv.Atoi(after)
 	return time.Duration(n) * time.Second
 }

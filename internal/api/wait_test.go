@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/mettjs/cairnpost/internal/driver"
 )
 
 // A wait is written in whole seconds, rounded up, never less than one
@@ -31,5 +33,9 @@ func TestAWaitIsWrittenInWholeSecondsUpToTheLongest(t *testing.T) {
 	}
 	if _, err := strconv.Atoi(seconds(math.MaxInt64)); err != nil {
 		t.Error(err)
+	}
+	// One longest wait, for what a driver reads and what is written.
+	if longestWait*time.Second != driver.LongestWait {
+		t.Errorf("the longest wait written is %ds, the longest a driver answers %v", longestWait, driver.LongestWait)
 	}
 }

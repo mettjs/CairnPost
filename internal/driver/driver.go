@@ -85,6 +85,11 @@ var ErrSenderUnclear = fmt.Errorf("%w, or its sender's domain", ErrRejected)
 // ErrUnavailable is an upstream that cannot take mail now, and said so.
 var ErrUnavailable = errors.New("driver: the upstream is not taking mail now")
 
+// LongestWait is the longest wait there is, about 31 years: the most
+// seconds a client of this server reads in a Retry-After header, and
+// far inside what a time.Duration holds.
+const LongestWait = 999_999_999 * time.Second
+
 // Throttled is an upstream at its limit. It is an ErrUnavailable.
 type Throttled struct {
 	// After is how long the upstream asked to wait; zero when it did not say.
