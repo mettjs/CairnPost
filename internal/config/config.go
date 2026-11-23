@@ -29,6 +29,10 @@ type Config struct {
 	// SendTimeout is CAIRNPOST_SEND_TIMEOUT: the most one call to the
 	// upstream may take. Default 10s.
 	SendTimeout time.Duration
+	// MaxProviderWait is CAIRNPOST_MAX_PROVIDER_WAIT: the longest the
+	// server holds back because the upstream asked it to wait, whatever
+	// wait it asked for. Default 1h.
+	MaxProviderWait time.Duration
 	// MaxBodyBytes is CAIRNPOST_MAX_BODY_BYTES: the largest request body
 	// accepted. Default 1 MiB.
 	MaxBodyBytes int64
@@ -208,6 +212,9 @@ func Load(getenv func(string) string) (Config, error) {
 		return c, err
 	}
 	if c.SendTimeout, err = duration(getenv, "CAIRNPOST_SEND_TIMEOUT", 10*time.Second); err != nil {
+		return c, err
+	}
+	if c.MaxProviderWait, err = providerWait(getenv); err != nil {
 		return c, err
 	}
 	if c.MaxBodyBytes, err = number(getenv, "CAIRNPOST_MAX_BODY_BYTES", 1<<20); err != nil {

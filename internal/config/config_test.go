@@ -172,8 +172,13 @@ func TestConsoleSettings(t *testing.T) {
 	if c, err = Load(env(append(base, "CAIRNPOST_CONSOLE_TIMEZONE", " Asia/Kolkata ")...)); err != nil || c.Console.Zone.String() != "Asia/Kolkata" {
 		t.Fatalf("a time zone: %v %v", c.Console.Zone, err)
 	}
-	if c, err = Load(env(base...)); err != nil || c.MaxKeys != 200 || c.DNSTimeout != 6*time.Second {
-		t.Fatalf("the defaults: %d %s %v", c.MaxKeys, c.DNSTimeout, err)
+	if c, err = Load(env(base...)); err != nil || c.MaxKeys != 200 || c.DNSTimeout != 6*time.Second || c.MaxProviderWait != time.Hour {
+		t.Fatalf("the defaults: %d %s %s %v", c.MaxKeys, c.DNSTimeout, c.MaxProviderWait, err)
+	}
+	for set, want := range map[string]time.Duration{"1m": time.Minute, "20m": 20 * time.Minute, "168h": 168 * time.Hour} {
+		if c, err = Load(env(append(base, "CAIRNPOST_MAX_PROVIDER_WAIT", set)...)); err != nil || c.MaxProviderWait != want {
+			t.Fatalf("the longest wait for the provider, set to %s: %s %v", set, c.MaxProviderWait, err)
+		}
 	}
 	if c, err = Load(env(append(base, "CAIRNPOST_DNS_TIMEOUT", "20s")...)); err != nil || c.DNSTimeout != 20*time.Second {
 		t.Fatalf("a DNS timeout: %s %v", c.DNSTimeout, err)
@@ -188,6 +193,8 @@ func TestConsoleSettings(t *testing.T) {
 		{"CAIRNPOST_SCHEDULE_AHEAD", "30m"}, {"CAIRNPOST_SCHEDULE_AHEAD", "400d"}, {"CAIRNPOST_SCHEDULE_AHEAD", "soon"},
 		{"CAIRNPOST_SCHEDULE_MAX_BYTES", "1000"}, {"CAIRNPOST_SCHEDULE_POLL", "100ms"}, {"CAIRNPOST_SCHEDULE_POLL", "5m"},
 		{"CAIRNPOST_SCHEDULE_GIVE_UP", "10s"}, {"CAIRNPOST_SCHEDULE_GIVE_UP", "200h"},
+		{"CAIRNPOST_MAX_PROVIDER_WAIT", "59s"}, {"CAIRNPOST_MAX_PROVIDER_WAIT", "169h"}, {"CAIRNPOST_MAX_PROVIDER_WAIT", "0"},
+		{"CAIRNPOST_MAX_PROVIDER_WAIT", "soon"},
 		{"CAIRNPOST_CONTENT_FILES", "maybe"}, {"CAIRNPOST_MAX_BATCH", "0"}, {"CAIRNPOST_MAX_BATCH", "1001"}, {"CAIRNPOST_BATCH_PARALLEL", "0"},
 		{"CAIRNPOST_BATCH_PARALLEL", "65"}, {"CAIRNPOST_BATCH_TIMEOUT", "11m"}, {"CAIRNPOST_BATCH_TIMEOUT", "soon"},
 	} {

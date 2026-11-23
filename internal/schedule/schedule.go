@@ -40,6 +40,9 @@ type Options struct {
 	// Abandoned is how long an email may stay taken before the server
 	// that took it is held to have stopped: longer than any send.
 	Abandoned time.Duration
+	// MaxWait is the longest everything is held back when the mail
+	// provider says its limit is reached, whatever wait it asks for.
+	MaxWait time.Duration
 }
 
 const (
@@ -124,8 +127,9 @@ func (r *Runner) recover(ctx context.Context) {
 }
 
 // Pass takes the emails whose time has come and sends them. It answers
-// how many it took, and how long the mail provider asked everything to
-// wait, if it did.
+// how many it took and, when the mail provider said its limit is
+// reached, how long everything waits for that: what it asked, MaxWait
+// at most, or a pause when it did not say.
 func (r *Runner) Pass(ctx context.Context) (taken int, wait time.Duration, err error) {
 	bounded, cancel := context.WithTimeout(ctx, passTimeout)
 	due, err := r.store.TakeDue(bounded, r.opt.Batch)
@@ -137,6 +141,11 @@ func (r *Runner) Pass(ctx context.Context) (taken int, wait time.Duration, err e
 		mu      sync.Mutex
 		sending sync.WaitGroup
 		next    = make(chan store.Held)
+		// asked is the wait the provider itself said, which may be
+		// longer than the one kept to; off counts the emails put off
+		// for it.
+		asked time.Duration
+		off   atomic.Int32
 	)
 	for range min(max(r.opt.Parallel, 1), len(due)) {
 		sending.Go(func() {
@@ -152,11 +161,13 @@ func (r *Runner) Pass(ctx context.Context) (taken int, wait time.Duration, err e
 				case held > 0:
 					// The limit was said meanwhile: not begun, no try spent.
 					r.postpone(ctx, h, held)
+					off.Add(1)
 				default:
-					if asked := r.one(ctx, h); asked > 0 {
+					if kept, said := r.one(ctx, h); kept > 0 {
 						mu.Lock()
-						wait = max(wait, asked)
+						wait, asked = max(wait, kept), max(asked, said)
 						mu.Unlock()
+						off.Add(1)
 					}
 				}
 			}
@@ -167,6 +178,9 @@ func (r *Runner) Pass(ctx context.Context) (taken int, wait time.Duration, err e
 	}
 	close(next)
 	sending.Wait()
+	if wait > 0 {
+		r.holding(int(off.Load()), wait, asked)
+	}
 	return len(due), wait, nil
 }
 
@@ -198,7 +212,7 @@ func (r *Runner) release(ctx context.Context, h store.Held) {
 // server nor the other emails. What became of it is not known, so it is
 // left taken, to be recovered: sent again only if nothing of it was
 // handed to the provider.
-func (r *Runner) one(ctx context.Context, h store.Held) (asked time.Duration) {
+func (r *Runner) one(ctx context.Context, h store.Held) (wait, asked time.Duration) {
 	defer func() {
 		if p := recover(); p != nil {
 			r.log.Error("schedule: sending a waiting email panicked", "message", h.ID, "panic", fmt.Sprint(p))
@@ -211,21 +225,19 @@ func (r *Runner) one(ctx context.Context, h store.Held) (asked time.Duration) {
 	return r.send(ctx, h)
 }
 
-// send sends one email and settles it among those that wait. It answers
-// how long the mail provider asked everything to wait, if it did.
-func (r *Runner) send(ctx context.Context, h store.Held) time.Duration {
+// send sends one email and settles it among those that wait. When the
+// mail provider says its limit is reached, it answers how long
+// everything waits for that, and the wait the provider asked for.
+func (r *Runner) send(ctx context.Context, h store.Held) (time.Duration, time.Duration) {
 	// What was taken is seen through, whoever stops meanwhile.
 	last := r.now().Sub(h.SendAt) >= r.opt.GiveUp
 	err := r.sender.SendHeld(context.WithoutCancel(ctx), h, !last)
 	var throttled *driver.Throttled
 	switch {
 	case errors.As(err, &throttled) && !last:
-		asked := throttled.After
-		if asked <= 0 {
-			asked = pause
-		}
-		r.postpone(ctx, h, asked)
-		return asked
+		wait := r.hold(throttled)
+		r.postpone(ctx, h, wait)
+		return wait, throttled.After
 	case errors.Is(err, driver.ErrUnavailable) && !last:
 		// h.Tries are the tries before this one.
 		wait := min(firstWait<<min(h.Tries, 10), longestWait)
@@ -256,5 +268,5 @@ func (r *Runner) send(ctx context.Context, h store.Held) time.Duration {
 		r.log.Error("schedule: a waiting email could not be sent; it will be tried again", "message", h.ID, "error", err)
 		r.postpone(ctx, h, firstWait)
 	}
-	return 0
+	return 0, 0
 }

@@ -263,6 +263,12 @@ curl -X POST http://localhost:8025/emails/01a1d08e-.../cancel -H "Authorization:
   again: nobody is there to ask for a second one, and two would be
   worse. An email this server itself could not send by then is
   cancelled (`"reason": "failed"`).
+- **If the provider says its sending limit is reached** when the time
+  comes, every email that is due is put off, for as long as the provider
+  asks and `CAIRNPOST_MAX_PROVIDER_WAIT` (an hour) at most. Then they are
+  tried again, and put off again if the limit still stands. The log says
+  each time for how long. Where the provider does not say how long, it
+  is a minute.
 - **Where it is listed.** An email keeps the id it was given when it was
   asked for, and lists go by id: once sent, it is listed among the emails
   of the day it was asked for, not of the day it went.
@@ -689,6 +695,11 @@ measured against the live service:
   permission too, and set `CAIRNPOST_CLOUDFLARE_QUEUE_ID`. Without it an
   email's record stops at `sent`. Several CairnPost instances may read one
   queue; an event is recorded once.
+- A queue that says it is asked too often is left alone for as long as it
+  asks, and `CAIRNPOST_MAX_PROVIDER_WAIT` (an hour) at most. No event is
+  read meanwhile, and the log says for how long. (After any pass that
+  failed the reader rests of its own accord, five minutes at most; set
+  below that, the setting does not shorten that rest.)
 - **Raise the consumer's "max retries".** A Cloudflare queue hands a message
   over a limited number of times (3 unless you change it) and then deletes
   it. CairnPost takes no events while its database is down and hands back
@@ -973,6 +984,7 @@ not right, since the server would never hear of them.
 | `CAIRNPOST_PRUNE_EVERY` | `1h` | How long the pruner rests between passes. |
 | `CAIRNPOST_IN_DOUBT_WINDOW` | `2m` | How long a send whose answer was lost blocks a retry of its key. After it, the retry is sent: an email that arrives twice is better than one that never does. Must be longer than the send timeout and shorter than the key's lifetime. It is also how long a send may stay `sending` before it is taken to be abandoned (by a server that stopped in the middle of it) and set to `unknown`: looked for that often, so within twice this time, and never sooner than `CAIRNPOST_SEND_TIMEOUT` plus a minute. |
 | `CAIRNPOST_SEND_TIMEOUT` | `10s` | The most one call to the provider may take. |
+| `CAIRNPOST_MAX_PROVIDER_WAIT` | `1h` | The longest the server holds back because the provider asked it to wait, whatever wait it asked for (`1m` to `168h`): how long scheduled emails that are due are put off at most, and how long the reader of events rests at most on the queue's word. After it the provider is tried again. Keep it below `CAIRNPOST_SCHEDULE_GIVE_UP`: an email put off past that time has one last try. The wait an application is told in `Retry-After` is not cut by it. |
 | `CAIRNPOST_MAX_BODY_BYTES` | `1048576` | The largest request body accepted. |
 | `CAIRNPOST_MAX_ATTACHMENTS` | `10` | How many files one email may carry (0 to 100; 0 takes none). |
 | `CAIRNPOST_MAX_UPLOAD_BYTES` | `134217728` | How large the sends with files being taken at one time may be in all, as they arrive. A send past it answers 503 and is tried again. At least twice `CAIRNPOST_MAX_ATTACHMENT_BYTES`. |

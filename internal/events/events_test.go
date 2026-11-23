@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -22,13 +23,19 @@ type queue struct {
 	done, again []string
 	settleErr   error
 	takes       int
+	// takeErr is what Take answers, and taking is called when it is asked.
+	takeErr error
+	taking  func()
 }
 
 func (q *queue) Take(context.Context, int, time.Duration) ([]driver.Received, error) {
 	q.takes++
+	if q.taking != nil {
+		q.taking()
+	}
 	out := q.items
 	q.items = nil
-	return out, nil
+	return out, q.takeErr
 }
 
 func (q *queue) Settle(_ context.Context, done, again []string, _ time.Duration) error {
@@ -59,7 +66,8 @@ func newRig(t *testing.T) *rig {
 	return r
 }
 
-var options = events.Options{Poll: time.Second, Batch: 50, Lease: time.Minute, Retry: 30 * time.Second, Grace: 2 * time.Minute}
+var options = events.Options{Poll: time.Second, Batch: 50, Lease: time.Minute, Retry: 30 * time.Second, Grace: 2 * time.Minute,
+	MaxWait: time.Hour}
 
 func (r *rig) readerOn(s store.Events, ping func(context.Context) error) *events.Reader {
 	return events.New(s, ping, r.queue, "fake", options, func() time.Time { return r.now },
@@ -336,6 +344,46 @@ func TestRunStopsAndFinishesItsPass(t *testing.T) {
 	}
 	if !r.reader.Healthy() || strings.Join(r.queue.done, ",") != "l1" {
 		t.Fatalf("healthy %v, done %v", r.reader.Healthy(), r.queue.done)
+	}
+}
+
+// A queue's word is no bound on how long the reader rests: no event is
+// read meanwhile. A wait of years is kept to the longest the reader is
+// set to rest, and the log says what was asked; a shorter one is rested
+// as asked.
+func TestAWaitTheQueueAsksIsHeldToTheLongest(t *testing.T) {
+	for _, c := range []struct {
+		name         string
+		asked        time.Duration
+		said, unsaid string
+	}{
+		{"years", driver.LongestWait, "asked=" + driver.LongestWait.String() + " in=1h0m0s", ""},
+		{"the longest itself", time.Hour, "in=1h0m0s", "asked="},
+		{"less", 10 * time.Minute, "in=10m0s", "asked="},
+		{"less than the rest it takes anyway", time.Millisecond, "in=1s", "asked="},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newRig(t)
+			ctx, stop := context.WithCancel(context.Background())
+			// The reader is told to stop while it asks the queue: it says
+			// how long it would rest, and then does not.
+			r.queue.takeErr = fmt.Errorf("the queue: %w", &driver.Throttled{After: c.asked})
+			r.queue.taking = stop
+			stopped := make(chan struct{})
+			go func() { r.reader.Run(ctx); close(stopped) }()
+			select {
+			case <-stopped:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Run did not stop")
+			}
+			said := r.logged.String()
+			if r.queue.takes != 1 || !strings.Contains(said, c.said+"\n") || r.reader.Healthy() {
+				t.Fatalf("%d takes, healthy %v, said:\n%s", r.queue.takes, r.reader.Healthy(), said)
+			}
+			if c.unsaid != "" && strings.Contains(said, c.unsaid) {
+				t.Fatalf("nothing was cut, and it is said that something was:\n%s", said)
+			}
+		})
 	}
 }
 
