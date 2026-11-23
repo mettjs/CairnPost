@@ -6,6 +6,8 @@ Every change a user of CairnPost can notice is written here. The format is
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-22
+
 ### Fixed
 
 - A wait is never written longer than 999,999,999 seconds (about 31
@@ -218,6 +220,7 @@ Every change a user of CairnPost can notice is written here. The format is
 - Images for amd64 and arm64 at `ghcr.io/mettjs/cairnpost`, published with
   each release.
 
-[Unreleased]: https://github.com/mettjs/CairnPost/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/mettjs/CairnPost/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/mettjs/CairnPost/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mettjs/CairnPost/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mettjs/CairnPost/releases/tag/v0.1.0
