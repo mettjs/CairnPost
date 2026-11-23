@@ -266,8 +266,9 @@ curl -X POST http://localhost:8025/emails/01a1d08e-.../cancel -H "Authorization:
 - **If the provider says its sending limit is reached** when the time
   comes, every email that is due is put off, for as long as the provider
   asks and `CAIRNPOST_MAX_PROVIDER_WAIT` (an hour) at most. Then they are
-  tried again, and put off again if the limit still stands. Where the
-  provider does not say how long, it is a minute.
+  tried again, and put off again if the limit still stands. The log says
+  each time for how long. Where the provider does not say how long, it
+  is a minute.
 - **Where it is listed.** An email keeps the id it was given when it was
   asked for, and lists go by id: once sent, it is listed among the emails
   of the day it was asked for, not of the day it went.

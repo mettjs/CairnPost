@@ -19,3 +19,17 @@ func (r *Runner) hold(t *driver.Throttled) time.Duration {
 	}
 	return pause
 }
+
+// holding says, once for a look, that nothing that is due goes out and
+// for how long: whoever runs the server is not left to find that out
+// from the emails that did not come. off is how many this look put off;
+// more may be due, which are not looked for until the wait is over.
+func (r *Runner) holding(off int, wait, asked time.Duration) {
+	if asked > wait {
+		r.log.Warn("schedule: the mail provider says its sending limit is reached, and asks for a longer wait than CAIRNPOST_MAX_PROVIDER_WAIT allows; no email that is due is sent until it is tried again, sooner than it asked",
+			"put_off", off, "asked", asked.String(), "in", wait.String())
+		return
+	}
+	r.log.Warn("schedule: the mail provider says its sending limit is reached; no email that is due is sent until it is tried again",
+		"put_off", off, "in", wait.String())
+}

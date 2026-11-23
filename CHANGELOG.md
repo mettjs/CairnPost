@@ -26,6 +26,10 @@ Every change a user of CairnPost can notice is written here. The format is
   day is asked once an hour instead of once. An email an earlier version
   already put off for such a wait stays put off: it reads `scheduled`
   past its time, and `PATCH /emails/{id}` gives it a new one.
+- When scheduled emails are put off because the provider's limit is
+  reached, the log says each time that nothing that is due is sent, and
+  for how long. It said that a send was refused, and not that
+  everything waits.
 
 ## [0.1.1] - 2026-11-15
 

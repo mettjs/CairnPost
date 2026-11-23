@@ -1,10 +1,12 @@
 package schedule_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +23,8 @@ type upstream struct {
 	mu   sync.Mutex
 	err  error
 	held []driver.Message
+	// first is how many emails it takes before it answers err.
+	first int
 }
 
 func (*upstream) Name() string { return "fake" }
@@ -29,6 +33,9 @@ func (u *upstream) Send(_ context.Context, m driver.Message) (string, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.held = append(u.held, m)
+	if len(u.held) <= u.first {
+		return "up-1", nil
+	}
 	return "up-1", u.err
 }
 
@@ -40,12 +47,14 @@ type rig struct {
 	run   *schedule.Runner
 	now   time.Time
 	key   store.Key
+	// logged is what the mail service and the runner said.
+	logged bytes.Buffer
 }
 
 func newRig(t *testing.T, keep time.Duration) *rig {
 	r := &rig{t: t, store: memstore.New(), drv: &upstream{}, now: time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)}
 	r.store.Now = func() time.Time { return r.now }
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.NewTextHandler(&r.logged, nil))
 	var err error
 	if r.key, err = r.store.CreateKey(context.Background(), store.Key{Name: "app", Prefix: "cp_app", Scope: store.ScopeSend}, 0); err != nil {
 		t.Fatal(err)
@@ -208,17 +217,19 @@ func TestTheProvidersLimitPausesEverythingAndSpendsNoTry(t *testing.T) {
 // The provider's word is no bound on how long everything is held back.
 // A wait of years, which one wrong answer can ask for, is kept to the
 // longest the runner is set to wait: the emails go out when that is
-// over, long before they are given up on.
+// over, long before they are given up on, and the log says once that
+// they were held back, for how long, and what was asked.
 func TestAWaitTheProviderAsksIsHeldToTheLongest(t *testing.T) {
 	for _, c := range []struct {
-		name        string
-		asked, wait time.Duration
+		name         string
+		asked, wait  time.Duration
+		said, unsaid string
 	}{
-		{"years", driver.LongestWait, time.Hour},
-		{"a second over", time.Hour + time.Second, time.Hour},
-		{"the longest itself", time.Hour, time.Hour},
-		{"less", 10 * time.Minute, 10 * time.Minute},
-		{"none said", 0, time.Minute},
+		{"years", driver.LongestWait, time.Hour, "asked=" + driver.LongestWait.String(), ""},
+		{"a second over", time.Hour + time.Second, time.Hour, "asked=1h0m1s", ""},
+		{"the longest itself", time.Hour, time.Hour, "in=1h0m0s", "asked="},
+		{"less", 10 * time.Minute, 10 * time.Minute, "in=10m0s", "asked="},
+		{"none said", 0, time.Minute, "in=1m0s", "asked="},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := newRig(t, 0)
@@ -228,8 +239,17 @@ func TestAWaitTheProviderAsksIsHeldToTheLongest(t *testing.T) {
 			}
 			r.drv.err = &driver.Throttled{After: c.asked}
 			r.now = r.now.Add(time.Hour)
+			r.logged.Reset()
 			if n, wait := r.pass(); n != 4 || wait != c.wait {
 				t.Fatalf("%d taken, wait %s, want %s", n, wait, c.wait)
+			}
+			said := r.logged.String()
+			if strings.Count(said, "schedule: the mail provider says") != 1 || !strings.Contains(said, "put_off=4") ||
+				!strings.Contains(said, "in="+c.wait.String()) || !strings.Contains(said, c.said) {
+				t.Fatalf("held back, and said:\n%s", said)
+			}
+			if c.unsaid != "" && strings.Contains(said, c.unsaid) {
+				t.Fatalf("nothing was cut, and it is said that something was:\n%s", said)
 			}
 			r.drv.err = nil
 			r.now = r.now.Add(c.wait - time.Second)
@@ -246,6 +266,27 @@ func TestAWaitTheProviderAsksIsHeldToTheLongest(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The emails counted are those put off, not those that went out before
+// the provider said its limit was reached.
+func TestOnlyTheEmailsPutOffAreCounted(t *testing.T) {
+	r := newRig(t, 0)
+	for _, to := range []string{"a@example.org", "b@example.org", "c@example.org", "d@example.org"} {
+		r.later(to)
+	}
+	r.drv.first, r.drv.err = 1, &driver.Throttled{After: 10 * time.Minute}
+	r.now = r.now.Add(time.Hour)
+	r.logged.Reset()
+	if n, wait := r.pass(); n != 4 || wait != 10*time.Minute {
+		t.Fatalf("%d taken, wait %s", n, wait)
+	}
+	if w, _ := r.store.Waiting(context.Background(), ""); w != 3 {
+		t.Fatalf("%d wait, want the three that did not go", w)
+	}
+	if said := r.logged.String(); !strings.Contains(said, "put_off=3 in=10m0s") {
+		t.Fatalf("three wait, and said:\n%s", said)
 	}
 }
 
