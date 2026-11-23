@@ -127,7 +127,7 @@ func serve(ctx context.Context) error {
 	case source != nil:
 		reader = events.New(db, db.Ping, source, drv.Name(), events.Options{Poll: cfg.EventsPoll,
 			Batch: cfg.EventsBatch, Lease: cfg.EventsLease, Retry: cfg.EventsRetry, Grace: cfg.EventsGrace,
-			KeepDetails: cfg.ContentRetention}, time.Now, log)
+			KeepDetails: cfg.ContentRetention, MaxWait: cfg.MaxProviderWait}, time.Now, log)
 		go func() { defer close(reading); reader.Run(ctx) }()
 	case captured == nil:
 		close(reading)
@@ -179,7 +179,7 @@ func serve(ctx context.Context) error {
 	// Emails asked for ahead of time are sent beside the API when their
 	// time comes, and what is under way is finished when it stops.
 	later := schedule.New(db, mailer, schedule.Options{Poll: cfg.Schedule.Poll, Batch: 50, Parallel: cfg.BatchParallel,
-		GiveUp: cfg.Schedule.GiveUp, Abandoned: cfg.AbandonedAfter()}, time.Now, log)
+		GiveUp: cfg.Schedule.GiveUp, Abandoned: cfg.AbandonedAfter(), MaxWait: cfg.MaxProviderWait}, time.Now, log)
 	scheduling := make(chan struct{})
 	go func() { defer close(scheduling); later.Run(ctx) }()
 	counted := measured{sent: stats.New(db, 0), endpoints: endpoints, driver: drv, version: version, log: log, waiting: mailer.Waiting,

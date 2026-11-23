@@ -53,7 +53,7 @@ func newRig(t *testing.T, keep time.Duration) *rig {
 	r.mail = mail.New(r.store, r.drv, mail.Options{SendTimeout: time.Second, IdempotencyTTL: 24 * time.Hour, InDoubtWindow: 2 * time.Minute,
 		KeepContent: keep, Now: r.store.Now}, log)
 	r.run = schedule.New(r.store, r.mail, schedule.Options{Poll: time.Second, Batch: 10, Parallel: 2,
-		GiveUp: 3 * time.Hour, Abandoned: 5 * time.Minute}, r.store.Now, log)
+		GiveUp: 3 * time.Hour, Abandoned: 5 * time.Minute, MaxWait: time.Hour}, r.store.Now, log)
 	return r
 }
 
@@ -202,6 +202,64 @@ func TestTheProvidersLimitPausesEverythingAndSpendsNoTry(t *testing.T) {
 	}
 	if w, _ := r.store.Waiting(context.Background(), ""); w != 0 {
 		t.Fatalf("%d still wait", w)
+	}
+}
+
+// The provider's word is no bound on how long everything is held back.
+// A wait of years, which one wrong answer can ask for, is kept to the
+// longest the runner is set to wait: the emails go out when that is
+// over, long before they are given up on.
+func TestAWaitTheProviderAsksIsHeldToTheLongest(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		asked, wait time.Duration
+	}{
+		{"years", driver.LongestWait, time.Hour},
+		{"a second over", time.Hour + time.Second, time.Hour},
+		{"the longest itself", time.Hour, time.Hour},
+		{"less", 10 * time.Minute, 10 * time.Minute},
+		{"none said", 0, time.Minute},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newRig(t, 0)
+			var ids []string
+			for _, to := range []string{"a@example.org", "b@example.org", "c@example.org", "d@example.org"} {
+				ids = append(ids, r.later(to))
+			}
+			r.drv.err = &driver.Throttled{After: c.asked}
+			r.now = r.now.Add(time.Hour)
+			if n, wait := r.pass(); n != 4 || wait != c.wait {
+				t.Fatalf("%d taken, wait %s, want %s", n, wait, c.wait)
+			}
+			r.drv.err = nil
+			r.now = r.now.Add(c.wait - time.Second)
+			if n, _ := r.pass(); n != 0 {
+				t.Fatal("tried again before the wait was over")
+			}
+			r.now = r.now.Add(time.Second)
+			if n, _ := r.pass(); n != 4 {
+				t.Fatalf("%d taken when the wait was over", n)
+			}
+			for _, id := range ids {
+				if r.state(id) != store.StateSent {
+					t.Fatalf("%s is %s after the wait", id, r.state(id))
+				}
+			}
+		})
+	}
+}
+
+// A runner given no longest wait does not take the provider's word for
+// one: it asks again after the pause.
+func TestWithNoLongestWaitSetTheProvidersWordIsNotTaken(t *testing.T) {
+	r := newRig(t, 0)
+	r.run = schedule.New(r.store, r.mail, schedule.Options{Poll: time.Second, Batch: 10, Parallel: 2,
+		GiveUp: 3 * time.Hour, Abandoned: 5 * time.Minute}, r.store.Now, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.later("a@example.org")
+	r.drv.err = &driver.Throttled{After: driver.LongestWait}
+	r.now = r.now.Add(time.Hour)
+	if _, wait := r.pass(); wait != time.Minute {
+		t.Fatalf("wait %s", wait)
 	}
 }
 

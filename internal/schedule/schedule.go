@@ -40,6 +40,9 @@ type Options struct {
 	// Abandoned is how long an email may stay taken before the server
 	// that took it is held to have stopped: longer than any send.
 	Abandoned time.Duration
+	// MaxWait is the longest everything is held back when the mail
+	// provider says its limit is reached, whatever wait it asks for.
+	MaxWait time.Duration
 }
 
 const (
@@ -124,8 +127,9 @@ func (r *Runner) recover(ctx context.Context) {
 }
 
 // Pass takes the emails whose time has come and sends them. It answers
-// how many it took, and how long the mail provider asked everything to
-// wait, if it did.
+// how many it took and, when the mail provider said its limit is
+// reached, how long everything waits for that: what it asked, MaxWait
+// at most, or a pause when it did not say.
 func (r *Runner) Pass(ctx context.Context) (taken int, wait time.Duration, err error) {
 	bounded, cancel := context.WithTimeout(ctx, passTimeout)
 	due, err := r.store.TakeDue(bounded, r.opt.Batch)
@@ -211,8 +215,9 @@ func (r *Runner) one(ctx context.Context, h store.Held) (asked time.Duration) {
 	return r.send(ctx, h)
 }
 
-// send sends one email and settles it among those that wait. It answers
-// how long the mail provider asked everything to wait, if it did.
+// send sends one email and settles it among those that wait. When the
+// mail provider says its limit is reached, it answers how long
+// everything waits for that.
 func (r *Runner) send(ctx context.Context, h store.Held) time.Duration {
 	// What was taken is seen through, whoever stops meanwhile.
 	last := r.now().Sub(h.SendAt) >= r.opt.GiveUp
@@ -220,12 +225,9 @@ func (r *Runner) send(ctx context.Context, h store.Held) time.Duration {
 	var throttled *driver.Throttled
 	switch {
 	case errors.As(err, &throttled) && !last:
-		asked := throttled.After
-		if asked <= 0 {
-			asked = pause
-		}
-		r.postpone(ctx, h, asked)
-		return asked
+		wait := r.hold(throttled)
+		r.postpone(ctx, h, wait)
+		return wait
 	case errors.Is(err, driver.ErrUnavailable) && !last:
 		// h.Tries are the tries before this one.
 		wait := min(firstWait<<min(h.Tries, 10), longestWait)

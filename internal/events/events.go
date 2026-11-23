@@ -34,6 +34,10 @@ type Options struct {
 	// server's sentence about it is kept; 0 keeps none. It is the time
 	// the operator keeps what emails say.
 	KeepDetails time.Duration
+	// MaxWait is the longest the reader rests because the upstream asked
+	// it to wait, whatever wait it asked for. The rest it takes of its
+	// own accord after a pass that failed is apart from it.
+	MaxWait time.Duration
 }
 
 // kindOf maps each kind a driver reports to the kind the store keeps. It
@@ -73,8 +77,10 @@ const longestRest = 5 * time.Minute
 
 // Run reads until the context ends, then finishes the pass it is in. A
 // pass that fails is tried again after a rest that doubles up to five
-// minutes, or the wait the upstream asked for: what was not settled is
-// kept by the upstream, and a queue is not hammered while it refuses.
+// minutes, or the wait the upstream asked for, MaxWait at most: what
+// was not settled is kept by the upstream, and a queue is not hammered
+// while it refuses. An upstream can ask for any wait at all, and no
+// event is read during it.
 func (r *Reader) Run(ctx context.Context) {
 	rest := r.opt.Poll
 	for ctx.Err() == nil {
@@ -95,10 +101,15 @@ func (r *Reader) Run(ctx context.Context) {
 			}
 		default:
 			r.failing.Store(true)
-			if errors.As(err, &throttled) && throttled.After > rest {
-				rest = throttled.After
+			said := []any{"error", err}
+			if errors.As(err, &throttled) {
+				rest = max(rest, min(throttled.After, r.opt.MaxWait))
+				if throttled.After > rest {
+					// It asked for longer than this reader is set to rest.
+					said = append(said, "asked", throttled.After.String())
+				}
 			}
-			r.log.Error("events: delivery events are not being read; trying again", "error", err, "in", rest.String())
+			r.log.Error("events: delivery events are not being read; trying again", append(said, "in", rest.String())...)
 		}
 		select {
 		case <-ctx.Done():

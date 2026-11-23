@@ -15,6 +15,17 @@ Every change a user of CairnPost can notice is written here. The format is
 - With the `cloudflare` driver, a wait Cloudflare says in a number too
   large to count is read as the longest wait there is. It wrapped round
   into no wait, or into a wait of one second.
+- The server holds back on its mail provider's word for an hour at
+  most, or for what the new setting `CAIRNPOST_MAX_PROVIDER_WAIT` says
+  (`1m` to `168h`). When the provider says its limit is reached, the
+  scheduled emails that are due are put off and the reader of delivery
+  events rests, for as long as the provider asked, whatever it asked:
+  one wrong answer asking for years stopped both for years, and the
+  emails stayed put off through a restart. Now the provider is tried
+  again when the hour is over, so a provider whose limit stands for a
+  day is asked once an hour instead of once. An email an earlier version
+  already put off for such a wait stays put off: it reads `scheduled`
+  past its time, and `PATCH /emails/{id}` gives it a new one.
 
 ## [0.1.1] - 2026-11-15
 
