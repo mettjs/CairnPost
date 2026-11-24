@@ -54,8 +54,9 @@ The [changelog](CHANGELOG.md) says what exists.
 ## Try it
 
 Each release publishes an image at `ghcr.io/mettjs/cairnpost`, for amd64 and
-arm64: `docker pull ghcr.io/mettjs/cairnpost:0.1.2`. To run it from source
-with its database:
+arm64: `docker pull ghcr.io/mettjs/cairnpost:0.1.2`. It is built with Go 1.27
+and tested on Postgres 18. To run it from source with its database, which
+needs only Docker:
 
 ```sh
 docker compose up -d --build
@@ -960,7 +961,7 @@ not right, since the server would never hear of them.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CAIRNPOST_POSTGRES_DSN` | required | The database. Postgres 18 or later. |
+| `CAIRNPOST_POSTGRES_DSN` | required | The database. Postgres 18: an older one lacks what CairnPost uses, and a newer one has not been tried. |
 | `CAIRNPOST_DRIVER` | required | Who delivers the mail: `cloudflare`, `smtp` or `capture`. See Drivers. |
 | `CAIRNPOST_SMTP_HOST` | required for `smtp` | The mail server to send through. |
 | `CAIRNPOST_SMTP_SECURITY` | `starttls` | How the connection is secured: `starttls` (secured before anything is said, or not used), `tls` (from the first byte) or `none`. |

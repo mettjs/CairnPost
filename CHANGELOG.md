@@ -6,6 +6,12 @@ Every change a user of CairnPost can notice is written here. The format is
 
 ## [Unreleased]
 
+### Changed
+
+- The README names the versions CairnPost is built and tested with, Go 1.27
+  and Postgres 18. It said "Postgres 18 or later"; no later one has been
+  tried, so it no longer says one will do.
+
 ## [0.1.2] - 2026-11-22
 
 ### Fixed

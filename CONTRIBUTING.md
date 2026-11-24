@@ -56,8 +56,8 @@ that tested nothing never reads as green. CI runs all of the above.
 - **Small files, one concern each.** No `utils` or `helpers` grab-bags.
 - **The standard library first.** A new dependency is the exception: open an
   issue saying what it replaces before adding one.
-- **The latest stable Go and Postgres.** The versions in `go.mod`, the
-  Dockerfile, CI and the Compose file agree.
+- **Go 1.27 and Postgres 18.** The versions in `go.mod`, the Dockerfile, CI
+  and the Compose file agree, and move together when they move.
 - **Schema changes are versioned migrations.** One that shipped in a release
   is never edited; a mistake is corrected by a new one.
 - **Errors say what to do**, and never echo an address or a provider's text.
